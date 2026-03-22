@@ -11,7 +11,7 @@ echo "==> [1/3] Converting 20 Grafana exports to Elastic draft JSON..."
 python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards
 n="$(find build/elastic-dashboards -maxdepth 1 -name '*-elastic-draft.json' | wc -l | tr -d ' ')"
 echo "    Draft files: $n"
-echo "==> [2/3] Seeding logs-workshop-default + metrics-workshop-default (@timestamp) for ES|QL chart probes..."
+echo "==> [2/3] Seeding logs + metrics + traces (workshop-*-default @timestamp) for Discover / ES|QL probes..."
 if python3 tools/seed_workshop_telemetry.py; then
   echo "    Seed OK (or already populated)."
 else

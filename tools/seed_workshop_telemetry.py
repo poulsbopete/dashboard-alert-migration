@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import random
+import secrets
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -44,10 +45,30 @@ def es_client() -> tuple[str, dict[str, str], object]:
     return es, headers, auth
 
 
+def _hex_trace_id() -> str:
+    return secrets.token_hex(16)
+
+
+def _hex_id16() -> str:
+    return secrets.token_hex(8)
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Seed workshop logs + metrics for Discover / ES|QL demos.")
+    ap = argparse.ArgumentParser(description="Seed workshop logs + metrics + traces for Discover / ES|QL demos.")
     ap.add_argument("--log-docs", type=int, default=400, help="Number of synthetic log documents")
     ap.add_argument("--metric-docs", type=int, default=200, help="Number of synthetic metric documents")
+    ap.add_argument(
+        "--trace-transactions",
+        type=int,
+        default=80,
+        help="Number of synthetic trace trees (each adds 1 transaction + spans)",
+    )
+    ap.add_argument(
+        "--spans-per-trace",
+        type=int,
+        default=2,
+        help="Child spans per transaction (fixed count, 0-8)",
+    )
     ap.add_argument(
         "--days",
         type=int,
@@ -94,6 +115,58 @@ def main() -> int:
             },
         )
 
+    n_spans = max(0, min(int(args.spans_per_trace), 8))
+    trace_docs = 0
+    for _ in range(max(0, args.trace_transactions)):
+        base_m = rng.randint(0, window_mins)
+        ts0 = now - timedelta(minutes=base_m)
+        trace_id = _hex_trace_id()
+        trans_id = _hex_id16()
+        svc = rng.choice(["workshop-checkout", "workshop-api", "workshop-service"])
+        trans_ts = ts0.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        add_create(
+            "traces-workshop-default",
+            {
+                "@timestamp": trans_ts,
+                "processor.event": "transaction",
+                "trace.id": trace_id,
+                "transaction.id": trans_id,
+                "transaction.type": "request",
+                "transaction.name": rng.choice(
+                    ["GET /checkout", "POST /orders", "GET /users", "internal.poll"]
+                ),
+                "transaction.result": rng.choice(["success", "success", "failure"]),
+                "event.outcome": rng.choice(["success", "success", "failure"]),
+                "service.name": svc,
+                "service.environment": "workshop",
+                "http.response.status_code": rng.choice([200, 200, 201, 404, 500]),
+            },
+        )
+        trace_docs += 1
+        for s in range(n_spans):
+            span_ts = ts0 + timedelta(milliseconds=5 + s * 12)
+            span_ts_s = span_ts.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            span_id = _hex_id16()
+            add_create(
+                "traces-workshop-default",
+                {
+                    "@timestamp": span_ts_s,
+                    "processor.event": "span",
+                    "trace.id": trace_id,
+                    "transaction.id": trans_id,
+                    "span.id": span_id,
+                    "parent.id": trans_id,
+                    "span.type": rng.choice(["app", "db", "external"]),
+                    "span.name": rng.choice(
+                        ["validate_cart", "charge_card", "fetch_inventory", "redis.get", "http.client"]
+                    ),
+                    "event.outcome": "success",
+                    "service.name": svc,
+                    "service.environment": "workshop",
+                },
+            )
+            trace_docs += 1
+
     body = "\n".join(bulk_lines) + "\n"
     h = {**headers, "Content-Type": "application/x-ndjson"}
     r = requests.post(
@@ -120,8 +193,10 @@ def main() -> int:
         return 1
 
     print(
-        f"OK: indexed {args.log_docs} docs → logs-workshop-default, "
-        f"{args.metric_docs} docs → metrics-workshop-default (last {args.days}d window)."
+        f"OK: indexed {args.log_docs} → logs-workshop-default, "
+        f"{args.metric_docs} → metrics-workshop-default, "
+        f"{trace_docs} → traces-workshop-default "
+        f"({args.trace_transactions} transactions × (1 + {n_spans}) docs; last {args.days}d window)."
     )
     return 0
 
