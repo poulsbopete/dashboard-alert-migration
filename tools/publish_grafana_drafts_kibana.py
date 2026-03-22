@@ -2,12 +2,13 @@
 """
 Publish workshop Grafana→Elastic *draft* JSON into Kibana.
 
-**Primary (Observability Serverless):** **POST /api/dashboards?apiVersion=1** with optional **Markdown**
-panel holding PromQL / migration notes (see Elastic Dashboards API). Serverless often returns **500** on
-hand-crafted **saved_objects/_import** payloads when migration metadata does not match the stack.
+**Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **Lens `xy`** panels. Each panel tries **ES|QL**
+volume probes in order: **`logs-workshop-default,metrics-workshop-default`** (after **`seed_workshop_telemetry.py`**),
+then **`logs-*,metrics-*`**, then **`logs-*,metrics-*,traces-*`**, until Kibana accepts the query (**`traces-*`** often breaks
+`@timestamp` validation when unioned). Override with **`WORKSHOP_ESQL_FROM`** (single pattern). PromQL is **not** executed.
 
-**Fallback:** one-object-at-a-time **POST /api/saved_objects/_import** with **minimal** dashboard attributes
-(no controlGroupInput / typeMigrationVersion) if the Dashboards API is unavailable.
+**Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MAX_LENS_PANELS`**,
+**`WORKSHOP_ESQL_FROM`**, **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -98,12 +99,16 @@ def build_description(draft: dict[str, Any]) -> str:
 
 def markdown_for_canvas(description: str) -> str:
     """Non-empty Markdown for a dashboard panel so the canvas is not blank."""
-    header = (
-        "## Grafana → Elastic (import draft)\n\n"
-        "There are **no** auto-generated charts. Use **Edit** (pencil) → **Add panel** to add "
-        "**Lens** or **ES|QL** visualizations, or refine queries with Cursor + Agent Skills.\n\n"
-        "---\n\n"
-    )
+    header = """## Grafana → Elastic (import draft)
+
+**Line charts** use **ES|QL** document counts over time (not PromQL). The publisher tries `FROM` patterns in order:
+`logs-*`, `metrics-*`, then workshop streams `logs-workshop-default,metrics-workshop-default` (from **seed** / migrate),
+then `logs-*,metrics-*`, then `logs-*,metrics-*,traces-*` (traces last — union can break **@timestamp** on Serverless).
+Set **WORKSHOP_ESQL_FROM** to force one pattern. If you see only this Markdown and no charts, **`git pull`** and re-run migrate.
+
+---
+
+"""
     detail = description.strip() if description.strip() else "_No per-panel PromQL was captured in this export._"
     return (header + detail)[:50000]
 
@@ -151,21 +156,135 @@ def _plain_preview_from_markdown(md: str) -> str:
     return (p[:2000].strip() or "Grafana migration draft — add Lens panels via Edit.")
 
 
-def note_panel_variants(md: str, plain_one_line: str) -> list[tuple[str, list[dict[str, Any]]]]:
+def _max_lens_panels() -> int:
+    raw = (os.environ.get("WORKSHOP_MAX_LENS_PANELS") or "6").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 6
+    return max(0, min(n, 12))
+
+
+def _esql_time_bucket_field() -> str:
+    """Time column for BUCKET(); ECS default is @timestamp."""
+    raw = (os.environ.get("WORKSHOP_ESQL_TIME_FIELD") or "@timestamp").strip()
+    return raw if raw else "@timestamp"
+
+
+def _esql_volume_probe_queries() -> list[str]:
     """
-    Panel shapes to try against POST/PUT /api/dashboards (schema differs by stack).
-    Newer Serverless rejects type DASHBOARD_MARKDOWN; use markdown + ES|QL metric fallback.
+    Ordered ES|QL lines for Lens (save succeeds only when @timestamp exists on the resolved union).
+    traces-* last — it often yields Unknown column [@timestamp] on Serverless when merged with logs/metrics.
     """
+    override = (os.environ.get("WORKSHOP_ESQL_FROM") or "").strip()
+    tf = _esql_time_bucket_field()
+    if override:
+        return [
+            f"FROM {override} "
+            f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
+        ]
+    # Try narrow workshop streams after wildcards so empty/new projects still validate once any logs exist.
+    return [
+        f"FROM logs-* "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"FROM metrics-* "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"FROM logs-workshop-default,metrics-workshop-default "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"FROM logs-*,metrics-* "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"FROM logs-*,metrics-*,traces-* "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+    ]
+
+
+def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict[str, Any]]:
+    """
+    Inline Lens `xy` line panels for POST/PUT /api/dashboards — must use type ``lens`` + ``config.attributes``
+    (root ``type: xy`` is rejected / stripped; see kibana-dashboards skill examples).
+    """
+    if (os.environ.get("WORKSHOP_DISABLE_LENS") or "").strip() in ("1", "true", "yes"):
+        return []
+    max_n = _max_lens_panels()
+    raw_panels = draft.get("panels") or []
+    if not isinstance(raw_panels, list):
+        raw_panels = []
+    if not raw_panels:
+        raw_panels = [{"title": "Observability volume", "migration": {"promql": ""}}]
+    out: list[dict[str, Any]] = []
+    for i, pan in enumerate(raw_panels[:max_n]):
+        if not isinstance(pan, dict):
+            continue
+        # Match kibana-dashboards API reference: xy + line layer only (extra keys can 400 on Serverless).
+        out.append(
+            {
+                "type": "lens",
+                "uid": str(uuid.uuid4()),
+                "config": {
+                    "attributes": {
+                        "type": "xy",
+                        "layers": [
+                            {
+                                "type": "line",
+                                "dataset": {"type": "esql", "query": esql_query},
+                                "x": {"operation": "value", "column": "bucket"},
+                                "y": [{"operation": "value", "column": "c"}],
+                            }
+                        ],
+                    }
+                },
+            }
+        )
+    return out
+
+
+def _layout_note_and_data_panels(
+    note_rows: list[dict[str, Any]], data_panels: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Place optional note row(s) at top; tile data panels below in two columns."""
+    laid: list[dict[str, Any]] = []
+    y_off = 0
+    for p in note_rows:
+        row = dict(p)
+        g = dict(row.get("grid") or {})
+        g.setdefault("x", 0)
+        g["y"] = y_off
+        g.setdefault("w", 48)
+        g.setdefault("h", 10)
+        row["grid"] = g
+        laid.append(row)
+        y_off += int(g.get("h") or 10)
+    for i, p in enumerate(data_panels):
+        row = dict(p)
+        r, c = divmod(i, 2)
+        row["grid"] = {
+            "x": c * 24,
+            "y": y_off + r * 15,
+            "w": 24,
+            "h": 14,
+        }
+        laid.append(row)
+    return laid
+
+
+def _note_only_fallback_panels(md: str, plain_one_line: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Legacy: full-dashboard note-only variants (no ES|QL charts)."""
     plain_esql = _esql_string_literal(plain_one_line[:500])
     q = f'ROW "{plain_esql}" AS workshop_note'
     metric_panel: dict[str, Any] = {
-        "type": "metric",
+        "type": "lens",
         "uid": str(uuid.uuid4()),
         "grid": {"x": 0, "y": 0, "w": 48, "h": 18},
-        "dataset": {"type": "esql", "query": q},
-        "metrics": [{"type": "primary", "operation": "value", "column": "workshop_note"}],
+        "config": {
+            "attributes": {
+                "title": "",
+                "type": "metric",
+                "dataset": {"type": "esql", "query": q},
+                "metrics": [{"type": "primary", "operation": "value", "column": "workshop_note"}],
+            }
+        },
     }
-    variants: list[tuple[str, list[dict[str, Any]]]] = [
+    return [
         (
             "markdown",
             [
@@ -190,7 +309,6 @@ def note_panel_variants(md: str, plain_one_line: str) -> list[tuple[str, list[di
         ),
         ("metric_esql_note", [metric_panel]),
     ]
-    return variants
 
 
 def _push_dashboards_api(
@@ -201,10 +319,11 @@ def _push_dashboards_api(
     method: str,
     dashboard_id: str | None,
     title: str,
-    description: str,
+    draft: dict[str, Any],
 ) -> tuple[bool, str]:
-    """POST create (dashboard_id None) or PUT update — tries panel variants until one succeeds."""
+    """POST/PUT with Markdown notes + ES|QL xy probes; falls back to note-only if API rejects combo."""
     h = dashboards_api_headers(headers)
+    description = build_description(draft)
     md = markdown_for_canvas(description)
     plain_preview = _plain_preview_from_markdown(md)
     base: dict[str, Any] = {
@@ -212,8 +331,71 @@ def _push_dashboards_api(
         "description": plain_preview[:1000] or "Grafana migration draft",
         "time_range": {"from": "now-30d", "to": "now"},
     }
+    note_compact: list[tuple[str, list[dict[str, Any]]]] = [
+        (
+            "markdown",
+            [
+                {
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 10},
+                    "config": {"content": md},
+                    "uid": str(uuid.uuid4()),
+                    "type": "markdown",
+                }
+            ],
+        ),
+        (
+            "DASHBOARD_MARKDOWN",
+            [
+                {
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 10},
+                    "config": {"content": md},
+                    "uid": str(uuid.uuid4()),
+                    "type": "DASHBOARD_MARKDOWN",
+                }
+            ],
+        ),
+        ("no_note", []),
+    ]
+
+    attempts: list[list[dict[str, Any]]] = []
+    for esql in _esql_volume_probe_queries():
+        data_panels = build_esql_xy_panels(draft, esql_query=esql)
+        if not data_panels:
+            continue
+        for _lbl, prefix in note_compact:
+            attempts.append(_layout_note_and_data_panels(prefix, data_panels))
+        attempts.append(_layout_note_and_data_panels([], data_panels))
+        attempts.append(_layout_note_and_data_panels([], data_panels[:1]))
+
     last_err = ""
-    for _label, panels in note_panel_variants(md, plain_preview):
+    for panels in attempts:
+        if not panels:
+            continue
+        body = {**base, "panels": panels}
+        if method.upper() == "POST":
+            r = requests.post(
+                f"{kibana}/api/dashboards?apiVersion=1",
+                headers=h,
+                auth=auth,
+                json=body,
+                timeout=180,
+            )
+        else:
+            if not dashboard_id:
+                return False, "PUT requires dashboard_id"
+            rid = quote(dashboard_id, safe="")
+            r = requests.put(
+                f"{kibana}/api/dashboards/{rid}?apiVersion=1",
+                headers=h,
+                auth=auth,
+                json=body,
+                timeout=180,
+            )
+        if r.status_code in (200, 201):
+            return True, ""
+        last_err = f"HTTP {r.status_code} {r.text[:700]}"
+
+    for _lbl, panels in _note_only_fallback_panels(md, plain_preview):
         body = {**base, "panels": panels}
         if method.upper() == "POST":
             r = requests.post(
@@ -224,9 +406,7 @@ def _push_dashboards_api(
                 timeout=120,
             )
         else:
-            if not dashboard_id:
-                return False, "PUT requires dashboard_id"
-            rid = quote(dashboard_id, safe="")
+            rid = quote(dashboard_id or "", safe="")
             r = requests.put(
                 f"{kibana}/api/dashboards/{rid}?apiVersion=1",
                 headers=h,
@@ -245,11 +425,11 @@ def publish_one_dashboards_api(
     headers: dict[str, str],
     auth: Any,
     title: str,
-    description: str,
+    draft: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Create a dashboard via POST /api/dashboards?apiVersion=1 (tries markdown then ES|QL metric)."""
+    """Create a dashboard via POST /api/dashboards?apiVersion=1 (notes + ES|QL xy probes)."""
     return _push_dashboards_api(
-        kibana, headers, auth, method="POST", dashboard_id=None, title=title, description=description
+        kibana, headers, auth, method="POST", dashboard_id=None, title=title, draft=draft
     )
 
 
@@ -259,9 +439,9 @@ def put_dashboard_markdown_canvas(
     auth: Any,
     dashboard_id: str,
     title: str,
-    description: str,
+    draft: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Replace dashboard contents after saved-object import (same panel variants as create)."""
+    """Replace dashboard contents after saved-object import (notes + ES|QL probes)."""
     return _push_dashboards_api(
         kibana,
         headers,
@@ -269,7 +449,7 @@ def put_dashboard_markdown_canvas(
         method="PUT",
         dashboard_id=dashboard_id,
         title=title,
-        description=description,
+        draft=draft,
     )
 
 
@@ -350,7 +530,7 @@ def main() -> int:
         body = dashboard_payload(title, desc)
 
         try:
-            good, err_dash = publish_one_dashboards_api(kibana, headers, auth, title, desc)
+            good, err_dash = publish_one_dashboards_api(kibana, headers, auth, title, draft)
         except requests.RequestException as e:
             good, err_dash = False, str(e)
 
@@ -358,6 +538,14 @@ def main() -> int:
             ok += 1
             print("OK", dash_id, title[:70])
             continue
+
+        print(
+            "WARN",
+            dash_id,
+            "Dashboards API (Lens) failed — import fallback; stderr tail:",
+            err_dash[:500],
+            file=sys.stderr,
+        )
 
         rec = saved_object_minimal_import_line(dash_id, body, core_ver)
         try:
@@ -367,15 +555,15 @@ def main() -> int:
 
         if good_imp:
             api_id = imported_id or dash_id
-            hg, herr = put_dashboard_markdown_canvas(kibana, headers, auth, api_id, title, desc)
+            hg, herr = put_dashboard_markdown_canvas(kibana, headers, auth, api_id, title, draft)
             if hg:
-                print("OK", dash_id, title[:70], "(fallback: import + Markdown panel)")
+                print("OK", dash_id, title[:70], "(fallback: import + Dashboards API panels)")
             else:
                 print(
                     "OK",
                     dash_id,
                     title[:70],
-                    "(fallback: import only; Markdown PUT failed — canvas may be blank)",
+                    "(fallback: import only; Dashboards PUT failed — canvas may be blank)",
                     file=sys.stderr,
                 )
                 print("  ", herr[:200], file=sys.stderr)
