@@ -25,8 +25,45 @@ fi
 
 ALLOY_BIN="${ALLOY_BIN:-/usr/local/bin/alloy}"
 ALLOY_CFG="${ALLOY_CFG:-/root/workshop/assets/alloy/workshop.alloy}"
-if [ ! -x "$ALLOY_BIN" ]; then
-  echo "ERROR: Alloy not found at $ALLOY_BIN (track setup should install it)." >&2
+
+_ensure_alloy_binary() {
+  if [ -x "$ALLOY_BIN" ]; then
+    return 0
+  fi
+  echo "Alloy missing at $ALLOY_BIN — installing Grafana Alloy (one-time)..." >&2
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq 2>/dev/null || true
+  apt-get install -y --no-install-recommends curl ca-certificates unzip >/dev/null 2>&1 || true
+  ALLOY_VER="${ALLOY_VERSION:-v1.8.3}"
+  Z="/tmp/alloy-workshop-install-$$.zip"
+  D="/tmp/alloy-workshop-unpack-$$"
+  rm -rf "$D"
+  mkdir -p "$D" "$(dirname "$ALLOY_BIN")"
+  if ! curl -fsSL "https://github.com/grafana/alloy/releases/download/${ALLOY_VER}/alloy-linux-amd64.zip" -o "$Z"; then
+    echo "ERROR: could not download Alloy ${ALLOY_VER} (need curl + github.com)." >&2
+    return 1
+  fi
+  if ! unzip -o -j "$Z" -d "$D" >/dev/null; then
+    echo "ERROR: unzip failed for Alloy archive (apt install unzip?)." >&2
+    rm -f "$Z"
+    return 1
+  fi
+  rm -f "$Z"
+  for cand in "$D/alloy" "$D/alloy-linux-amd64" "$D/alloy-linux-amd64.exe"; do
+    if [ -f "$cand" ]; then
+      install -m 0755 "$cand" "$ALLOY_BIN"
+      rm -rf "$D"
+      echo "Installed Alloy → $ALLOY_BIN" >&2
+      return 0
+    fi
+  done
+  echo "ERROR: no alloy binary found after unzip. Contents:" >&2
+  ls -la "$D" >&2 || true
+  rm -rf "$D"
+  return 1
+}
+
+if ! _ensure_alloy_binary; then
   exit 1
 fi
 

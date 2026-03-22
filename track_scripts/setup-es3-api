@@ -223,13 +223,74 @@ ln -sfn "$TRACK_ROOT" /root/workshop
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base git ca-certificates
+apt-get install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base git ca-certificates unzip
 
 python3 -m venv /opt/workshop-venv
 /opt/workshop-venv/bin/pip install --upgrade pip
 /opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
 
+ALLOY_VER="${ALLOY_VERSION:-v1.8.3}"
+if [ ! -x /usr/local/bin/alloy ]; then
+  echo "Installing Grafana Alloy ${ALLOY_VER}..."
+  ADIR="/tmp/alloy-setup-unpack-$$"
+  rm -rf "$ADIR"
+  mkdir -p "$ADIR"
+  curl -fsSL "https://github.com/grafana/alloy/releases/download/${ALLOY_VER}/alloy-linux-amd64.zip" -o /tmp/alloy-linux-amd64.zip
+  unzip -o -j /tmp/alloy-linux-amd64.zip -d "$ADIR"
+  if [ -f "$ADIR/alloy" ]; then
+    install -m 0755 "$ADIR/alloy" /usr/local/bin/alloy
+  elif [ -f "$ADIR/alloy-linux-amd64" ]; then
+    install -m 0755 "$ADIR/alloy-linux-amd64" /usr/local/bin/alloy
+  else
+    echo "ERROR: Alloy zip did not contain alloy or alloy-linux-amd64" >&2
+    ls -la "$ADIR" >&2 || true
+    exit 1
+  fi
+  rm -rf "$ADIR" /tmp/alloy-linux-amd64.zip
+fi
+
 mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards /root/workshop/build/elastic-alerts
+
+MOTLP_ENDPOINT=""
+if [ -f /tmp/project_results.json ]; then
+  MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.motlp // empty' /tmp/project_results.json)"
+  if [ -z "$MOTLP_ENDPOINT" ] || [ "$MOTLP_ENDPOINT" = "null" ]; then
+    MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.otlp // empty' /tmp/project_results.json)"
+  fi
+  if [ -z "$MOTLP_ENDPOINT" ] || [ "$MOTLP_ENDPOINT" = "null" ]; then
+    MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.otel // empty' /tmp/project_results.json)"
+  fi
+fi
+if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
+  agent variable set ES_OTLP_ENDPOINT "$MOTLP_ENDPOINT" || true
+fi
+
+PIPELINE_OK=0
+if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ] && [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
+  echo "Starting Grafana Alloy → Elastic managed OTLP (same pattern as elastic-autonomous-observability track)..."
+  export WORKSHOP_OTLP_ENDPOINT="$MOTLP_ENDPOINT"
+  export WORKSHOP_OTLP_AUTH_HEADER="ApiKey ${WORKSHOP_ES_API_KEY}"
+  mkdir -p /tmp/alloy-storage
+  nohup /usr/local/bin/alloy run --storage.path=/tmp/alloy-storage "$TRACK_ROOT/assets/alloy/workshop.alloy" >>/tmp/workshop-alloy.log 2>&1 &
+  sleep 4
+  nohup /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/otel_workshop_emitter.py" >>/tmp/workshop-emitter.log 2>&1 &
+  nohup /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/datadog_otel_to_elastic.py" >>/tmp/workshop-datadog-otel.log 2>&1 &
+  PIPELINE_OK=1
+  echo "Alloy + OTLP emitters running (alloy.log, workshop-emitter.log, workshop-datadog-otel.log)."
+elif [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
+  echo "WARN: mOTLP URL in project_results but ES_API_KEY missing — cannot export via Alloy; using bulk seed fallback." >&2
+fi
+
+if [ "$PIPELINE_OK" != "1" ]; then
+  echo "Seeding workshop telemetry (bulk API fallback: logs-workshop-default, metrics-workshop-default)..."
+  if [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
+    ES_URL="$ES_URL" ES_API_KEY="$WORKSHOP_ES_API_KEY" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
+      || echo "WARN: telemetry seed failed (Discover may be empty until you re-run scripts/seed_workshop_telemetry.sh)" >&2
+  else
+    ES_URL="$ES_URL" ES_USERNAME=admin ES_PASSWORD="$ELASTICSEARCH_PASSWORD" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
+      || echo "WARN: telemetry seed failed (Discover may be empty until you re-run scripts/seed_workshop_telemetry.sh)" >&2
+  fi
+fi
 
 {
   echo "WORKSHOP_ROOT=$TRACK_ROOT"
@@ -244,7 +305,21 @@ mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-da
   fi
 } >>/root/.bashrc
 
+if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
+  {
+    echo ""
+    echo "# Managed OTLP (OpenTelemetry) — Alloy forwards here; copy URL from Kibana if empty: Add data → OpenTelemetry"
+    printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$MOTLP_ENDPOINT"
+    echo "# Restart Alloy + emitter: ./scripts/start_workshop_otel.sh"
+  } >>/root/.bashrc
+fi
+
 find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o -name 'solve-es3-api' -o -name 'cleanup-es3-api' \) -exec chmod +x {} \;
 [[ -f "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh"
+[[ -f "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh" ]] && chmod +x "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh"
+[[ -f "$TRACK_ROOT/scripts/start_workshop_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/start_workshop_otel.sh"
+[[ -f "$TRACK_ROOT/scripts/send_datadog_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/send_datadog_otel.sh"
+[[ -f "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh" ]] && chmod +x "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh"
+[[ -f "$TRACK_ROOT/scripts/sync_workshop_from_git.sh" ]] && chmod +x "$TRACK_ROOT/scripts/sync_workshop_from_git.sh"
 
 echo "Track bootstrap complete."
