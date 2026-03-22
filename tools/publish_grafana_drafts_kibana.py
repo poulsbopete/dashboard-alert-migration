@@ -101,21 +101,44 @@ def build_description(draft: dict[str, Any]) -> str:
     return body[:50000]
 
 
-def markdown_for_canvas(description: str) -> str:
-    """Non-empty Markdown for a dashboard panel so the canvas is not blank."""
-    header = """## Grafana → Elastic (import draft)
+def _short_listing_description(draft: dict[str, Any], title: str) -> str:
+    """Kibana dashboard list subtitle — unique per import (avoid identical blobs under every title)."""
+    lines: list[str] = []
+    panels = draft.get("panels") or []
+    if isinstance(panels, list):
+        for pan in panels[:5]:
+            if not isinstance(pan, dict):
+                continue
+            mig = pan.get("migration") or {}
+            pq = (mig.get("promql") or "").strip()
+            ptitle = (pan.get("title") or "").strip()
+            if pq:
+                lines.append(pq[:110] + ("…" if len(pq) > 110 else ""))
+            elif ptitle:
+                lines.append(ptitle[:72])
+    if lines:
+        return ("Grafana→Elastic — " + " · ".join(lines[:2]))[:300]
+    return ("Grafana→Elastic — " + (title.strip() or "import draft"))[:300]
 
-**Panels** mix **ES|QL** **line**, **area**, **bar**, **metric**, and **breakdown** charts (not PromQL). Short Grafana exports are **padded**
-to **WORKSHOP_MIN_LENS_PANELS** (default **8**) up to **WORKSHOP_MAX_LENS_PANELS** (default **12**) so you see more chart types.
-**Traces (no lab restart):** `cd /root/workshop && git pull && source ~/.bashrc` → **`python3 tools/seed_workshop_telemetry.py`**
-(writes **traces-workshop-default**). Optionally **`export WORKSHOP_ESQL_FROM=traces-workshop-default`** (or **`traces-*`**) then re-run
-**`python3 tools/publish_grafana_drafts_kibana.py`**. **WORKSHOP_SIMPLE_LENS=1** = duplicate line charts only.
 
----
-
-"""
-    detail = description.strip() if description.strip() else "_No per-panel PromQL was captured in this export._"
-    return (header + detail)[:50000]
+def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
+    """Compact Markdown panel: unique title line + rotating one-liner; full PromQL detail below."""
+    tips = (
+        "Lens panels use **ES|QL**; PromQL below is the Grafana source for migration.",
+        "Use **Edit** to swap queries. Publisher options (**WORKSHOP_***) are in the repo **README**.",
+        "Traces on the VM: **`python3 tools/seed_workshop_telemetry.py`** (no lab restart).",
+        "Force a data pattern: **`export WORKSHOP_ESQL_FROM=…`** then re-run **`publish_grafana_drafts_kibana.py`**.",
+        "Many charts? Short Grafana JSON is padded — **`WORKSHOP_MIN_LENS_PANELS`** / **`WORKSHOP_MAX_LENS_PANELS`** in README.",
+        "Duplicate lines only: **`WORKSHOP_SIMPLE_LENS=1`** when debugging.",
+        "Community JSON: **assignment B5b** — same **`grafana_to_elastic.py`** pipeline.",
+        "Path A parity: mixed Lens types match **`migrate_grafana_dashboards_to_serverless.sh`** output.",
+    )
+    idx = sum(ord(c) for c in dashboard_title) % len(tips)
+    tip = tips[idx]
+    ttl = (dashboard_title.strip() or "Grafana import draft").replace("\n", " ")[:200]
+    header = f"## Grafana → Elastic\n\n**{ttl}** — {tip}\n\n---\n\n"
+    body = detail.strip() if detail.strip() else "_No per-panel PromQL was captured in this export._"
+    return (header + body)[:50000]
 
 
 def dashboard_payload(title: str, description: str) -> dict[str, Any]:
@@ -153,12 +176,6 @@ def dashboards_api_headers(base: dict[str, str]) -> dict[str, str]:
 def _esql_string_literal(s: str) -> str:
     """Escape for ES|QL double-quoted string."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _plain_preview_from_markdown(md: str) -> str:
-    p = re.sub(r"[_*`#]+", " ", md)
-    p = " ".join(p.split())
-    return (p[:2000].strip() or "Grafana migration draft — add Lens panels via Edit.")
 
 
 def _min_lens_panels() -> int:
@@ -540,11 +557,11 @@ def _push_dashboards_api(
     """POST/PUT with Markdown notes + ES|QL xy probes; falls back to note-only if API rejects combo."""
     h = dashboards_api_headers(headers)
     description = build_description(draft)
-    md = markdown_for_canvas(description)
-    plain_preview = _plain_preview_from_markdown(md)
+    md = markdown_for_canvas(description, dashboard_title=title)
+    listing_desc = _short_listing_description(draft, title)
     base: dict[str, Any] = {
         "title": title[:255],
-        "description": plain_preview[:1000] or "Grafana migration draft",
+        "description": listing_desc,
         "time_range": {"from": "now-30d", "to": "now"},
     }
     note_compact: list[tuple[str, list[dict[str, Any]]]] = [
@@ -552,7 +569,7 @@ def _push_dashboards_api(
             "markdown",
             [
                 {
-                    "grid": {"x": 0, "y": 0, "w": 48, "h": 10},
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 8},
                     "config": {"content": md},
                     "uid": str(uuid.uuid4()),
                     "type": "markdown",
@@ -563,7 +580,7 @@ def _push_dashboards_api(
             "DASHBOARD_MARKDOWN",
             [
                 {
-                    "grid": {"x": 0, "y": 0, "w": 48, "h": 10},
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 8},
                     "config": {"content": md},
                     "uid": str(uuid.uuid4()),
                     "type": "DASHBOARD_MARKDOWN",
@@ -619,7 +636,7 @@ def _push_dashboards_api(
             return True, ""
         last_err = f"HTTP {r.status_code} {r.text[:700]}"
 
-    for _lbl, panels in _note_only_fallback_panels(md, plain_preview):
+    for _lbl, panels in _note_only_fallback_panels(md, listing_desc):
         body = {**base, "panels": panels}
         if method.upper() == "POST":
             r = requests.post(
@@ -749,9 +766,9 @@ def main() -> int:
     for path in files:
         draft = json.loads(path.read_text(encoding="utf-8"))
         title = str(draft.get("title") or path.stem)
-        desc = build_description(draft)
+        list_desc = _short_listing_description(draft, title)
         dash_id = sanitize_id(path.stem)
-        body = dashboard_payload(title, desc)
+        body = dashboard_payload(title, list_desc)
 
         try:
             good, err_dash = publish_one_dashboards_api(kibana, headers, auth, title, draft)
