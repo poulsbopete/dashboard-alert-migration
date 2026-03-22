@@ -8,10 +8,6 @@ The scenario is intentionally **vendor- and domain-neutral**: a tiny `sample-api
 realistic **metrics, traces, and logs** so you can practice extraction, translation, and governance patterns (including
 **high-cardinality** label handling).
 
-> **Note:** The upstream Instruqt track [`elastic-autonomous-observability`](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability)
-> is not publicly cloneable. This track follows the same structural conventions (`track.yml`, `config.yml`,
-> `track_scripts/`, `NN-lab-*/assignment.md`).
-
 ## What this aligns with (spike goals)
 
 - **Grafana → Elastic**: leverage **PromQL** continuity where Elastic exposes Prometheus-compatible querying—often

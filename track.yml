@@ -14,9 +14,6 @@ description: |
   You will use a **CLI-first** workflow (Python utilities in `tools/`) for fast iteration, optional **AI / Agent
   Skills** for repeatable operations, and a small **Kubernetes** sandbox (`sample-api`) that emits metrics, logs, and
   traces through **OpenTelemetry Collector** and **Grafana Alloy**.
-
-  **Note:** This track is modeled on common Instruqt layout conventions. The upstream `elastic-autonomous-observability`
-  track is not publicly cloneable; content here is standalone.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - kubernetes
