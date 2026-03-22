@@ -29,7 +29,8 @@ cd /root/workshop && source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Converts **20** Grafana exports and **POSTs** dashboard saved objects via **`tools/publish_grafana_drafts_kibana.py`**.
+Converts **20** Grafana exports and publishes dashboard shells via **`tools/publish_grafana_drafts_kibana.py`**
+(**`POST /api/saved_objects/_bulk_create`**, required on Observability Serverless).
 
 ## Path B — Drafts only (then Cursor / skills)
 

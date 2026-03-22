@@ -77,7 +77,7 @@ From **`/root/workshop`**, run:
 This will:
 
 1. Run **`tools/grafana_to_elastic.py`** on all **`assets/grafana/*.json`** → **`build/elastic-dashboards/*-elastic-draft.json`** (20 files).
-2. Run **`tools/publish_grafana_drafts_kibana.py`**, which calls **`POST /api/saved_objects/dashboard/{id}?overwrite=true`** on **`$KIBANA_URL`** for each draft (empty dashboard shell + **title** + **description** with PromQL / migration notes).
+2. Run **`tools/publish_grafana_drafts_kibana.py`**, which calls **`POST /api/saved_objects/_bulk_create?overwrite=true`** with one **dashboard** object per draft (Serverless does not expose **`POST .../dashboard/{id}`**). Each object is an empty dashboard shell + **title** + **description** with PromQL / migration notes.
 
 Then open **Elastic Serverless → Dashboards** and confirm **~20** dashboards (titles end with **`(Grafana import draft)`**). Add **Lens** panels in the UI as needed.
 

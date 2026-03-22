@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Publish workshop Grafana→Elastic *draft* JSON files into Kibana as Dashboard saved objects
-(Kibana Saved Objects HTTP API). Each dashboard carries title + description (PromQL / migration notes);
+via **POST /api/saved_objects/_bulk_create** (Observability Serverless does not allow
+**POST /api/saved_objects/dashboard/{id}**). Each dashboard carries title + description (PromQL / migration notes);
 panels start empty—add Lens in UI or use Path B (Cursor + Agent Skills).
 
 Requires (after `source ~/.bashrc` on es3-api):
@@ -22,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from urllib.parse import quote
 
 
 def kibana_client() -> tuple[str, dict[str, str], Any]:
@@ -111,33 +111,78 @@ def main() -> int:
 
     kibana, headers, auth = kibana_client()
 
-    ok = 0
-    failed: list[str] = []
+    # Observability Serverless rejects POST /api/saved_objects/dashboard/{id}; use bulk create with id in body.
+    bulk_url = f"{kibana}/api/saved_objects/_bulk_create"
+    bulk: list[dict[str, Any]] = []
+    meta: list[tuple[Path, str, str]] = []
     for path in files:
         draft = json.loads(path.read_text(encoding="utf-8"))
         title = str(draft.get("title") or path.stem)
         desc = build_description(draft)
         dash_id = sanitize_id(path.stem)
-        url = f"{kibana}/api/saved_objects/dashboard/{quote(dash_id, safe='')}"
         body = dashboard_payload(title, desc)
-        try:
-            r = requests.post(
-                url,
-                params={"overwrite": "true"},
-                headers=headers,
-                auth=auth,
-                json=body,
-                timeout=120,
-            )
-            if r.status_code in (200, 201):
-                ok += 1
-                print("OK", dash_id, title[:70])
-            else:
-                failed.append(f"{path.name}: HTTP {r.status_code} {r.text[:400]}")
-                print("FAIL", dash_id, r.status_code, file=sys.stderr)
-        except requests.RequestException as e:
+        bulk.append(
+            {
+                "type": "dashboard",
+                "id": dash_id,
+                "attributes": body["attributes"],
+                "references": body.get("references") or [],
+            }
+        )
+        meta.append((path, dash_id, title))
+
+    ok = 0
+    failed: list[str] = []
+    try:
+        r = requests.post(
+            bulk_url,
+            params={"overwrite": "true"},
+            headers=headers,
+            auth=auth,
+            json=bulk,
+            timeout=300,
+        )
+    except requests.RequestException as e:
+        for path, dash_id, _title in meta:
             failed.append(f"{path.name}: {e}")
-            print("FAIL", path.name, e, file=sys.stderr)
+            print("FAIL", dash_id, e, file=sys.stderr)
+        print(f"\nPublished {ok}/{len(files)} dashboards to Kibana.")
+        if failed:
+            print("\nFailures:", file=sys.stderr)
+            for msg in failed[:12]:
+                print(f"  {msg}", file=sys.stderr)
+        return 1
+
+    if r.status_code not in (200, 201):
+        for path, dash_id, _title in meta:
+            failed.append(f"{path.name}: HTTP {r.status_code} {r.text[:400]}")
+            print("FAIL", dash_id, r.status_code, file=sys.stderr)
+    else:
+        try:
+            payload = r.json()
+        except json.JSONDecodeError:
+            for path, dash_id, _title in meta:
+                failed.append(f"{path.name}: invalid JSON response from Kibana")
+            print("FAIL bulk_create: non-JSON body", file=sys.stderr)
+        else:
+            saved = payload.get("saved_objects") or []
+            by_id = {str(o.get("id", "")): o for o in saved if o.get("id")}
+            for path, dash_id, title in meta:
+                item = by_id.get(dash_id)
+                if not item:
+                    failed.append(
+                        f"{path.name}: no entry for id {dash_id!r} in bulk_create response ({len(saved)} objects)"
+                    )
+                    print("FAIL", dash_id, file=sys.stderr)
+                    continue
+                err = item.get("error")
+                if err:
+                    msg = err.get("message") if isinstance(err, dict) else str(err)
+                    failed.append(f"{path.name}: {msg or err}")
+                    print("FAIL", dash_id, file=sys.stderr)
+                else:
+                    ok += 1
+                    print("OK", dash_id, title[:70])
 
     print(f"\nPublished {ok}/{len(files)} dashboards to Kibana.")
     if failed:
