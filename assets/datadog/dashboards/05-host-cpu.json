@@ -1,0 +1,49 @@
+{
+  "title": "Host CPU",
+  "description": "Synthetic Datadog-style export for migration workshop",
+  "widgets": [
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Series A",
+        "requests": [
+          {
+            "q": "avg:system.cpu.user{*} by {host}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Series B",
+        "requests": [
+          {
+            "q": "avg:system.load.1{*} by {host}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "*",
+      "prefix": "env"
+    }
+  ]
+}

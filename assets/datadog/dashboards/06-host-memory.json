@@ -1,0 +1,31 @@
+{
+  "title": "Host memory",
+  "description": "Synthetic Datadog-style export for migration workshop",
+  "widgets": [
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Primary",
+        "requests": [
+          {
+            "q": "avg:system.mem.pct_usable{*} by {host}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "*",
+      "prefix": "env"
+    }
+  ]
+}

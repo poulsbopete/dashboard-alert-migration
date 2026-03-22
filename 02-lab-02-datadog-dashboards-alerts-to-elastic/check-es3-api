@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+cd /root/workshop
+dc="$(find build/elastic-datadog-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+ac="$(find build/elastic-alerts -maxdepth 1 -type f -name 'monitor-*-elastic.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${dc:-0}" -lt 10 ]; then
+  fail-message "Expected 10 Datadog dashboard drafts in build/elastic-datadog-dashboards (*-elastic-draft.json). Found: ${dc:-0}. Run: python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards"
+fi
+if [ "${ac:-0}" -lt 4 ]; then
+  fail-message "Expected 4 monitor-derived alert drafts (monitor-*-elastic.json) in build/elastic-alerts. Found: ${ac:-0}."
+fi
+echo "Lab 2 checks passed."

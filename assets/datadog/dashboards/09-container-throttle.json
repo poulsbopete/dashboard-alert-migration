@@ -1,0 +1,31 @@
+{
+  "title": "Container CPU throttle",
+  "description": "Synthetic Datadog-style export for migration workshop",
+  "widgets": [
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Primary",
+        "requests": [
+          {
+            "q": "avg:container.cpu.throttled{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "*",
+      "prefix": "env"
+    }
+  ]
+}

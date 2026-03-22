@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+cd /root/workshop
+count="$(find build/elastic-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${count:-0}" -lt 20 ]; then
+  fail-message "Expected 20 Grafana-derived drafts (*-elastic-draft.json) in build/elastic-dashboards (found: ${count:-0}). Run: python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards"
+fi
+echo "Lab 1 checks passed."

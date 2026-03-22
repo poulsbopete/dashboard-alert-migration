@@ -1,9 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-f=/root/workshop/build/unified-overview.json
-if [ ! -f "$f" ]; then
-  fail-message "Missing build/unified-overview.json"
-fi
-if ! grep -q "Unified observability overview" "$f"; then
-  fail-message "unified-overview.json should include the Unified observability overview title text."
-fi

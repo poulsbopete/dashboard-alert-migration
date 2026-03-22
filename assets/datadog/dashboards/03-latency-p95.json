@@ -1,0 +1,31 @@
+{
+  "title": "Latency p95",
+  "description": "Synthetic Datadog-style export for migration workshop",
+  "widgets": [
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Primary",
+        "requests": [
+          {
+            "q": "p95:trace.http.request.duration{*} by {resource_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 12,
+        "height": 4
+      }
+    }
+  ],
+  "template_variables": [
+    {
+      "name": "env",
+      "default": "*",
+      "prefix": "env"
+    }
+  ]
+}

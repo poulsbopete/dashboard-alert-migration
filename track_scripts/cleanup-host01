@@ -1,5 +1,0 @@
-#!/bin/bash
-set -euxo pipefail
-
-export KUBECONFIG=/root/.kube/config
-kubectl delete namespace workshop-o11y --ignore-not-found=true || true

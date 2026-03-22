@@ -1,7 +1,0 @@
-#!/bin/bash
-set -euxo pipefail
-export KUBECONFIG=/root/.kube/config
-cd /root/workshop
-export ELASTIC_OTLP_ENDPOINT="${ELASTIC_OTLP_ENDPOINT:-https://example.otlp.observability.elastic.cloud:443}"
-export ELASTIC_OTLP_AUTH="${ELASTIC_OTLP_AUTH:-ApiKey replace-me}"
-WAIT_ROLLOUT=0 ./scripts/apply_elastic_otlp.sh

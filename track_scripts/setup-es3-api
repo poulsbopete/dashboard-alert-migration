@@ -1,0 +1,245 @@
+#!/bin/bash
+# Provision Observability Serverless via es3-api, proxy Kibana on :8080, then lay down workshop files.
+
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+  PME_CLOUD_INSTRUQT_API_KEY="${ESS_CLOUD_API_KEY:-}"
+fi
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+  PME_CLOUD_INSTRUQT_API_KEY="$(agent variable get PME_CLOUD_INSTRUQT_API_KEY 2>/dev/null || echo "")"
+fi
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+  ESS_KEY="$(agent variable get ESS_CLOUD_API_KEY 2>/dev/null || echo "")"
+  if [ -n "$ESS_KEY" ]; then
+    PME_CLOUD_INSTRUQT_API_KEY="$ESS_KEY"
+  fi
+fi
+
+if [ -z "${PME_CLOUD_INSTRUQT_API_KEY:-}" ]; then
+  echo "ERROR: Cloud API key not set. Configure Instruqt secret ESS_CLOUD_API_KEY for this track."
+  exit 1
+fi
+export PME_CLOUD_INSTRUQT_API_KEY
+
+set -euxo pipefail
+
+echo "Track setup on es3-api (elastic/es3-api-v2)"
+
+_n=0
+until [ -f /opt/instruqt/bootstrap/host-bootstrap-completed ]; do
+  sleep 1
+  _n=$((_n + 1))
+  if [ "$_n" -ge 600 ]; then
+    echo "ERROR: host-bootstrap-completed not found after 600s" >&2
+    exit 1
+  fi
+done
+
+echo "Project type: ${PROJECT_TYPE:-observability}"
+echo "Regions: ${REGIONS:-aws-us-east-1}"
+
+PRODUCT_TIER="${PRODUCT_TIER:-complete}"
+python3 bin/es3-api.py \
+  --operation create \
+  --project-type "${PROJECT_TYPE:-observability}" \
+  --product-tier "$PRODUCT_TIER" \
+  --regions "${REGIONS:-aws-us-east-1}" \
+  --project-name "${INSTRUQT_TRACK_SLUG:-migration}-$INSTRUQT_PARTICIPANT_ID-$(date '+%s')" \
+  --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
+  --wait-for-ready
+
+timeout=120
+counter=0
+while [ $counter -lt $timeout ]; do
+  if [ -f /tmp/project_results.json ]; then
+    echo "project_results.json present"
+    break
+  fi
+  echo "Waiting for /tmp/project_results.json ($((counter + 1))/${timeout}s)"
+  sleep 1
+  counter=$((counter + 1))
+done
+
+if [ ! -f /tmp/project_results.json ]; then
+  echo "ERROR: /tmp/project_results.json not found"
+  exit 1
+fi
+
+REG="${REGIONS:-aws-us-east-1}"
+export KIBANA_URL
+KIBANA_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.kibana' /tmp/project_results.json)"
+export ELASTICSEARCH_PASSWORD
+ELASTICSEARCH_PASSWORD="$(jq -r --arg region "$REG" '.[$region].credentials.password' /tmp/project_results.json)"
+export ES_URL
+ES_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.elasticsearch' /tmp/project_results.json)"
+
+agent variable set ES_KIBANA_URL "$KIBANA_URL"
+agent variable set ES_URL "$ES_URL"
+agent variable set ES_USERNAME "$(jq -r --arg region "$REG" '.[$region].credentials.username' /tmp/project_results.json)"
+agent variable set ES_PASSWORD "$ELASTICSEARCH_PASSWORD"
+agent variable set ES_DEPLOYMENT_ID "$(jq -r --arg region "$REG" '.[$region].id' /tmp/project_results.json)"
+
+BASE64="$(echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64 -w0 2>/dev/null || echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64)"
+KIBANA_URL_WITHOUT_PROTOCOL="$(echo "$KIBANA_URL" | sed -e 's#http[s]\?://##g')"
+
+WORKSHOP_ES_API_KEY=""
+output="$(curl -X POST -s -u "admin:${ELASTICSEARCH_PASSWORD}" \
+  -w "\n%{http_code}" \
+  "$ES_URL/_security/api_key" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"workshop-migration"}' || true)"
+http_code="$(echo "$output" | tail -n1)"
+response_body="$(echo "$output" | sed '$d')"
+if [ "$http_code" = "200" ]; then
+  ELASTICSEARCH_API_KEY="$(echo "$response_body" | jq -r '.encoded // empty')"
+  if [ -n "$ELASTICSEARCH_API_KEY" ]; then
+    agent variable set ES_API_KEY "$ELASTICSEARCH_API_KEY"
+    agent variable set ELASTIC_API_KEY "$ELASTICSEARCH_API_KEY"
+    WORKSHOP_ES_API_KEY="$ELASTICSEARCH_API_KEY"
+  fi
+fi
+
+cat > /etc/nginx/conf.d/default.conf <<NGX
+server {
+  listen 8080 default_server;
+  server_name kibana;
+  location /nginx_status {
+    stub_status on;
+    allow 127.0.0.1;
+    deny all;
+  }
+  location / {
+    proxy_set_header Host ${KIBANA_URL_WITHOUT_PROTOCOL};
+    proxy_pass ${KIBANA_URL};
+    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+    proxy_set_header Connection "keep-alive";
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header X-Content-Type-Options;
+    proxy_hide_header Strict-Transport-Security;
+    proxy_set_header X-Scheme \$scheme;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header Authorization "Basic ${BASE64}";
+    proxy_set_header Accept-Encoding "gzip, deflate, br";
+    proxy_set_header Accept "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    proxy_set_header Accept-Language "en-US,en;q=0.9";
+    proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
+    proxy_redirect off;
+    proxy_http_version 1.1;
+    client_max_body_size 20M;
+    proxy_read_timeout 600;
+    proxy_buffering off;
+    proxy_send_timeout 300;
+    send_timeout 300;
+    proxy_connect_timeout 300;
+  }
+}
+NGX
+
+systemctl restart nginx
+sleep 2
+if ! systemctl is-active --quiet nginx; then
+  echo "ERROR: nginx failed to start"
+  systemctl status nginx || true
+  exit 1
+fi
+
+# --- Workshop tree (CLI + assets) ---
+SCRIPT="${BASH_SOURCE[0]:-$0}"
+[[ "$SCRIPT" == /* ]] || SCRIPT="$(pwd)/$SCRIPT"
+if command -v realpath &>/dev/null; then
+  SCRIPT="$(realpath "$SCRIPT")"
+else
+  _resolved="$(readlink -f "$SCRIPT" 2>/dev/null || true)"
+  [[ -n "$_resolved" ]] && SCRIPT="$_resolved"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+CANDIDATE="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+_track_root_ok() {
+  [[ -n "$1" && -f "$1/tools/requirements.txt" && -d "$1/assets/grafana" && -d "$1/assets/datadog" ]]
+}
+_pick_root_from_requirements_file() {
+  local _req="$1" _r
+  _r="$(cd "$(dirname "$_req")/.." && pwd)"
+  if _track_root_ok "$_r"; then
+    printf '%s\n' "$_r"
+  fi
+}
+
+TRACK_ROOT=""
+for r in "${WORKSHOP_ROOT:-}" "${INSTRUQT_TRACK_DIR:-}" "$CANDIDATE" "$(pwd)" "/root/workshop"; do
+  if _track_root_ok "$r"; then
+    TRACK_ROOT="$(cd "$r" && pwd)"
+    break
+  fi
+done
+
+if [[ -z "$TRACK_ROOT" ]]; then
+  while IFS= read -r _req; do
+    TRACK_ROOT="$(_pick_root_from_requirements_file "$_req")"
+    [[ -n "$TRACK_ROOT" ]] && break
+  done < <(find /opt/instruqt /root /home /mnt /srv /var/lib /usr/local /opt /tmp \
+    -maxdepth 24 -type f -path '*/tools/requirements.txt' 2>/dev/null | head -64)
+fi
+
+if [[ -z "$TRACK_ROOT" ]]; then
+  while IFS= read -r _req; do
+    TRACK_ROOT="$(_pick_root_from_requirements_file "$_req")"
+    [[ -n "$TRACK_ROOT" ]] && break
+  done < <(find / -maxdepth 20 \( -path /proc -o -path /sys -o -path /dev \) -prune -o \
+    -type f -path '*/tools/requirements.txt' -print 2>/dev/null | head -32)
+fi
+
+if [[ -z "$TRACK_ROOT" ]]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y --no-install-recommends git ca-certificates
+  _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
+  _ref="${WORKSHOP_GIT_REF:-main}"
+  rm -rf /opt/instruqt-workshop-track
+  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
+    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+  fi
+  if _track_root_ok "/opt/instruqt-workshop-track"; then
+    TRACK_ROOT="$(cd /opt/instruqt-workshop-track && pwd)"
+  fi
+fi
+
+if [[ -z "$TRACK_ROOT" ]]; then
+  echo "ERROR: Could not resolve workshop tree" >&2
+  exit 1
+fi
+
+export WORKSHOP_ROOT="${WORKSHOP_ROOT:-$TRACK_ROOT}"
+ln -sfn "$TRACK_ROOT" /root/workshop
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base git ca-certificates
+
+python3 -m venv /opt/workshop-venv
+/opt/workshop-venv/bin/pip install --upgrade pip
+/opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
+
+mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards /root/workshop/build/elastic-alerts
+
+{
+  echo "WORKSHOP_ROOT=$TRACK_ROOT"
+  echo "export PATH=/opt/workshop-venv/bin:\$PATH"
+  printf 'export KIBANA_URL=%q\n' "$KIBANA_URL"
+  printf 'export ES_URL=%q\n' "$ES_URL"
+  printf 'export ES_USERNAME=%q\n' "admin"
+  printf 'export ES_PASSWORD=%q\n' "$ELASTICSEARCH_PASSWORD"
+  if [ -n "$WORKSHOP_ES_API_KEY" ]; then
+    printf 'export ES_API_KEY=%q\n' "$WORKSHOP_ES_API_KEY"
+    echo "# Same key as Kibana → Admin and settings → API keys → workshop-migration (created by track setup)"
+  fi
+} >>/root/.bashrc
+
+find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o -name 'solve-es3-api' -o -name 'cleanup-es3-api' \) -exec chmod +x {} \;
+[[ -f "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh"
+
+echo "Track bootstrap complete."

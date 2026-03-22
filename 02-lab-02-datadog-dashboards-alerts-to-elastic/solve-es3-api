@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euxo pipefail
+cd /root/workshop
+mkdir -p build/elastic-datadog-dashboards build/elastic-alerts
+python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
+for f in assets/datadog/monitor-*.json; do
+  base="$(basename "$f" .json)"
+  python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"
+done

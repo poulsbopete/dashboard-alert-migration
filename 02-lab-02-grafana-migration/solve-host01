@@ -1,6 +1,0 @@
-#!/bin/bash
-set -euxo pipefail
-cd /root/workshop
-mkdir -p build/elastic-dashboards
-python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards
-printf '%s\n' "Example: histogram_quantile in Grafana maps to percentile aggregations over histogram buckets in ES|QL or PromQL-native views in Elastic Observability." > build/promql-notes.md

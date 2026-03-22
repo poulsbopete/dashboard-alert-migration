@@ -1,6 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-f=/root/workshop/build/agent-skills-batch-report.txt
-if [ ! -s "$f" ]; then
-  fail-message "Create a non-empty build/agent-skills-batch-report.txt (see assignment)."
-fi

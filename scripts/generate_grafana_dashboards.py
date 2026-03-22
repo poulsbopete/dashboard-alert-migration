@@ -33,6 +33,14 @@ QUERIES = [
     ),
     ("11-entity-errors.json", "Errors by entity_id", "sum by (entity_id) (rate(operation_errors_total[5m]))"),
     ("12-heatmap-style.json", "Request mix", "sum by (method, status) (rate(http_requests_total[5m]))"),
+    ("13-cpu-saturation.json", "CPU-style saturation proxy", "avg(rate(process_cpu_seconds_total[5m])) by (instance)"),
+    ("14-memory-working-set.json", "Memory working set style", "process_resident_memory_bytes / 1024 / 1024"),
+    ("15-gc-pause-rate.json", "GC pause indicator", "rate(go_gc_duration_seconds_sum[5m])"),
+    ("16-dependency-latency.json", "Downstream latency p90", "histogram_quantile(0.90, sum by (le, dependency) (rate(http_client_duration_seconds_bucket[5m])))"),
+    ("17-queue-depth.json", "Queue depth stand-in", "sum(workqueue_depth) by (queue)"),
+    ("18-cache-hit-ratio.json", "Cache hit ratio", "sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m])))"),
+    ("19-pod-restarts.json", "Restart churn", "sum by (pod) (increase(kube_pod_container_status_restarts_total[1h]))"),
+    ("20-endpoint-slo.json", "Endpoint availability", "sum(rate(http_requests_total{status!~\"5..\"}[30m])) / sum(rate(http_requests_total[30m]))"),
 ]
 
 

@@ -1,11 +1,19 @@
 # Team secret *names* belong here so `instruqt track push` keeps sandbox bindings (values live in Instruqt only).
 version: "3"
 virtualmachines:
-  - name: host01
-    image: instruqt/k3s-v1-34-5
+  - name: es3-api
+    image: elastic/es3-api-v2
     shell: /bin/bash
-    memory: 16384
+    environment:
+      PRODUCT_TIER: complete
+      PROJECT_TYPE: observability
+      REGIONS: aws-us-east-1
+    memory: 12288
     cpus: 4
+    allow_external_ingress:
+      - http
+      - https
+      - high-ports
 secrets:
   - name: LLM_PROXY_PROD
   - name: ESS_CLOUD_API_KEY

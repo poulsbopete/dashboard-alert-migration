@@ -1,0 +1,5 @@
+#!/bin/bash
+set -euxo pipefail
+cd /root/workshop
+source /root/.bashrc
+./scripts/migrate_grafana_dashboards_to_serverless.sh
