@@ -31,7 +31,7 @@ echo
 
 echo "--- Listening ports (OTLP gRPC 4317, OTLP HTTP 4318, Alloy self-metrics 12345) ---"
 if command -v ss >/dev/null 2>&1; then
-  ss -tlnp 2>/dev/null | grep -E ':(4317|4318|12345)\b' || echo "  (none of 4317/4318/12345 listening — Alloy probably not running)"
+  ss -tlnp 2>/dev/null | grep -E ':(4317|4318|12345)([[:space:]]|$)' || echo "  (none of 4317/4318/12345 listening — Alloy probably not running)"
 elif command -v netstat >/dev/null 2>&1; then
   netstat -tln 2>/dev/null | grep -E '4317|4318|12345' || echo "  (none listening)"
 else
@@ -40,11 +40,14 @@ fi
 echo
 
 echo "--- Alloy self-metrics (Prometheus scrape target) ---"
-if curl -sf --max-time 3 "http://127.0.0.1:12345/metrics" | head -n 5; then
+# Do not pipe curl to head without pipefail — an empty/failed curl still yields exit 0 from head.
+if _motlp_body=$(curl -sf --max-time 3 "http://127.0.0.1:12345/metrics" 2>/dev/null) && [ -n "${_motlp_body}" ]; then
+  echo "${_motlp_body}" | head -n 5
   echo "  … http://127.0.0.1:12345/metrics responds (Alloy internal telemetry is live)"
 else
   echo "  FAIL: no response from http://127.0.0.1:12345/metrics"
 fi
+unset _motlp_body 2>/dev/null || true
 echo
 
 echo "--- Recent log lines ---"
