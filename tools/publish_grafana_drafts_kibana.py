@@ -140,6 +140,106 @@ def dashboards_api_headers(base: dict[str, str]) -> dict[str, str]:
     return h
 
 
+def _esql_string_literal(s: str) -> str:
+    """Escape for ES|QL double-quoted string."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _plain_preview_from_markdown(md: str) -> str:
+    p = re.sub(r"[_*`#]+", " ", md)
+    p = " ".join(p.split())
+    return (p[:2000].strip() or "Grafana migration draft — add Lens panels via Edit.")
+
+
+def note_panel_variants(md: str, plain_one_line: str) -> list[tuple[str, list[dict[str, Any]]]]:
+    """
+    Panel shapes to try against POST/PUT /api/dashboards (schema differs by stack).
+    Newer Serverless rejects type DASHBOARD_MARKDOWN; use markdown + ES|QL metric fallback.
+    """
+    plain_esql = _esql_string_literal(plain_one_line[:500])
+    q = f'ROW "{plain_esql}" AS workshop_note'
+    metric_panel: dict[str, Any] = {
+        "type": "metric",
+        "uid": str(uuid.uuid4()),
+        "grid": {"x": 0, "y": 0, "w": 48, "h": 18},
+        "dataset": {"type": "esql", "query": q},
+        "metrics": [{"type": "primary", "operation": "value", "column": "workshop_note"}],
+    }
+    variants: list[tuple[str, list[dict[str, Any]]]] = [
+        (
+            "markdown",
+            [
+                {
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
+                    "config": {"content": md},
+                    "uid": str(uuid.uuid4()),
+                    "type": "markdown",
+                }
+            ],
+        ),
+        (
+            "DASHBOARD_MARKDOWN",
+            [
+                {
+                    "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
+                    "config": {"content": md},
+                    "uid": str(uuid.uuid4()),
+                    "type": "DASHBOARD_MARKDOWN",
+                }
+            ],
+        ),
+        ("metric_esql_note", [metric_panel]),
+    ]
+    return variants
+
+
+def _push_dashboards_api(
+    kibana: str,
+    headers: dict[str, str],
+    auth: Any,
+    *,
+    method: str,
+    dashboard_id: str | None,
+    title: str,
+    description: str,
+) -> tuple[bool, str]:
+    """POST create (dashboard_id None) or PUT update — tries panel variants until one succeeds."""
+    h = dashboards_api_headers(headers)
+    md = markdown_for_canvas(description)
+    plain_preview = _plain_preview_from_markdown(md)
+    base: dict[str, Any] = {
+        "title": title[:255],
+        "description": plain_preview[:1000] or "Grafana migration draft",
+        "time_range": {"from": "now-30d", "to": "now"},
+    }
+    last_err = ""
+    for _label, panels in note_panel_variants(md, plain_preview):
+        body = {**base, "panels": panels}
+        if method.upper() == "POST":
+            r = requests.post(
+                f"{kibana}/api/dashboards?apiVersion=1",
+                headers=h,
+                auth=auth,
+                json=body,
+                timeout=120,
+            )
+        else:
+            if not dashboard_id:
+                return False, "PUT requires dashboard_id"
+            rid = quote(dashboard_id, safe="")
+            r = requests.put(
+                f"{kibana}/api/dashboards/{rid}?apiVersion=1",
+                headers=h,
+                auth=auth,
+                json=body,
+                timeout=120,
+            )
+        if r.status_code in (200, 201):
+            return True, ""
+        last_err = f"HTTP {r.status_code} {r.text[:700]}"
+    return False, last_err
+
+
 def publish_one_dashboards_api(
     kibana: str,
     headers: dict[str, str],
@@ -147,35 +247,10 @@ def publish_one_dashboards_api(
     title: str,
     description: str,
 ) -> tuple[bool, str]:
-    """Create a dashboard via the supported Serverless Dashboards API."""
-    h = dashboards_api_headers(headers)
-    md = markdown_for_canvas(description)
-    panels: list[dict[str, Any]] = [
-        {
-            "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
-            "config": {"content": md},
-            "uid": str(uuid.uuid4()),
-            "type": "DASHBOARD_MARKDOWN",
-        }
-    ]
-    # description: shown in dashboard list; panels: visible on open (avoid blank canvas)
-    plain_preview = re.sub(r"[_*`#]+", " ", md)[:2000].strip()
-    body: dict[str, Any] = {
-        "title": title[:255],
-        "description": plain_preview[:1000] or "Grafana migration draft",
-        "panels": panels,
-        "time_range": {"from": "now-30d", "to": "now"},
-    }
-    r = requests.post(
-        f"{kibana}/api/dashboards?apiVersion=1",
-        headers=h,
-        auth=auth,
-        json=body,
-        timeout=120,
+    """Create a dashboard via POST /api/dashboards?apiVersion=1 (tries markdown then ES|QL metric)."""
+    return _push_dashboards_api(
+        kibana, headers, auth, method="POST", dashboard_id=None, title=title, description=description
     )
-    if r.status_code in (200, 201):
-        return True, ""
-    return False, f"HTTP {r.status_code} {r.text[:600]}"
 
 
 def put_dashboard_markdown_canvas(
@@ -186,34 +261,16 @@ def put_dashboard_markdown_canvas(
     title: str,
     description: str,
 ) -> tuple[bool, str]:
-    """Replace dashboard contents with a single Markdown panel (fixes blank canvas after saved-object import)."""
-    h = dashboards_api_headers(headers)
-    md = markdown_for_canvas(description)
-    plain_preview = re.sub(r"[_*`#]+", " ", md)[:2000].strip()
-    body: dict[str, Any] = {
-        "title": title[:255],
-        "description": plain_preview[:1000] or "Grafana migration draft",
-        "panels": [
-            {
-                "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
-                "config": {"content": md},
-                "uid": str(uuid.uuid4()),
-                "type": "DASHBOARD_MARKDOWN",
-            }
-        ],
-        "time_range": {"from": "now-30d", "to": "now"},
-    }
-    rid = quote(dashboard_id, safe="")
-    r = requests.put(
-        f"{kibana}/api/dashboards/{rid}?apiVersion=1",
-        headers=h,
-        auth=auth,
-        json=body,
-        timeout=120,
+    """Replace dashboard contents after saved-object import (same panel variants as create)."""
+    return _push_dashboards_api(
+        kibana,
+        headers,
+        auth,
+        method="PUT",
+        dashboard_id=dashboard_id,
+        title=title,
+        description=description,
     )
-    if r.status_code in (200, 201):
-        return True, ""
-    return False, f"HTTP {r.status_code} {r.text[:600]}"
 
 
 def saved_object_minimal_import_line(
