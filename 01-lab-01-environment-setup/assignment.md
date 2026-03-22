@@ -9,7 +9,7 @@ difficulty: ""
 enhanced_loading: null
 ---
 
-# Lab 1 — Environment setup (PayPal-inspired merchant platform)
+# Lab 1 — Environment setup (fictional merchant platform)
 
 You are operating a fictional **global merchant payments mesh**: services emit **Prometheus-style metrics**, **OpenTelemetry traces**, and **structured logs**. Today the organization is fragmented across Grafana + Datadog-style monitors; this workshop migrates the signal path into **Elastic Observability Serverless** using **OpenTelemetry Collector** and **Grafana Alloy**.
 

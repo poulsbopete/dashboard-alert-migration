@@ -1,6 +1,6 @@
-slug: paypal-elastic-serverless-migration
+slug: merchant-platform-serverless-migration
 id: bhxh3cg7b4ex
-title: PayPal-Style Observability Migration to Elastic Serverless
+title: Merchant Platform Observability Migration to Elastic Serverless
 teaser: Migrate Grafana (Prometheus/Alloy) and Datadog-style monitors into Elastic
   Serverless with OpenTelemetry and Agent Skills.
 description: |

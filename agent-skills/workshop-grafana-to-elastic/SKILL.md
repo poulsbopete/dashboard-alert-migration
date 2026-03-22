@@ -1,5 +1,5 @@
 ---
-name: paypal-grafana-to-elastic
+name: workshop-grafana-to-elastic
 description: >
   Workshop skill: convert Grafana dashboard JSON (Prometheus/PromQL) into Elastic Observability dashboard drafts using
   the bundled CLI in this repository. Pair with upstream Elastic Agent Skills for Kibana dashboard APIs.
@@ -8,7 +8,7 @@ metadata:
   version: 0.1.0
 ---
 
-# PayPal-style Grafana → Elastic (workshop)
+# Grafana → Elastic (workshop)
 
 ## When to use
 

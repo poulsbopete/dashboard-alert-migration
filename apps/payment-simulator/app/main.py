@@ -40,7 +40,7 @@ PAYMENT_ERRORS = Counter(
 def merchant_pool():
     if HIGH_CARD > 0:
         return [f"m_{i}" for i in range(HIGH_CARD)]
-    return ["paypal_merch_us", "paypal_merch_eu", "paypal_merch_apac", "marketplace_demo"]
+    return ["merch_region_us", "merch_region_eu", "merch_region_apac", "marketplace_demo"]
 
 
 MERCHANTS = merchant_pool()

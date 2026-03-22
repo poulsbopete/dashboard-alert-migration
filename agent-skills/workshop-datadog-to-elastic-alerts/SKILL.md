@@ -1,5 +1,5 @@
 ---
-name: paypal-datadog-to-elastic-alerts
+name: workshop-datadog-to-elastic-alerts
 description: >
   Workshop skill: convert Datadog-style monitor JSON into Kibana alerting rule drafts. Complements upstream Elastic
   Agent Skills for alerting rule APIs.

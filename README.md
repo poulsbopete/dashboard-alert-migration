@@ -1,4 +1,4 @@
-# paypal-elastic-serverless-migration (Instruqt track)
+# merchant-platform-serverless-migration (Instruqt track)
 
 This repository is a **self-contained Instruqt workshop track** that demonstrates migrating **Grafana (Prometheus via
 Grafana Alloy)** and **Datadog-style monitors** into **Elastic Observability Serverless**, using **OpenTelemetry** and
@@ -6,8 +6,7 @@ optional **Elastic Agent Skills** workflows.
 
 > **Note:** The upstream Instruqt track [`elastic-autonomous-observability`](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability)
 > is not publicly cloneable. This track mirrors common Instruqt layout conventions (`track.yml`, `config.yml`,
-> `track_scripts/`, `NN-lab-*/assignment.md`) while implementing the PayPal-inspired storyline requested for this
-> workshop.
+> `track_scripts/`, `NN-lab-*/assignment.md`) while implementing a **fictional large-scale merchant platform** scenario.
 
 ## Layout
 
@@ -15,7 +14,7 @@ optional **Elastic Agent Skills** workflows.
 | --- | --- |
 | `track.yml` / `config.yml` | Instruqt metadata + `instruqt/k3s-v1-34-5` sandbox host |
 | `track_scripts/` | Track bootstrap: build `payment-simulator`, `kubectl apply`, venv |
-| `01-lab-environment-setup/` … `06-lab-unified-observability/` | Labs (`assignment.md`, `Instructions.md`, lifecycle scripts) |
+| `01-lab-01-environment-setup/` … `06-lab-06-unified-observability/` | Labs (`assignment.md`, `Instructions.md`, lifecycle scripts) |
 | `k8s/` | Kubernetes manifests (OTEL Collector, Alloy, workloads) |
 | `apps/payment-simulator/` | FastAPI service (metrics + traces) |
 | `assets/grafana/` | 12 sample Grafana dashboards (generated + committed) |
@@ -39,7 +38,7 @@ python3 tools/grafana_to_elastic.py assets/grafana/01-overview.json | head
 ## Publishing to Instruqt
 
 1. Install the [Instruqt CLI](https://docs.instruqt.com/reference/cli/commands) and authenticate.
-2. Create a new track (or pull an existing track ID) and replace `REPLACE_WITH_INSTRUQT_TRACK_ID` in `track.yml`.
+2. Ensure `track.yml` has the correct `id` for your Instruqt track (created on first push or pulled with `instruqt track pull`).
 3. Set `owner` / `developers` to match your organization.
 4. Push the track directory with `instruqt track push` (see Instruqt docs for your workflow).
 

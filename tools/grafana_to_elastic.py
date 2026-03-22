@@ -83,7 +83,7 @@ def build_elastic_dashboard(title: str, queries: list[dict[str, str]]) -> dict[s
         "title": f"{title} (Grafana import draft)",
         "panels": panels,
         "time_range": {"from": "now-24h", "to": "now"},
-        "tags": ["workshop", "grafana-import", "paypal-elastic-serverless-migration"],
+        "tags": ["workshop", "grafana-import", "merchant-platform-serverless-migration"],
     }
 
 

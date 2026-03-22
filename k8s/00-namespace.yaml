@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: merchant-o11y
   labels:
-    app.kubernetes.io/part-of: paypal-elastic-serverless-migration
+    app.kubernetes.io/part-of: merchant-platform-serverless-migration
