@@ -15,6 +15,10 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 - **Agent Skills**: use upstream skills locally (for example `kibana-dashboards`, `kibana-alerting-rules`) plus workshop
   wrappers under `agent-skills/`.
 
+## Dashboards API (reference)
+
+Lab 1 **Path A** publishes **empty** dashboard shells via the **Saved Objects import** API (see `tools/publish_grafana_drafts_kibana.py`). For **full** dashboards (Lens panels, grid layout, time range) use the **Dashboards HTTP API** or the **`kibana-dashboards`** skill. A concise workshop-oriented guide lives in **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** (CRUD, headers, spaces, supported panels, links to Elastic docs).
+
 ## Layout
 
 | Path | Purpose |
@@ -29,6 +33,7 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Path A:** convert 20 Grafana exports + **Kibana Saved Objects API** publish |
 | `agent-skills/` | Workshop skills + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
+| `docs/dashboards-api-getting-started.md` | **Dashboards API** (`/api/dashboards?apiVersion=1`): CRUD, spaces, panel support — complements Saved Objects **import** used in Lab 1 Path A |
 
 Loading / wait slides are defined in each **`assignment.md`** frontmatter (`notes:`), per Instruqt [loading experience](https://docs.instruqt.com/tracks/manage/loading-experience).
 

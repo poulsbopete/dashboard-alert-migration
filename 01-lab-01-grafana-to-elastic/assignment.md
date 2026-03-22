@@ -95,6 +95,8 @@ python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-dashbo
 
 Use this when you want the model and **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** (**`kibana-dashboards`**) to drive **Saved Objects** / **dashboard** APIs with richer Lens definitions than the automated shell.
 
+For **`GET` / `POST` / `PUT` / `DELETE /api/dashboards?apiVersion=1`** (headers, spaces, supported panels), see the repo guide **[`docs/dashboards-api-getting-started.md`](../../docs/dashboards-api-getting-started.md)**.
+
 1. **Clone** this workshop repository on your laptop (same layout as `/root/workshop`).
 2. In the **Instruqt Terminal**, run **`source ~/.bashrc`** and **copy** (do not paste into chat logs): **`KIBANA_URL`**, **`ES_URL`**, **`ES_API_KEY`** or **`ES_PASSWORD`**.
 3. Export those variables in your laptop shell or `.env` for Cursor / skills.
