@@ -5,6 +5,22 @@ type: challenge
 title: Lab 1 — Environment setup
 teaser: Stand up Kubernetes telemetry plumbing and connect Elastic Observability Serverless
   over OTLP.
+tabs:
+- id: lypopaehfkah
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: rdmuzri3smi7
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: blxkp1sz0kzz
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---

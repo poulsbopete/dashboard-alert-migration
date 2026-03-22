@@ -5,6 +5,22 @@ type: challenge
 title: Lab 4 — Agent Skills automation
 teaser: Wire Elastic Agent Skills to CLI migration utilities and (optionally) drive
   them from an AI agent.
+tabs:
+- id: 7vx1ovw4y1gm
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: ivncf5un7mss
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: btjirwgkad3k
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---

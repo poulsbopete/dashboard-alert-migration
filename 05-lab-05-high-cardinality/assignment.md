@@ -5,6 +5,22 @@ type: challenge
 title: Lab 5 — High cardinality optimization
 teaser: Stress-test label cardinality, then apply collector-side protections and discuss
   rollups.
+tabs:
+- id: q4fbzn37vx3s
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: v81sanv2xnp3
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: hki0asxhl8ic
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---

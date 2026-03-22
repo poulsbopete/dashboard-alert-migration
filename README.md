@@ -23,7 +23,7 @@ realistic **metrics, traces, and logs** so you can practice extraction, translat
 | --- | --- |
 | `track.yml` / `config.yml` | Instruqt metadata + `instruqt/k3s-v1-34-5` sandbox host |
 | `track_scripts/` | Bootstrap: build `sample-api` image, `kubectl apply`, Python venv |
-| `01-lab-01-environment-setup/` … `06-lab-06-unified-observability/` | Labs |
+| `01-lab-01-environment-setup/` … `06-lab-06-unified-observability/` | Labs (`assignment.md` includes **tabs**: Terminal, Workshop code editor, Elastic Cloud) |
 | `k8s/` | Namespaced manifests (`workshop-o11y`): OTEL Collector, Alloy, workloads |
 | `apps/sample-api/` | Minimal HTTP API + Prometheus metrics + OTEL traces |
 | `assets/grafana/` | 12 sample Grafana JSON exports |

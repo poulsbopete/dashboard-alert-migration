@@ -5,6 +5,22 @@ type: challenge
 title: Lab 6 — Unified observability + before/after
 teaser: Tie metrics, logs, and traces into one narrative and compare “before vs after”
   operations.
+tabs:
+- id: g12xcaqidire
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: dtqidyzdprub
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: tjgmmqeno0ib
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---

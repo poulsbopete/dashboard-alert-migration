@@ -5,6 +5,22 @@ type: challenge
 title: Lab 3 — Datadog-style monitors → Elastic alerting
 teaser: Export JSON monitors, translate mentally to Elastic rules, and emit Kibana
   alerting JSON drafts.
+tabs:
+- id: gwh5a6knvpxo
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: zmcxrkovt2qw
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: 0ujfr5w7lykw
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---

@@ -5,6 +5,22 @@ type: challenge
 title: Lab 2 — Grafana migration (Prometheus → Elastic)
 teaser: Treat Grafana JSON as the source of truth for PromQL panels and produce Elastic
   dashboard drafts.
+tabs:
+- id: fsizfoyfjtag
+  title: Terminal
+  type: terminal
+  hostname: host01
+  workdir: /root/workshop
+- id: kq3pgzwyvvfw
+  title: Workshop
+  type: code
+  hostname: host01
+  path: /root/workshop
+- id: v9ea7agmywny
+  title: Elastic Cloud
+  type: website
+  url: https://cloud.elastic.co
+  new_window: true
 difficulty: ""
 enhanced_loading: null
 ---
