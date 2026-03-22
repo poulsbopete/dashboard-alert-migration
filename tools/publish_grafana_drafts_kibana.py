@@ -26,6 +26,7 @@ import sys
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -95,6 +96,18 @@ def build_description(draft: dict[str, Any]) -> str:
     return body[:50000]
 
 
+def markdown_for_canvas(description: str) -> str:
+    """Non-empty Markdown for a dashboard panel so the canvas is not blank."""
+    header = (
+        "## Grafana → Elastic (import draft)\n\n"
+        "There are **no** auto-generated charts. Use **Edit** (pencil) → **Add panel** to add "
+        "**Lens** or **ES|QL** visualizations, or refine queries with Cursor + Agent Skills.\n\n"
+        "---\n\n"
+    )
+    detail = description.strip() if description.strip() else "_No per-panel PromQL was captured in this export._"
+    return (header + detail)[:50000]
+
+
 def dashboard_payload(title: str, description: str) -> dict[str, Any]:
     """Classic saved-object-shaped attributes (import fallback only)."""
     options = {
@@ -136,23 +149,63 @@ def publish_one_dashboards_api(
 ) -> tuple[bool, str]:
     """Create a dashboard via the supported Serverless Dashboards API."""
     h = dashboards_api_headers(headers)
-    panels: list[dict[str, Any]] = []
-    if description.strip():
-        panels.append(
-            {
-                "grid": {"x": 0, "y": 0, "w": 48, "h": 24},
-                "config": {"content": description[:50000]},
-                "uid": str(uuid.uuid4()),
-                "type": "DASHBOARD_MARKDOWN",
-            }
-        )
+    md = markdown_for_canvas(description)
+    panels: list[dict[str, Any]] = [
+        {
+            "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
+            "config": {"content": md},
+            "uid": str(uuid.uuid4()),
+            "type": "DASHBOARD_MARKDOWN",
+        }
+    ]
+    # description: shown in dashboard list; panels: visible on open (avoid blank canvas)
+    plain_preview = re.sub(r"[_*`#]+", " ", md)[:2000].strip()
     body: dict[str, Any] = {
         "title": title[:255],
+        "description": plain_preview[:1000] or "Grafana migration draft",
         "panels": panels,
         "time_range": {"from": "now-30d", "to": "now"},
     }
     r = requests.post(
         f"{kibana}/api/dashboards?apiVersion=1",
+        headers=h,
+        auth=auth,
+        json=body,
+        timeout=120,
+    )
+    if r.status_code in (200, 201):
+        return True, ""
+    return False, f"HTTP {r.status_code} {r.text[:600]}"
+
+
+def put_dashboard_markdown_canvas(
+    kibana: str,
+    headers: dict[str, str],
+    auth: Any,
+    dashboard_id: str,
+    title: str,
+    description: str,
+) -> tuple[bool, str]:
+    """Replace dashboard contents with a single Markdown panel (fixes blank canvas after saved-object import)."""
+    h = dashboards_api_headers(headers)
+    md = markdown_for_canvas(description)
+    plain_preview = re.sub(r"[_*`#]+", " ", md)[:2000].strip()
+    body: dict[str, Any] = {
+        "title": title[:255],
+        "description": plain_preview[:1000] or "Grafana migration draft",
+        "panels": [
+            {
+                "grid": {"x": 0, "y": 0, "w": 48, "h": 28},
+                "config": {"content": md},
+                "uid": str(uuid.uuid4()),
+                "type": "DASHBOARD_MARKDOWN",
+            }
+        ],
+        "time_range": {"from": "now-30d", "to": "now"},
+    }
+    rid = quote(dashboard_id, safe="")
+    r = requests.put(
+        f"{kibana}/api/dashboards/{rid}?apiVersion=1",
         headers=h,
         auth=auth,
         json=body,
@@ -181,7 +234,8 @@ def import_one_ndjson(
     headers: dict[str, str],
     auth: Any,
     record: dict[str, Any],
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str | None]:
+    """Returns (ok, error_message, dashboard_id_for_api) — id may be None if response omits it."""
     h = api_headers_no_content_type(headers)
     line = json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n"
     r = requests.post(
@@ -193,17 +247,22 @@ def import_one_ndjson(
         timeout=120,
     )
     if r.status_code not in (200, 201):
-        return False, f"HTTP {r.status_code} {r.text[:600]}"
+        return False, f"HTTP {r.status_code} {r.text[:600]}", None
     try:
         payload = r.json()
     except json.JSONDecodeError:
-        return False, "non-JSON import response"
+        return False, "non-JSON import response", None
     errs = payload.get("errors") or []
     if errs:
-        return False, str(errs[0])[:600]
+        return False, str(errs[0])[:600], None
     if payload.get("success") is False and int(payload.get("successCount") or 0) < 1:
-        return False, str(payload)[:600]
-    return True, ""
+        return False, str(payload)[:600], None
+    imp_id: str | None = None
+    for row in payload.get("successResults") or []:
+        if row.get("type") == "dashboard":
+            imp_id = str(row.get("id") or row.get("destinationId") or "") or None
+            break
+    return True, "", imp_id
 
 
 def main() -> int:
@@ -245,13 +304,25 @@ def main() -> int:
 
         rec = saved_object_minimal_import_line(dash_id, body, core_ver)
         try:
-            good_imp, err_imp = import_one_ndjson(kibana, headers, auth, rec)
+            good_imp, err_imp, imported_id = import_one_ndjson(kibana, headers, auth, rec)
         except requests.RequestException as e:
-            good_imp, err_imp = False, str(e)
+            good_imp, err_imp, imported_id = False, str(e), None
 
         if good_imp:
+            api_id = imported_id or dash_id
+            hg, herr = put_dashboard_markdown_canvas(kibana, headers, auth, api_id, title, desc)
+            if hg:
+                print("OK", dash_id, title[:70], "(fallback: import + Markdown panel)")
+            else:
+                print(
+                    "OK",
+                    dash_id,
+                    title[:70],
+                    "(fallback: import only; Markdown PUT failed — canvas may be blank)",
+                    file=sys.stderr,
+                )
+                print("  ", herr[:200], file=sys.stderr)
             ok += 1
-            print("OK", dash_id, title[:70], "(fallback: saved-objects import)")
             continue
 
         failed.append(f"{path.name}: Dashboards API: {err_dash} | import: {err_imp}")

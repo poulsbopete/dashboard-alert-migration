@@ -77,9 +77,11 @@ From **`/root/workshop`**, run:
 This will:
 
 1. Run **`tools/grafana_to_elastic.py`** on all **`assets/grafana/*.json`** → **`build/elastic-dashboards/*-elastic-draft.json`** (20 files).
-2. Run **`tools/publish_grafana_drafts_kibana.py`**, which creates dashboards via **`POST /api/dashboards?apiVersion=1`** (Markdown panel for PromQL / migration notes when present). If that fails for an object, it falls back to a **minimal** **`POST /api/saved_objects/_import`** (single-object NDJSON). Serverless is unreliable for hand-built bulk saved-object imports, so the Dashboards API is the primary path.
+2. Run **`tools/publish_grafana_drafts_kibana.py`**, which creates dashboards via **`POST /api/dashboards?apiVersion=1`** with a **Markdown** panel on the canvas (instructions + PromQL / migration notes). If that fails, it **imports** a minimal saved object, then **`PUT`s the same Markdown** so the dashboard is not blank. (Older script versions only set **description** metadata—visible in the list but not on the canvas.)
 
-Then open **Elastic Serverless → Dashboards** and confirm **~20** dashboards (titles end with **`(Grafana import draft)`**). Add **Lens** panels in the UI as needed.
+Then open **Elastic Serverless → Dashboards** and confirm **~20** dashboards (titles end with **`(Grafana import draft)`**). You should see **one Markdown panel** when you open a dashboard; **Lens** charts are not auto-created—add them with **Edit → Add panel**.
+
+**If dashboards from an earlier run still look empty:** pull the latest workshop, then run **`./scripts/migrate_grafana_dashboards_to_serverless.sh`** again (`overwrite` replaces imports; new **`POST`** runs may add duplicate titles—delete old copies in the UI if needed).
 
 **Manual steps (same as script internals):**
 
