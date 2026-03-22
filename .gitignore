@@ -7,4 +7,3 @@ __pycache__/
 *.log
 build/
 .DS_Store
-k8s/otel-collector-elastic-secret.yaml

@@ -29,7 +29,6 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Path A:** convert 20 Grafana exports + **Kibana Saved Objects API** publish |
 | `agent-skills/` | Workshop skills + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
-| `k8s/`, `apps/sample-api/` | Legacy / optional material (not used by the container track bootstrap) |
 
 Loading / wait slides are defined in each **`assignment.md`** frontmatter (`notes:`), per Instruqt [loading experience](https://docs.instruqt.com/tracks/manage/loading-experience).
 

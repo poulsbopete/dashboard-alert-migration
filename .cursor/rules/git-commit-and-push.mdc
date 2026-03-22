@@ -1,0 +1,15 @@
+---
+description: Commit and push workshop changes to Git by default
+alwaysApply: true
+---
+
+# Git: commit (and push) after substantive changes
+
+When you change this repository in a way the user would expect to see on GitHub (track content, labs, scripts, assets, config, README), **finish with Git**:
+
+1. `git status` — confirm what changed.
+2. `git add` the relevant paths (or `git add -A` when the whole change set should ship).
+3. `git commit` with a short, accurate message (imperative mood, mention track/lab scope when useful).
+4. **`git push origin main`** when `origin` exists and network is available, unless the user explicitly asked for a local-only commit.
+
+Do not leave intentional workshop edits uncommitted at the end of a task. If push fails (auth/network), say so and leave the commit locally.
