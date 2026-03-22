@@ -1,6 +1,11 @@
+# Team secret *names* belong here so `instruqt track push` keeps sandbox bindings (values live in Instruqt only).
 version: "3"
 virtualmachines:
   - name: host01
     image: instruqt/k3s-v1-34-5
-    machine_type: n1-standard-4
     shell: /bin/bash
+    memory: 16384
+    cpus: 4
+secrets:
+  - name: LLM_PROXY_PROD
+  - name: ESS_CLOUD_API_KEY

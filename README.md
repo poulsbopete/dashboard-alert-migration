@@ -36,6 +36,15 @@ realistic **metrics, traces, and logs** so you can practice extraction, translat
 - Elastic **Observability** Serverless project: OTLP endpoint + API key for learners (or Instruqt secrets)
 - Outbound access from the sandbox to Elastic Cloud
 
+### Instruqt secrets (retained on `track push`)
+
+`config.yml` declares **`LLM_PROXY_PROD`** and **`ESS_CLOUD_API_KEY`** under `secrets:`. That keeps them bound to this
+track when you push from Git—sandbox-only edits in the UI can be overwritten if they are not also in `config.yml`.
+
+- Store **values** under **Team settings → Secrets** in Instruqt (never commit secrets to this repo).
+- During **lifecycle scripts** (`track_scripts/*`, challenge `setup-host01`, etc.), each name is available as an
+  **environment variable** with the same name (for example `$ESS_CLOUD_API_KEY`).
+
 ## Local smoke test (optional)
 
 ```bash
