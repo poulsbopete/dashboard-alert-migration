@@ -1,9 +1,9 @@
 slug: elastic-serverless-migration-lab
-id: ueroxxv9yust
+id: hs7ogfqktp5m
 type: track
 title: Grafana & Datadog → Elastic Serverless (migration workshop)
-teaser: Spike-focused track for dashboards and alerts—Prometheus/Grafana, Datadog-style exports, OTLP, and CLI-first
-  automation toward Elastic Observability Serverless.
+teaser: Spike-focused track for dashboards and alerts—Prometheus/Grafana, Datadog-style
+  exports, OTLP, and CLI-first automation toward Elastic Observability Serverless.
 description: |
   This hands-on track mirrors a short **migration spike**: move **Grafana (Prometheus-backed)** dashboards and
   **Datadog-style** monitors toward **Elastic Observability Serverless**. Elastic’s **native PromQL** support reduces
@@ -40,5 +40,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "18013039470004304541"
+checksum: "18049908749759007165"
 enhanced_loading: false

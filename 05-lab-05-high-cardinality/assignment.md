@@ -1,9 +1,10 @@
 ---
 slug: lab-05-high-cardinality
-id: acx7y6xc0ssy
+id: bzvambh6vmoq
 type: challenge
 title: Lab 5 — High cardinality optimization
-teaser: Stress-test label cardinality, then apply collector-side protections and discuss rollups.
+teaser: Stress-test label cardinality, then apply collector-side protections and discuss
+  rollups.
 difficulty: ""
 enhanced_loading: null
 ---

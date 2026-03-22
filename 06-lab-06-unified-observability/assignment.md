@@ -1,9 +1,10 @@
 ---
 slug: lab-06-unified-observability
-id: msxmmkc5azfz
+id: guesipflxuep
 type: challenge
 title: Lab 6 — Unified observability + before/after
-teaser: Tie metrics, logs, and traces into one narrative and compare “before vs after” operations.
+teaser: Tie metrics, logs, and traces into one narrative and compare “before vs after”
+  operations.
 difficulty: ""
 enhanced_loading: null
 ---

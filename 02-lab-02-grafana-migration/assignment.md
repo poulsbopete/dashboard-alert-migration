@@ -1,6 +1,6 @@
 ---
 slug: lab-02-grafana-migration
-id: 38r5xtybhpsx
+id: berxl591tjk4
 type: challenge
 title: Lab 2 — Grafana migration (Prometheus → Elastic)
 teaser: Treat Grafana JSON as the source of truth for PromQL panels and produce Elastic

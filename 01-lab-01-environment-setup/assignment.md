@@ -1,9 +1,10 @@
 ---
 slug: lab-01-environment-setup
-id: xistysq5jing
+id: 7xffw36spadb
 type: challenge
 title: Lab 1 — Environment setup
-teaser: Stand up Kubernetes telemetry plumbing and connect Elastic Observability Serverless over OTLP.
+teaser: Stand up Kubernetes telemetry plumbing and connect Elastic Observability Serverless
+  over OTLP.
 difficulty: ""
 enhanced_loading: null
 ---
