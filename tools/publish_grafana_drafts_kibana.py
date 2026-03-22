@@ -2,10 +2,13 @@
 """
 Publish workshop Grafana→Elastic *draft* JSON into Kibana.
 
-**Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **Lens `xy`** panels. Each panel tries **ES|QL**
-volume probes in order: **`logs-workshop-default,metrics-workshop-default`** (after **`seed_workshop_telemetry.py`**),
-then **`logs-*,metrics-*`**, then **`logs-*,metrics-*,traces-*`**, until Kibana accepts the query (**`traces-*`** often breaks
-`@timestamp` validation when unioned). Override with **`WORKSHOP_ESQL_FROM`** (single pattern). PromQL is **not** executed.
+**Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels (rotating **line**, **area**,
+**bar**, **metric**, multi-series **line** with **breakdown**, and optional **AVG(workshop.requests.rate)** when the resolved
+`FROM` includes metrics). The same `FROM` clause as each volume probe is reused so panels stay consistent. If mixed layouts
+fail validation, the publisher falls back to **uniform line** charts only. **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
+
+**Probes:** **`logs-*`**, **`metrics-*`**, workshop streams, unions, then **`traces-*`**. Override with **`WORKSHOP_ESQL_FROM`**.
+PromQL in drafts is **not** executed.
 
 **Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MAX_LENS_PANELS`**,
 **`WORKSHOP_ESQL_FROM`**, **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
@@ -101,10 +104,9 @@ def markdown_for_canvas(description: str) -> str:
     """Non-empty Markdown for a dashboard panel so the canvas is not blank."""
     header = """## Grafana → Elastic (import draft)
 
-**Line charts** use **ES|QL** document counts over time (not PromQL). The publisher tries `FROM` patterns in order:
-`logs-*`, `metrics-*`, then workshop streams `logs-workshop-default,metrics-workshop-default` (from **seed** / migrate),
-then `logs-*,metrics-*`, then `logs-*,metrics-*,traces-*` (traces last — union can break **@timestamp** on Serverless).
-Set **WORKSHOP_ESQL_FROM** to force one pattern. If you see only this Markdown and no charts, **`git pull`** and re-run migrate.
+**Panels** mix **ES|QL** **line**, **area**, **bar**, **metric**, and **breakdown** charts (not PromQL). The publisher rotates queries
+by Grafana panel slot using the same resolved `FROM` (try order: `logs-*`, `metrics-*`, workshop streams, unions, `traces-*`).
+Set **WORKSHOP_ESQL_FROM** to force one pattern; **WORKSHOP_SIMPLE_LENS=1** forces simple duplicate line charts only.
 
 ---
 
@@ -196,6 +198,186 @@ def _esql_volume_probe_queries() -> list[str]:
         f"FROM logs-*,metrics-*,traces-* "
         f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
     ]
+
+
+def _from_clause_from_probe(esql: str) -> str:
+    m = re.search(r"^\s*FROM\s+(.+?)\s*\|", esql, flags=re.IGNORECASE | re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return "logs-*"
+
+
+def _mixed_esql_templates(from_clause: str, tf: str) -> list[dict[str, Any]]:
+    """Rotating panel recipes; only include log- or metrics-specific ES|QL when the FROM pattern plausibly has those fields."""
+    fc = from_clause.strip()
+    low = fc.lower()
+    has_logs = "logs" in low
+    has_metrics = "metrics" in low
+    has_traces = "trace" in low
+    q_vol = f"FROM {fc} | STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
+    tpls: list[dict[str, Any]] = [
+        {
+            "viz": "xy",
+            "layer": "line",
+            "query": q_vol,
+            "x": "bucket",
+            "ys": [("c", None)],
+            "breakdown": None,
+        },
+        {
+            "viz": "xy",
+            "layer": "area",
+            "query": q_vol,
+            "x": "bucket",
+            "ys": [("c", None)],
+            "breakdown": None,
+        },
+    ]
+    if has_logs:
+        tpls.extend(
+            [
+                {
+                    "viz": "xy",
+                    "layer": "bar",
+                    "query": (
+                        f"FROM {fc} | STATS c = COUNT(*) BY code = http.response.status_code "
+                        f"| SORT c DESC | LIMIT 10"
+                    ),
+                    "x": "code",
+                    "ys": [("c", None)],
+                    "breakdown": None,
+                },
+                {
+                    "viz": "xy",
+                    "layer": "bar",
+                    "query": (
+                        f"FROM {fc} | STATS c = COUNT(*) BY lvl = log.level | SORT c DESC | LIMIT 8"
+                    ),
+                    "x": "lvl",
+                    "ys": [("c", None)],
+                    "breakdown": None,
+                },
+                {
+                    "viz": "xy",
+                    "layer": "line",
+                    "query": (
+                        f"FROM {fc} | STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend), "
+                        f"svc = service.name"
+                    ),
+                    "x": "bucket",
+                    "ys": [("c", None)],
+                    "breakdown": "svc",
+                },
+            ]
+        )
+    if has_traces:
+        tpls.append(
+            {
+                "viz": "xy",
+                "layer": "bar",
+                "query": (
+                    f"FROM {fc} | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 10"
+                ),
+                "x": "name",
+                "ys": [("c", None)],
+                "breakdown": None,
+            }
+        )
+    tpls.append(
+        {
+            "viz": "metric",
+            "query": f"FROM {fc} | STATS total = COUNT(*)",
+            "col": "total",
+        }
+    )
+    if has_metrics:
+        tpls.append(
+            {
+                "viz": "xy",
+                "layer": "line",
+                "query": (
+                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) "
+                    f"BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
+                ),
+                "x": "bucket",
+                "ys": [("m", None)],
+                "breakdown": None,
+            }
+        )
+    return tpls
+
+
+def build_mixed_esql_panels(
+    draft: dict[str, Any], *, from_clause: str, time_field: str
+) -> list[dict[str, Any]]:
+    """Lens panels with varied ES|QL + chart types (Path A/B richer dashboards than duplicate volume lines)."""
+    if (os.environ.get("WORKSHOP_DISABLE_LENS") or "").strip() in ("1", "true", "yes"):
+        return []
+    if (os.environ.get("WORKSHOP_SIMPLE_LENS") or "").strip() in ("1", "true", "yes"):
+        return []
+    max_n = _max_lens_panels()
+    raw_panels = draft.get("panels") or []
+    if not isinstance(raw_panels, list):
+        raw_panels = []
+    if not raw_panels:
+        raw_panels = [{"title": "Observability volume", "migration": {"promql": ""}}]
+    tf = time_field
+    templates = _mixed_esql_templates(from_clause, tf)
+    if not templates:
+        return []
+    out: list[dict[str, Any]] = []
+    for i, pan in enumerate(raw_panels[:max_n]):
+        if not isinstance(pan, dict):
+            continue
+        spec = templates[i % len(templates)]
+        if spec["viz"] == "metric":
+            out.append(
+                {
+                    "type": "lens",
+                    "uid": str(uuid.uuid4()),
+                    "config": {
+                        "attributes": {
+                            "type": "metric",
+                            "dataset": {"type": "esql", "query": spec["query"]},
+                            "metrics": [
+                                {
+                                    "type": "primary",
+                                    "operation": "value",
+                                    "column": spec["col"],
+                                }
+                            ],
+                        }
+                    },
+                }
+            )
+            continue
+        layer: dict[str, Any] = {
+            "type": spec["layer"],
+            "dataset": {"type": "esql", "query": spec["query"]},
+            "x": {"operation": "value", "column": spec["x"]},
+            "y": [],
+        }
+        for col, label in spec["ys"]:
+            y_ent: dict[str, Any] = {"operation": "value", "column": col}
+            if label:
+                y_ent["label"] = label
+            layer["y"].append(y_ent)
+        br = spec.get("breakdown")
+        if isinstance(br, str) and br.strip():
+            layer["breakdown_by"] = {"operation": "value", "column": br.strip()}
+        out.append(
+            {
+                "type": "lens",
+                "uid": str(uuid.uuid4()),
+                "config": {
+                    "attributes": {
+                        "type": "xy",
+                        "layers": [layer],
+                    }
+                },
+            }
+        )
+    return out
 
 
 def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict[str, Any]]:
@@ -358,7 +540,15 @@ def _push_dashboards_api(
     ]
 
     attempts: list[list[dict[str, Any]]] = []
+    tf = _esql_time_bucket_field()
     for esql in _esql_volume_probe_queries():
+        fc = _from_clause_from_probe(esql)
+        mixed = build_mixed_esql_panels(draft, from_clause=fc, time_field=tf)
+        if mixed:
+            for _lbl, prefix in note_compact:
+                attempts.append(_layout_note_and_data_panels(prefix, mixed))
+            attempts.append(_layout_note_and_data_panels([], mixed))
+            attempts.append(_layout_note_and_data_panels([], mixed[:1]))
         data_panels = build_esql_xy_panels(draft, esql_query=esql)
         if not data_panels:
             continue
