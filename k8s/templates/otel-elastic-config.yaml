@@ -1,0 +1,50 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheusremotewrite:
+    endpoint: 0.0.0.0:19291
+
+processors:
+  batch: {}
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  attributes:
+    actions:
+      - key: merchant_id
+        action: delete
+
+exporters:
+  debug:
+    verbosity: basic
+  otlphttp:
+    endpoint: ELASTIC_OTLP_ENDPOINT_PLACEHOLDER
+    tls:
+      insecure: false
+    headers:
+      Authorization: ELASTIC_OTLP_AUTH_PLACEHOLDER
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, otlphttp]
+    metrics:
+      receivers: [otlp, prometheusremotewrite]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [debug, otlphttp]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, otlphttp]

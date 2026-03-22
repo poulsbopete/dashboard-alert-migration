@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+export KUBECONFIG=/root/.kube/config
+
+if ! kubectl get ns merchant-o11y &>/dev/null; then
+  fail-message "Namespace merchant-o11y not found. Re-run track bootstrap."
+fi
+
+mapfile -t pods < <(kubectl get pods -n merchant-o11y --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+if [ "${#pods[@]}" -lt 3 ]; then
+  fail-message "Expected at least 3 Running pods in merchant-o11y. Current: ${#pods[@]}"
+fi
+
+if ! kubectl get deployment otel-collector -n merchant-o11y &>/dev/null; then
+  fail-message "otel-collector deployment missing."
+fi
+
+if ! kubectl get deployment alloy -n merchant-o11y &>/dev/null; then
+  fail-message "alloy deployment missing."
+fi
+
+if ! kubectl get configmap otel-collector-config -n merchant-o11y -o yaml | grep -q "otlphttp"; then
+  fail-message "OTLP HTTP exporter not present in otel-collector-config. Run: cd /root/workshop && ./scripts/apply_elastic_otlp.sh"
+fi
+
+kubectl wait --for=condition=available deployment/payment-simulator -n merchant-o11y --timeout=120s
+kubectl wait --for=condition=available deployment/alloy -n merchant-o11y --timeout=120s
+
+echo "Lab 1 checks passed."

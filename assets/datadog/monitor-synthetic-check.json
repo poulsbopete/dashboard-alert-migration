@@ -1,0 +1,12 @@
+{
+  "name": "[Workshop] Synthetic payment API check",
+  "type": "service check",
+  "query": "\"http.can_connect\".over(\"url:https://payments.example/v1/payments\").last(2).count_by_status()",
+  "message": "Synthetic checks translate to Elastic Synthetics or uptime rules depending on edition.",
+  "tags": ["env:workshop", "synthetics:true"],
+  "options": {
+    "thresholds": {
+      "critical": 1
+    }
+  }
+}

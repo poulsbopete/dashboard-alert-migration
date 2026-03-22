@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+/opt/workshop-venv/
+.env
+.elastic-credentials
+*.log
+build/
+.DS_Store
+k8s/otel-collector-elastic-secret.yaml

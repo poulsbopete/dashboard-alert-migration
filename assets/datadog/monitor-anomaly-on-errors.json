@@ -1,0 +1,12 @@
+{
+  "name": "[Workshop] Anomaly detection on payment errors",
+  "type": "anomaly alert",
+  "query": "avg(last_4h):anomalies(avg:payment.errors{*} , 'basic', 3, direction='both', alert_window='last_15m', interval=60, count_default_zero='true') >= 1",
+  "message": "Datadog anomaly monitors are a good fit for Elastic ML jobs + anomaly rules when ML is enabled.",
+  "tags": ["env:workshop", "ml:true"],
+  "options": {
+    "thresholds": {
+      "critical": 1
+    }
+  }
+}

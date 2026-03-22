@@ -1,0 +1,12 @@
+{
+  "name": "[Workshop] p95 latency regression",
+  "type": "query alert",
+  "query": "avg(last_10m):p95:trace.http.request.duration{service:payment-simulator} > 1.5",
+  "message": "Latency SLO burn. In Elastic, map to APM transaction latency or PromQL histogram_quantile equivalent.",
+  "tags": ["env:workshop", "slo:latency"],
+  "options": {
+    "thresholds": {
+      "critical": 1.5
+    }
+  }
+}

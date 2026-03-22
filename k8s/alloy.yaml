@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: merchant-o11y
+data:
+  config.river: |
+    prometheus.scrape "merchant_services" {
+      scrape_interval = "10s"
+      scrape_timeout  = "5s"
+      targets = [
+        { "__address__" = "payment-simulator.merchant-o11y.svc.cluster.local:8080", "job" = "payment-simulator" },
+      ]
+      metrics_path = "/metrics"
+      forward_to     = [prometheus.remote_write.otel.receiver]
+    }
+
+    prometheus.remote_write "otel" {
+      endpoint {
+        url = "http://otel-collector.merchant-o11y.svc.cluster.local:19291/api/v1/write"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: merchant-o11y
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.4.2
+          args:
+            - run
+            - /etc/alloy/config.river
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - containerPort: 12345
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 12345
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: merchant-o11y
+spec:
+  ports:
+    - port: 12345
+      targetPort: 12345
+  selector:
+    app: alloy

@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cardinality-stress
+  namespace: merchant-o11y
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: cardinality-stress
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cardinality-stress
+  namespace: merchant-o11y
+  labels:
+    workshop.lab: cardinality
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: cardinality-stress
+  template:
+    metadata:
+      labels:
+        app: cardinality-stress
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: app
+          image: payment-sim:workshop
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.merchant-o11y.svc.cluster.local:4317
+            - name: OTEL_SERVICE_NAME
+              value: cardinality-stress
+            - name: HIGH_CARD_MERCHANTS
+              value: "50000"
+            - name: METRICS_ONLY
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

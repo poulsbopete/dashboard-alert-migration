@@ -1,0 +1,40 @@
+slug: paypal-elastic-serverless-migration
+id: REPLACE_WITH_INSTRUQT_TRACK_ID
+type: track
+title: PayPal-Style Observability Migration to Elastic Serverless
+teaser: Migrate Grafana (Prometheus/Alloy) and Datadog-style monitors into Elastic Serverless with OpenTelemetry and Agent Skills.
+description: |
+  Hands-on migration workshop simulating a large-scale merchant payments platform. You deploy lightweight Kubernetes
+  (k3s), OpenTelemetry Collector, Grafana Alloy, and a sample payment service emitting metrics, logs, and traces.
+  Labs cover Grafana dashboard migration (PromQL and Elastic-native paths), Datadog-style monitor conversion, Agent
+  Skills automation, high-cardinality optimization, and unified correlation in Elastic Observability Serverless.
+
+  **Note:** After pulling this repository, run `instruqt track create` or assign a real `id` and `owner` before pushing
+  to the Instruqt platform. This track is modeled on the structure of `elastic-autonomous-observability` but is a
+  standalone, open-source artifact (the upstream track is not publicly cloneable).
+
+icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
+tags:
+  - elastic
+  - observability
+  - opentelemetry
+  - kubernetes
+  - serverless
+owner: elastic
+developers: []
+maintenance: false
+show_timer: true
+skipping_enabled: true
+idle_timeout: 600
+timelimit: 14400
+lab_config:
+  extend_ttl: 3600
+  sidebar_enabled: true
+  feedback_recap_enabled: true
+  feedback_tab_enabled: true
+  loadingMessages: true
+  theme:
+    name: modern-dark
+  default_layout: AssignmentRight
+  default_layout_sidebar_size: 35
+  override_challenge_layout: false

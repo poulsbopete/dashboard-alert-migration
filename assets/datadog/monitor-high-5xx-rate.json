@@ -1,0 +1,13 @@
+{
+  "name": "[Workshop] High 5xx rate on payment-simulator",
+  "type": "query alert",
+  "query": "avg(last_5m):sum:trace.http.request.errors{service:payment-simulator}.as_count() > 25",
+  "message": "Alert fatigue candidate: paging on-call for any spike. Migrate to Elastic threshold + flapping controls.",
+  "tags": ["env:workshop", "team:merchant-platform"],
+  "options": {
+    "notify_no_data": false,
+    "thresholds": {
+      "critical": 25
+    }
+  }
+}

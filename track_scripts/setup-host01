@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euxo pipefail
+
+until [ -f /opt/instruqt/bootstrap/host-bootstrap-completed ]; do
+  sleep 1
+done
+
+TRACK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export WORKSHOP_ROOT="${WORKSHOP_ROOT:-$TRACK_ROOT}"
+ln -sfn "$TRACK_ROOT" /root/workshop
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base
+
+if ! command -v docker &>/dev/null; then
+  curl -fsSL https://get.docker.com | sh
+fi
+
+python3 -m venv /opt/workshop-venv
+/opt/workshop-venv/bin/pip install --upgrade pip
+/opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
+
+mkdir -p /root/.kube
+cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
+chmod 600 /root/.kube/config
+export KUBECONFIG=/root/.kube/config
+
+kubectl apply -f "$TRACK_ROOT/k8s/00-namespace.yaml"
+
+docker build -t payment-sim:workshop "$TRACK_ROOT/apps/payment-simulator"
+docker save payment-sim:workshop | k3s ctr images import -
+
+kubectl apply -f "$TRACK_ROOT/k8s/"
+
+echo "WORKSHOP_ROOT=$TRACK_ROOT" >>/root/.bashrc
+echo "export PATH=/opt/workshop-venv/bin:\$PATH" >>/root/.bashrc
+echo "export KUBECONFIG=/root/.kube/config" >>/root/.bashrc
+
+kubectl wait --for=condition=available deployment/payment-simulator -n merchant-o11y --timeout=300s || true
+kubectl wait --for=condition=available deployment/otel-collector -n merchant-o11y --timeout=300s || true
+kubectl wait --for=condition=available deployment/alloy -n merchant-o11y --timeout=300s || true
+
+find "$TRACK_ROOT" -type f \( -name 'setup-host01' -o -name 'check-host01' -o -name 'solve-host01' -o -name 'cleanup-host01' \) -exec chmod +x {} \;
+
+echo "Track bootstrap complete."

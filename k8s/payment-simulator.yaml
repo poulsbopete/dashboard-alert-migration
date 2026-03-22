@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-simulator
+  namespace: merchant-o11y
+  labels:
+    app: payment-simulator
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: payment-simulator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-simulator
+  namespace: merchant-o11y
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-simulator
+  template:
+    metadata:
+      labels:
+        app: payment-simulator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: app
+          image: payment-sim:workshop
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.merchant-o11y.svc.cluster.local:4317
+            - name: OTEL_SERVICE_NAME
+              value: payment-simulator
+            - name: OTEL_TRACES_SAMPLER
+              value: parentbased_traceidratio
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.5"
+            - name: HIGH_CARD_MERCHANTS
+              value: "0"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15

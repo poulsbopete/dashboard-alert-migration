@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+cd /root/workshop
+count="$(find build/elastic-alerts -maxdepth 1 -type f -name '*-elastic.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${count:-0}" -lt 4 ]; then
+  fail-message "Expected 4 Elastic alert drafts in build/elastic-alerts (found: ${count:-0})."
+fi
