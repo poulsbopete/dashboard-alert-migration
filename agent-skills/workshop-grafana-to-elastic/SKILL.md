@@ -6,7 +6,7 @@ description: >
   and Kibana Dashboards API publishing.
 metadata:
   author: workshop
-  version: 0.2.7
+  version: 0.2.8
 ---
 
 # Grafana → Elastic (workshop)
@@ -30,7 +30,7 @@ cd /root/workshop && source ~/.bashrc
 ```
 
 Converts **20** Grafana exports, runs **`tools/seed_workshop_telemetry.py`** ( **`@timestamp`** for ES|QL ), then publishes via **`tools/publish_grafana_drafts_kibana.py`**
-(**`POST /api/dashboards?apiVersion=1`**: Markdown + **mixed Lens** — line, area, bar, metric, breakdown, optional **AVG(workshop.requests.rate)**; uniform lines as API fallback; **`WORKSHOP_SIMPLE_LENS=1`** to disable mixing).
+(**`POST /api/dashboards?apiVersion=1`**: Markdown + **mixed Lens** — pads short drafts via **`WORKSHOP_MIN_LENS_PANELS`** (default **8**) / **`WORKSHOP_MAX_LENS_PANELS`** (default **12**); **`WORKSHOP_SIMPLE_LENS=1`** disables mixing).
 
 ## Path B — Laptop + Cursor (same flow as Lab 1 assignment)
 

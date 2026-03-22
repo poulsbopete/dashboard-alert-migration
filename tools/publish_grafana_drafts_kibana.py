@@ -10,8 +10,9 @@ fail validation, the publisher falls back to **uniform line** charts only. **`WO
 **Probes:** **`logs-*`**, **`metrics-*`**, workshop streams, unions, then **`traces-*`**. Override with **`WORKSHOP_ESQL_FROM`**.
 PromQL in drafts is **not** executed.
 
-**Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MAX_LENS_PANELS`**,
-**`WORKSHOP_ESQL_FROM`**, **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
+**Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MIN_LENS_PANELS`**
+(pad short Grafana drafts so more mixed charts appear), **`WORKSHOP_MAX_LENS_PANELS`**, **`WORKSHOP_SIMPLE_LENS`**, **`WORKSHOP_ESQL_FROM`**,
+**`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -104,9 +105,11 @@ def markdown_for_canvas(description: str) -> str:
     """Non-empty Markdown for a dashboard panel so the canvas is not blank."""
     header = """## Grafana → Elastic (import draft)
 
-**Panels** mix **ES|QL** **line**, **area**, **bar**, **metric**, and **breakdown** charts (not PromQL). The publisher rotates queries
-by Grafana panel slot using the same resolved `FROM` (try order: `logs-*`, `metrics-*`, workshop streams, unions, `traces-*`).
-Set **WORKSHOP_ESQL_FROM** to force one pattern; **WORKSHOP_SIMPLE_LENS=1** forces simple duplicate line charts only.
+**Panels** mix **ES|QL** **line**, **area**, **bar**, **metric**, and **breakdown** charts (not PromQL). Short Grafana exports are **padded**
+to **WORKSHOP_MIN_LENS_PANELS** (default **8**) up to **WORKSHOP_MAX_LENS_PANELS** (default **12**) so you see more chart types.
+**Traces (no lab restart):** `cd /root/workshop && git pull && source ~/.bashrc` → **`python3 tools/seed_workshop_telemetry.py`**
+(writes **traces-workshop-default**). Optionally **`export WORKSHOP_ESQL_FROM=traces-workshop-default`** (or **`traces-*`**) then re-run
+**`python3 tools/publish_grafana_drafts_kibana.py`**. **WORKSHOP_SIMPLE_LENS=1** = duplicate line charts only.
 
 ---
 
@@ -158,13 +161,42 @@ def _plain_preview_from_markdown(md: str) -> str:
     return (p[:2000].strip() or "Grafana migration draft — add Lens panels via Edit.")
 
 
-def _max_lens_panels() -> int:
-    raw = (os.environ.get("WORKSHOP_MAX_LENS_PANELS") or "6").strip()
+def _min_lens_panels() -> int:
+    """Pad Grafana drafts (often 2 panels) so we still emit enough Lens slots to cycle templates."""
+    raw = (os.environ.get("WORKSHOP_MIN_LENS_PANELS") or "8").strip()
     try:
         n = int(raw)
     except ValueError:
-        n = 6
-    return max(0, min(n, 12))
+        n = 8
+    return max(1, min(n, 24))
+
+
+def _max_lens_panels() -> int:
+    raw = (os.environ.get("WORKSHOP_MAX_LENS_PANELS") or "12").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 12
+    return max(0, min(n, 24))
+
+
+def _expand_draft_panels_for_lens(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = draft.get("panels") or []
+    if not isinstance(raw, list):
+        raw = []
+    panels: list[dict[str, Any]] = [p for p in raw if isinstance(p, dict)]
+    if not panels:
+        panels = [{"title": "Observability volume", "migration": {"promql": ""}}]
+    min_n = _min_lens_panels()
+    max_n = _max_lens_panels()
+    if max_n == 0:
+        return []
+    target_min = min(min_n, max_n)
+    k = 1
+    while len(panels) < target_min:
+        panels.append({"title": f"Workshop insights {k}", "migration": {"promql": ""}})
+        k += 1
+    return panels[:max_n]
 
 
 def _esql_time_bucket_field() -> str:
@@ -192,6 +224,8 @@ def _esql_volume_probe_queries() -> list[str]:
         f"FROM metrics-* "
         f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
         f"FROM logs-workshop-default,metrics-workshop-default "
+        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"FROM logs-workshop-default,metrics-workshop-default,traces-workshop-default "
         f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
         f"FROM logs-*,metrics-* "
         f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
@@ -259,6 +293,16 @@ def _mixed_esql_templates(from_clause: str, tf: str) -> list[dict[str, Any]]:
                 },
                 {
                     "viz": "xy",
+                    "layer": "bar",
+                    "query": (
+                        f"FROM {fc} | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 8"
+                    ),
+                    "x": "h",
+                    "ys": [("c", None)],
+                    "breakdown": None,
+                },
+                {
+                    "viz": "xy",
                     "layer": "line",
                     "query": (
                         f"FROM {fc} | STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend), "
@@ -315,18 +359,13 @@ def build_mixed_esql_panels(
         return []
     if (os.environ.get("WORKSHOP_SIMPLE_LENS") or "").strip() in ("1", "true", "yes"):
         return []
-    max_n = _max_lens_panels()
-    raw_panels = draft.get("panels") or []
-    if not isinstance(raw_panels, list):
-        raw_panels = []
-    if not raw_panels:
-        raw_panels = [{"title": "Observability volume", "migration": {"promql": ""}}]
+    panel_rows = _expand_draft_panels_for_lens(draft)
     tf = time_field
     templates = _mixed_esql_templates(from_clause, tf)
     if not templates:
         return []
     out: list[dict[str, Any]] = []
-    for i, pan in enumerate(raw_panels[:max_n]):
+    for i, pan in enumerate(panel_rows):
         if not isinstance(pan, dict):
             continue
         spec = templates[i % len(templates)]
@@ -387,14 +426,9 @@ def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict
     """
     if (os.environ.get("WORKSHOP_DISABLE_LENS") or "").strip() in ("1", "true", "yes"):
         return []
-    max_n = _max_lens_panels()
-    raw_panels = draft.get("panels") or []
-    if not isinstance(raw_panels, list):
-        raw_panels = []
-    if not raw_panels:
-        raw_panels = [{"title": "Observability volume", "migration": {"promql": ""}}]
+    panel_rows = _expand_draft_panels_for_lens(draft)
     out: list[dict[str, Any]] = []
-    for i, pan in enumerate(raw_panels[:max_n]):
+    for i, pan in enumerate(panel_rows):
         if not isinstance(pan, dict):
             continue
         # Match kibana-dashboards API reference: xy + line layer only (extra keys can 400 on Serverless).
