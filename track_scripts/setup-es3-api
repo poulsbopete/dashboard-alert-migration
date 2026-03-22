@@ -158,8 +158,12 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
 CANDIDATE="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Require Lab 1 Path A script + publisher so we never bind a stale pre-seeded /root/workshop
+# from an older image or bundle (same requirements.txt + assets, missing migration tooling).
 _track_root_ok() {
-  [[ -n "$1" && -f "$1/tools/requirements.txt" && -d "$1/assets/grafana" && -d "$1/assets/datadog" ]]
+  [[ -n "$1" && -f "$1/tools/requirements.txt" && -d "$1/assets/grafana" && -d "$1/assets/datadog" \
+    && -f "$1/scripts/migrate_grafana_dashboards_to_serverless.sh" \
+    && -f "$1/tools/publish_grafana_drafts_kibana.py" ]]
 }
 _pick_root_from_requirements_file() {
   local _req="$1" _r
@@ -170,7 +174,8 @@ _pick_root_from_requirements_file() {
 }
 
 TRACK_ROOT=""
-for r in "${WORKSHOP_ROOT:-}" "${INSTRUQT_TRACK_DIR:-}" "$CANDIDATE" "$(pwd)" "/root/workshop"; do
+# Do not probe /root/workshop here: it may be a leftover directory from an old image; we set it via symlink below.
+for r in "${WORKSHOP_ROOT:-}" "${INSTRUQT_TRACK_DIR:-}" "$CANDIDATE" "$(pwd)"; do
   if _track_root_ok "$r"; then
     TRACK_ROOT="$(cd "$r" && pwd)"
     break
