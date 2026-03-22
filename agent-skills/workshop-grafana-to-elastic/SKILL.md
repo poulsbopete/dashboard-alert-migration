@@ -6,7 +6,7 @@ description: >
   and Kibana Dashboards API publishing.
 metadata:
   author: workshop
-  version: 0.2.8
+  version: 0.2.9
 ---
 
 # Grafana → Elastic (workshop)
@@ -54,7 +54,16 @@ Use **Instruqt Terminal** (secrets in `~/.bashrc`) and **laptop** (clone + Curso
    python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards
    ```
 
-6. **Optional:** prompt the model (with **`kibana-dashboards`**) to **`POST`/`PUT`** dashboards to **`KIBANA_URL`**, or map **PromQL** → **ES|QL** / Lens. Running **`python3 tools/publish_grafana_drafts_kibana.py`** from the clone (with env from Instruqt pasted) applies the same **mixed Lens** layout as Path A. Optional audit trail: **`build/migration-notes/`**.
+6. **Optional — any Grafana JSON (community gallery or export):** Download or export dashboard JSON (e.g. from **[grafana.com/grafana/dashboards](https://grafana.com/grafana/dashboards/)** or **Grafana → Share → Export**). Save under something like **`build/grafana-imports/`** (often **gitignored**; respect **licenses**). Then:
+
+   ```bash
+   python3 tools/grafana_to_elastic.py build/grafana-imports/*.json --out-dir build/elastic-dashboards
+   python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-dashboards
+   ```
+
+   Gallery dashboards assume **Prometheus/Loki/Tempo/etc.**; **`grafana_to_elastic.py`** captures **PromQL** into drafts — refine **ES|QL** and panels in Kibana or with **`kibana-dashboards`** + Cursor.
+
+7. **Optional:** prompt the model (with **`kibana-dashboards`**) to **`POST`/`PUT`** dashboards to **`KIBANA_URL`**, or map **PromQL** → **ES|QL** / Lens. Step **6** already runs the publisher; use the skill for custom layouts. Optional audit trail: **`build/migration-notes/`**.
 
 ## Safety
 

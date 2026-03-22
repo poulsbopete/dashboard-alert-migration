@@ -6,4 +6,5 @@ __pycache__/
 .elastic-credentials
 *.log
 build/
+assets/grafana-imports/
 .DS_Store
