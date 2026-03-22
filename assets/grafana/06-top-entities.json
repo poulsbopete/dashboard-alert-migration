@@ -1,6 +1,6 @@
 {
-  "uid": "05-payment-errors",
-  "title": "Payment Errors",
+  "uid": "06-top-entities",
+  "title": "Top entities by traffic",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(payment_errors_total[5m]))",
+          "expr": "topk(10, sum by (entity_id) (rate(http_requests_total[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -72,7 +72,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(payment_errors_total[5m]))",
+          "expr": "topk(10, sum by (entity_id) (rate(http_requests_total[5m])))",
           "legendFormat": "",
           "refId": "A"
         }

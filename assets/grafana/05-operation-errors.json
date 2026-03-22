@@ -1,6 +1,6 @@
 {
-  "uid": "11-merchant-errors",
-  "title": "Errors by Merchant",
+  "uid": "05-operation-errors",
+  "title": "Operation errors by reason",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (merchant_id) (rate(payment_errors_total[5m]))",
+          "expr": "sum by (reason) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -72,7 +72,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (merchant_id) (rate(payment_errors_total[5m]))",
+          "expr": "sum by (reason) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

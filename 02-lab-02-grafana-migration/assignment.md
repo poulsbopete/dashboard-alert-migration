@@ -1,6 +1,6 @@
 ---
 slug: lab-02-grafana-migration
-id: xd5lzlb8b2ti
+id: 38r5xtybhpsx
 type: challenge
 title: Lab 2 — Grafana migration (Prometheus → Elastic)
 teaser: Treat Grafana JSON as the source of truth for PromQL panels and produce Elastic
@@ -47,7 +47,7 @@ Each output file includes:
 
 In Elastic Observability, PromQL support is surfaced for **Prometheus-compatible** metric workflows. When moving to TSDB-native views, you typically:
 
-- map labels (for example `merchant_id`) to dimensions
+- map labels (for example `entity_id`) to dimensions
 - replace `rate()` / `histogram_quantile()` with time-bucketed aggregations or PromQL-native paths where enabled
 
 Capture one example query from your exports and write a one-paragraph plan in `build/promql-notes.md` (create this file).

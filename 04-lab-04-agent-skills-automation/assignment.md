@@ -1,6 +1,6 @@
 ---
 slug: lab-04-agent-skills-automation
-id: nbcewe3y3az0
+id: ikcfpfmxtuib
 type: challenge
 title: Lab 4 — Agent Skills automation
 teaser: Wire Elastic Agent Skills to CLI migration utilities and (optionally) drive
@@ -10,6 +10,10 @@ enhanced_loading: null
 ---
 
 # Lab 4 — Agent Skills automation
+
+A migration **spike** usually favors **fast iteration**: ship a **CLI** that converts artifacts, then decide what (if
+anything) belongs in product UI later. **AI agents** can sit on the same CLIs and APIs—useful for one-off migrations
+today and for repeatable “migration as code” tomorrow.
 
 ## Why this matters
 

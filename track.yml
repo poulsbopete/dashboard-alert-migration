@@ -1,17 +1,22 @@
-slug: merchant-platform-serverless-migration
-id: bhxh3cg7b4ex
-title: Merchant Platform Observability Migration to Elastic Serverless
-teaser: Migrate Grafana (Prometheus/Alloy) and Datadog-style monitors into Elastic
-  Serverless with OpenTelemetry and Agent Skills.
+slug: elastic-serverless-migration-lab
+id: ueroxxv9yust
+type: track
+title: Grafana & Datadog → Elastic Serverless (migration workshop)
+teaser: Spike-focused track for dashboards and alerts—Prometheus/Grafana, Datadog-style exports, OTLP, and CLI-first
+  automation toward Elastic Observability Serverless.
 description: |
-  Hands-on migration workshop simulating a large-scale merchant payments platform. You deploy lightweight Kubernetes
-  (k3s), OpenTelemetry Collector, Grafana Alloy, and a sample payment service emitting metrics, logs, and traces.
-  Labs cover Grafana dashboard migration (PromQL and Elastic-native paths), Datadog-style monitor conversion, Agent
-  Skills automation, high-cardinality optimization, and unified correlation in Elastic Observability Serverless.
+  This hands-on track mirrors a short **migration spike**: move **Grafana (Prometheus-backed)** dashboards and
+  **Datadog-style** monitors toward **Elastic Observability Serverless**. Elastic’s **native PromQL** support reduces
+  friction for Grafana panels versus a full query-language rewrite; **alerting** still needs pragmatic mapping (for
+  example ES|QL-backed rules, query rules, or ML) because there is not always a one-step “pure ES|QL alert” equivalent
+  for every legacy monitor.
 
-  **Note:** After pulling this repository, run `instruqt track create` or assign a real `id` and `owner` before pushing
-  to the Instruqt platform. This track is modeled on the structure of `elastic-autonomous-observability` but is a
-  standalone, open-source artifact (the upstream track is not publicly cloneable).
+  You will use a **CLI-first** workflow (Python utilities in `tools/`) for fast iteration, optional **AI / Agent
+  Skills** for repeatable operations, and a small **Kubernetes** sandbox (`sample-api`) that emits metrics, logs, and
+  traces through **OpenTelemetry Collector** and **Grafana Alloy**.
+
+  **Note:** This track is modeled on common Instruqt layout conventions. The upstream `elastic-autonomous-observability`
+  track is not publicly cloneable; content here is standalone.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - kubernetes
@@ -38,5 +43,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "17857386518909181882"
+checksum: "18013039470004304541"
 enhanced_loading: false

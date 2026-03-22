@@ -1,6 +1,6 @@
 {
   "uid": "02-request-rate",
-  "title": "Request Rate by Merchant",
+  "title": "Request rate by entity_id",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (merchant_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -72,7 +72,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (merchant_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

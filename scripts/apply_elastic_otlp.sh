@@ -10,10 +10,10 @@ sed \
   -e "s|ELASTIC_OTLP_AUTH_PLACEHOLDER|${AUTH}|g" \
   "$ROOT/k8s/templates/otel-elastic-config.yaml" >"$TMP"
 kubectl create configmap otel-collector-config \
-  --namespace merchant-o11y \
+  --namespace workshop-o11y \
   --from-file=config.yaml="$TMP" \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deployment/otel-collector --namespace merchant-o11y
+kubectl rollout restart deployment/otel-collector --namespace workshop-o11y
 if [ "${WAIT_ROLLOUT:-1}" != "0" ]; then
-  kubectl rollout status deployment/otel-collector --namespace merchant-o11y --timeout=180s
+  kubectl rollout status deployment/otel-collector --namespace workshop-o11y --timeout=180s
 fi

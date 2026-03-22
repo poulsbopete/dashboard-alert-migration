@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: cardinality-stress
-  namespace: merchant-o11y
+  namespace: workshop-o11y
 spec:
   ports:
     - name: http
@@ -15,7 +15,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cardinality-stress
-  namespace: merchant-o11y
+  namespace: workshop-o11y
   labels:
     workshop.lab: cardinality
 spec:
@@ -34,16 +34,16 @@ spec:
     spec:
       containers:
         - name: app
-          image: payment-sim:workshop
+          image: sample-api:workshop
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://otel-collector.merchant-o11y.svc.cluster.local:4317
+              value: http://otel-collector.workshop-o11y.svc.cluster.local:4317
             - name: OTEL_SERVICE_NAME
               value: cardinality-stress
-            - name: HIGH_CARD_MERCHANTS
+            - name: HIGH_CARD_ENTITIES
               value: "50000"
             - name: METRICS_ONLY
               value: "1"

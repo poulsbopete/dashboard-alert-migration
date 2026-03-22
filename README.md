@@ -1,36 +1,49 @@
-# merchant-platform-serverless-migration (Instruqt track)
+# elastic-serverless-migration-lab (Instruqt track)
 
-This repository is a **self-contained Instruqt workshop track** that demonstrates migrating **Grafana (Prometheus via
-Grafana Alloy)** and **Datadog-style monitors** into **Elastic Observability Serverless**, using **OpenTelemetry** and
-optional **Elastic Agent Skills** workflows.
+Self-contained **Instruqt** workshop for a **dashboard and alert migration spike**: from **Grafana (Prometheus via
+Grafana Alloy)** and **Datadog-style** monitor exports toward **Elastic Observability Serverless**, using
+**OpenTelemetry**, **CLI utilities**, and optional **Elastic Agent Skills** / AI agents.
+
+The scenario is intentionally **vendor- and domain-neutral**: a tiny `sample-api` workload exists only to produce
+realistic **metrics, traces, and logs** so you can practice extraction, translation, and governance patterns (including
+**high-cardinality** label handling).
 
 > **Note:** The upstream Instruqt track [`elastic-autonomous-observability`](https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability)
-> is not publicly cloneable. This track mirrors common Instruqt layout conventions (`track.yml`, `config.yml`,
-> `track_scripts/`, `NN-lab-*/assignment.md`) while implementing a **fictional large-scale merchant platform** scenario.
+> is not publicly cloneable. This track follows the same structural conventions (`track.yml`, `config.yml`,
+> `track_scripts/`, `NN-lab-*/assignment.md`).
+
+## What this aligns with (spike goals)
+
+- **Grafana → Elastic**: leverage **PromQL** continuity where Elastic exposes Prometheus-compatible querying—often
+  simpler than a full rewrite to another DSL.
+- **Datadog → Elastic**: expect **more tailoring for alerting** (threshold rules, query rules, ML)—plan for a **short-term
+  compromise** while standards mature.
+- **Tooling**: **CLI-first** migration helpers under `tools/` for speed; **Agent Skills** for repeatable, automatable steps.
+- **AI**: optional agent-driven flows on top of the same artifacts.
 
 ## Layout
 
 | Path | Purpose |
 | --- | --- |
 | `track.yml` / `config.yml` | Instruqt metadata + `instruqt/k3s-v1-34-5` sandbox host |
-| `track_scripts/` | Track bootstrap: build `payment-simulator`, `kubectl apply`, venv |
-| `01-lab-01-environment-setup/` … `06-lab-06-unified-observability/` | Labs (`assignment.md`, `Instructions.md`, lifecycle scripts) |
-| `k8s/` | Kubernetes manifests (OTEL Collector, Alloy, workloads) |
-| `apps/payment-simulator/` | FastAPI service (metrics + traces) |
-| `assets/grafana/` | 12 sample Grafana dashboards (generated + committed) |
+| `track_scripts/` | Bootstrap: build `sample-api` image, `kubectl apply`, Python venv |
+| `01-lab-01-environment-setup/` … `06-lab-06-unified-observability/` | Labs |
+| `k8s/` | Namespaced manifests (`workshop-o11y`): OTEL Collector, Alloy, workloads |
+| `apps/sample-api/` | Minimal HTTP API + Prometheus metrics + OTEL traces |
+| `assets/grafana/` | 12 sample Grafana JSON exports |
 | `assets/datadog/` | Sample monitor JSON |
-| `tools/` | CLIs: Grafana → Elastic drafts, Datadog → Elastic alert drafts |
-| `agent-skills/` | Workshop-local skills that wrap the CLIs and point to upstream Agent Skills |
+| `tools/` | `grafana_to_elastic.py`, `datadog_to_elastic_alert.py` |
+| `agent-skills/` | Thin workshop skills pointing at the CLIs + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
 
 ## Facilitator prerequisites
 
-- Elastic Cloud **Observability** Serverless project and OTLP endpoint + API key for learners (or Instruqt secrets)
-- Outbound network from the sandbox to Elastic Cloud (typical Instruqt default)
+- Elastic **Observability** Serverless project: OTLP endpoint + API key for learners (or Instruqt secrets)
+- Outbound access from the sandbox to Elastic Cloud
 
 ## Local smoke test (optional)
 
 ```bash
-docker build -t payment-sim:workshop apps/payment-simulator
+docker build -t sample-api:workshop apps/sample-api
 python3 scripts/generate_grafana_dashboards.py
 python3 tools/grafana_to_elastic.py assets/grafana/01-overview.json | head
 ```
@@ -38,11 +51,10 @@ python3 tools/grafana_to_elastic.py assets/grafana/01-overview.json | head
 ## Publishing to Instruqt
 
 1. Install the [Instruqt CLI](https://docs.instruqt.com/reference/cli/commands) and authenticate.
-2. Ensure `track.yml` has the correct `id` for your Instruqt track (created on first push or pulled with `instruqt track pull`).
-3. Set `owner` / `developers` to match your organization.
-4. Push the track directory with `instruqt track push` (see Instruqt docs for your workflow).
+2. Keep `track.yml` in sync with your remote track (`instruqt track pull` / `push`).
+3. Run `instruqt track validate`, then `instruqt track push`.
 
 ## Agent Skills
 
-- Upstream catalog: [github.com/elastic/agent-skills](https://github.com/elastic/agent-skills)
-- This repo adds thin **workshop skills** under `agent-skills/` that document how to run the migration CLIs.
+- Upstream: [github.com/elastic/agent-skills](https://github.com/elastic/agent-skills)
+- Workshop wrappers: `agent-skills/workshop-grafana-to-elastic/`, `agent-skills/workshop-datadog-to-elastic-alerts/`

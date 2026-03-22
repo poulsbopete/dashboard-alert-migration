@@ -16,7 +16,7 @@ processors:
     spike_limit_mib: 100
   attributes:
     actions:
-      - key: merchant_id
+      - key: entity_id
         action: delete
 
 exporters:

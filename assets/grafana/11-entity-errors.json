@@ -1,6 +1,6 @@
 {
-  "uid": "06-top-merchants",
-  "title": "Top Merchants by Traffic",
+  "uid": "11-entity-errors",
+  "title": "Errors by entity_id",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (merchant_id) (rate(http_requests_total[5m])))",
+          "expr": "sum by (entity_id) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -72,7 +72,7 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (merchant_id) (rate(http_requests_total[5m])))",
+          "expr": "sum by (entity_id) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

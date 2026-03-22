@@ -58,7 +58,7 @@ def promql_to_esql_note(expr: str) -> str:
         )
     if "histogram_quantile" in expr:
         return "histogram_quantile in PromQL maps to percentile aggregation over histogram buckets in ES|QL."
-    return "Map label selectors to dimensions (e.g., merchant_id) and use time-bucketed aggregations."
+    return "Map label selectors to dimensions (e.g., entity_id) and use time-bucketed aggregations."
 
 
 def build_elastic_dashboard(title: str, queries: list[dict[str, str]]) -> dict[str, Any]:
@@ -83,7 +83,7 @@ def build_elastic_dashboard(title: str, queries: list[dict[str, str]]) -> dict[s
         "title": f"{title} (Grafana import draft)",
         "panels": panels,
         "time_range": {"from": "now-24h", "to": "now"},
-        "tags": ["workshop", "grafana-import", "merchant-platform-serverless-migration"],
+        "tags": ["workshop", "grafana-import", "elastic-serverless-migration-lab"],
     }
 
 

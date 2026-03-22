@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: payment-simulator
-  namespace: merchant-o11y
+  name: sample-api
+  namespace: workshop-o11y
   labels:
-    app: payment-simulator
+    app: sample-api
 spec:
   ports:
     - name: http
@@ -14,22 +14,22 @@ spec:
       port: 8080
       targetPort: 8080
   selector:
-    app: payment-simulator
+    app: sample-api
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: payment-simulator
-  namespace: merchant-o11y
+  name: sample-api
+  namespace: workshop-o11y
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: payment-simulator
+      app: sample-api
   template:
     metadata:
       labels:
-        app: payment-simulator
+        app: sample-api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
@@ -37,20 +37,20 @@ spec:
     spec:
       containers:
         - name: app
-          image: payment-sim:workshop
+          image: sample-api:workshop
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://otel-collector.merchant-o11y.svc.cluster.local:4317
+              value: http://otel-collector.workshop-o11y.svc.cluster.local:4317
             - name: OTEL_SERVICE_NAME
-              value: payment-simulator
+              value: sample-api
             - name: OTEL_TRACES_SAMPLER
               value: parentbased_traceidratio
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.5"
-            - name: HIGH_CARD_MERCHANTS
+            - name: HIGH_CARD_ENTITIES
               value: "0"
           readinessProbe:
             httpGet:

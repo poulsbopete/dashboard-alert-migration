@@ -9,18 +9,30 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets" / "grafana"
 
 QUERIES = [
-    ("01-overview.json", "Merchant Overview", "sum(rate(http_requests_total[5m]))"),
-    ("02-request-rate.json", "Request Rate by Merchant", "sum by (merchant_id) (rate(http_requests_total[5m]))"),
-    ("03-latency-p95.json", "Latency p95", "histogram_quantile(0.95, sum by (le, merchant_id) (rate(http_request_duration_seconds_bucket[5m])))"),
-    ("04-error-rate.json", "Error Rate", "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))"),
-    ("05-payment-errors.json", "Payment Errors", "sum by (reason) (rate(payment_errors_total[5m]))"),
-    ("06-top-merchants.json", "Top Merchants by Traffic", "topk(10, sum by (merchant_id) (rate(http_requests_total[5m])))"),
-    ("07-post-path.json", "POST /v1/payments Volume", "sum(rate(http_requests_total{path=\"/v1/payments\"}[5m]))"),
-    ("08-latency-by-path.json", "Latency by Path", "histogram_quantile(0.99, sum by (le, path) (rate(http_request_duration_seconds_bucket[5m])))"),
-    ("09-status-codes.json", "Status Codes", "sum by (status) (rate(http_requests_total[5m]))"),
-    ("10-slo-burn.json", "SLO-style Availability", "1 - (sum(rate(http_requests_total{status=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))"),
-    ("11-merchant-errors.json", "Errors by Merchant", "sum by (merchant_id) (rate(payment_errors_total[5m]))"),
-    ("12-heatmap-style.json", "Request Mix", "sum by (method, status) (rate(http_requests_total[5m]))"),
+    ("01-overview.json", "Traffic overview", "sum(rate(http_requests_total[5m]))"),
+    ("02-request-rate.json", "Request rate by entity_id", "sum by (entity_id) (rate(http_requests_total[5m]))"),
+    (
+        "03-latency-p95.json",
+        "Latency p95",
+        "histogram_quantile(0.95, sum by (le, entity_id) (rate(http_request_duration_seconds_bucket[5m])))",
+    ),
+    ("04-error-rate.json", "Error rate", "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))"),
+    ("05-operation-errors.json", "Operation errors by reason", "sum by (reason) (rate(operation_errors_total[5m]))"),
+    ("06-top-entities.json", "Top entities by traffic", "topk(10, sum by (entity_id) (rate(http_requests_total[5m])))"),
+    ("07-post-path.json", "POST /v1/invoke volume", "sum(rate(http_requests_total{path=\"/v1/invoke\"}[5m]))"),
+    (
+        "08-latency-by-path.json",
+        "Latency by path",
+        "histogram_quantile(0.99, sum by (le, path) (rate(http_request_duration_seconds_bucket[5m])))",
+    ),
+    ("09-status-codes.json", "Status codes", "sum by (status) (rate(http_requests_total[5m]))"),
+    (
+        "10-slo-burn.json",
+        "SLO-style availability",
+        "1 - (sum(rate(http_requests_total{status=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))",
+    ),
+    ("11-entity-errors.json", "Errors by entity_id", "sum by (entity_id) (rate(operation_errors_total[5m]))"),
+    ("12-heatmap-style.json", "Request mix", "sum by (method, status) (rate(http_requests_total[5m]))"),
 ]
 
 

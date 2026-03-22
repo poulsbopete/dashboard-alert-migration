@@ -64,7 +64,7 @@ def map_threshold_monitor(mon: dict[str, Any]) -> dict[str, Any]:
             "timeWindowUnit": "m",
             "size": 100,
         },
-        "tags": ["workshop", "datadog-import", "merchant-platform-serverless-migration"],
+        "tags": ["workshop", "datadog-import", "elastic-serverless-migration-lab"],
         "migration": {
             "source": "datadog",
             "original_query": query,

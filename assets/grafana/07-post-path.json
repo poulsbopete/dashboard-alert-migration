@@ -1,6 +1,6 @@
 {
   "uid": "07-post-path",
-  "title": "POST /v1/payments Volume",
+  "title": "POST /v1/invoke volume",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -39,7 +39,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{path=\"/v1/payments\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{path=\"/v1/invoke\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -72,7 +72,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{path=\"/v1/payments\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{path=\"/v1/invoke\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

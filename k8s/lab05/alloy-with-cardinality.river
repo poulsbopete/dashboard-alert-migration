@@ -1,9 +1,9 @@
-prometheus.scrape "merchant_services" {
+prometheus.scrape "workshop_targets" {
   scrape_interval = "10s"
   scrape_timeout  = "5s"
   targets = [
-    { "__address__" = "payment-simulator.merchant-o11y.svc.cluster.local:8080", "job" = "payment-simulator" },
-    { "__address__" = "cardinality-stress.merchant-o11y.svc.cluster.local:8080", "job" = "cardinality-stress" },
+    { "__address__" = "sample-api.workshop-o11y.svc.cluster.local:8080", "job" = "sample-api" },
+    { "__address__" = "cardinality-stress.workshop-o11y.svc.cluster.local:8080", "job" = "cardinality-stress" },
   ]
   metrics_path = "/metrics"
   forward_to     = [prometheus.remote_write.otel.receiver]
@@ -11,6 +11,6 @@ prometheus.scrape "merchant_services" {
 
 prometheus.remote_write "otel" {
   endpoint {
-    url = "http://otel-collector.merchant-o11y.svc.cluster.local:19291/api/v1/write"
+    url = "http://otel-collector.workshop-o11y.svc.cluster.local:19291/api/v1/write"
   }
 }

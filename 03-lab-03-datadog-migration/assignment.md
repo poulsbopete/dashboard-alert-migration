@@ -1,6 +1,6 @@
 ---
 slug: lab-03-datadog-migration
-id: lkydpxmtzmxt
+id: moa89r2tzixu
 type: challenge
 title: Lab 3 — Datadog-style monitors → Elastic alerting
 teaser: Export JSON monitors, translate mentally to Elastic rules, and emit Kibana

@@ -1,8 +1,8 @@
 {
-  "name": "[Workshop] Synthetic payment API check",
+  "name": "[Workshop] Synthetic HTTP check (sample endpoint)",
   "type": "service check",
-  "query": "\"http.can_connect\".over(\"url:https://payments.example/v1/payments\").last(2).count_by_status()",
-  "message": "Synthetic checks translate to Elastic Synthetics or uptime rules depending on edition.",
+  "query": "\"http.can_connect\".over(\"url:https://api.workshop.example/v1/invoke\").last(2).count_by_status()",
+  "message": "Synthetics map to Elastic Synthetics or uptime-style rules depending on edition and packaging.",
   "tags": ["env:workshop", "synthetics:true"],
   "options": {
     "thresholds": {

@@ -2,4 +2,4 @@
 set -euxo pipefail
 
 export KUBECONFIG=/root/.kube/config
-kubectl delete namespace merchant-o11y --ignore-not-found=true || true
+kubectl delete namespace workshop-o11y --ignore-not-found=true || true

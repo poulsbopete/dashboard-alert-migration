@@ -1,9 +1,9 @@
 {
-  "name": "[Workshop] High 5xx rate on payment-simulator",
+  "name": "[Workshop] High 5xx rate on sample-api",
   "type": "query alert",
-  "query": "avg(last_5m):sum:trace.http.request.errors{service:payment-simulator}.as_count() > 25",
-  "message": "Alert fatigue candidate: paging on-call for any spike. Migrate to Elastic threshold + flapping controls.",
-  "tags": ["env:workshop", "team:merchant-platform"],
+  "query": "avg(last_5m):sum:trace.http.request.errors{service:sample-api}.as_count() > 25",
+  "message": "Noisy threshold example: migrate to Elastic with flapping controls and clearer ownership.",
+  "tags": ["env:workshop", "team:platform"],
   "options": {
     "notify_no_data": false,
     "thresholds": {

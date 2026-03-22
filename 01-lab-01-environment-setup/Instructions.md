@@ -1,35 +1,24 @@
 # Lab 1 — Environment setup
 
-This file duplicates the learner-facing steps from `assignment.md` without Instruqt front matter.
+Steps mirror `assignment.md` (Instruqt assignment tab is authoritative).
 
 ## Goal
 
-Deploy the **Kubernetes** telemetry path (OpenTelemetry Collector + Grafana Alloy + `payment-simulator`) and connect **Elastic Observability Serverless** using **OTLP**.
+Run **OpenTelemetry Collector** + **Grafana Alloy** + **`sample-api`**, then export to **Elastic Observability Serverless**
+over **OTLP**.
 
-## Steps
+## Commands (summary)
 
-1. Create or choose an Elastic **Observability** Serverless project and obtain OTLP endpoint + API key.
+```bash
+export ELASTIC_OTLP_ENDPOINT="https://<your-endpoint>.otlp.observability.elastic.cloud:443"
+export ELASTIC_OTLP_AUTH="ApiKey <base64-api-key>"
 
-   ```bash
-   export ELASTIC_OTLP_ENDPOINT="https://<your-endpoint>.otlp.observability.elastic.cloud:443"
-   export ELASTIC_OTLP_AUTH="ApiKey <base64-api-key>"
-   ```
+cd /root/workshop
+chmod +x scripts/apply_elastic_otlp.sh
+./scripts/apply_elastic_otlp.sh
 
-2. Apply the Elastic OTLP pipeline:
+chmod +x scripts/generate_traffic.sh
+./scripts/generate_traffic.sh 200
+```
 
-   ```bash
-   cd /root/workshop
-   chmod +x scripts/apply_elastic_otlp.sh
-   ./scripts/apply_elastic_otlp.sh
-   ```
-
-3. Generate traffic:
-
-   ```bash
-   chmod +x scripts/generate_traffic.sh
-   ./scripts/generate_traffic.sh 200
-   ```
-
-4. Validate in Kibana: APM service `payment-simulator`, metrics, and traces for `POST /v1/payments`.
-
-For automated checks, use the Instruqt **Check** button (see `check-host01`).
+Validate in Kibana: APM service **`sample-api`**, traces for **`POST /v1/invoke`**.
