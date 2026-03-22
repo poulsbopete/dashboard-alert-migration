@@ -312,6 +312,15 @@ if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
     printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$MOTLP_ENDPOINT"
     echo "# Restart Alloy + emitter: ./scripts/start_workshop_otel.sh"
   } >>/root/.bashrc
+elif [[ -n "$ES_URL" ]] && [[ "$ES_URL" == *".es."* ]]; then
+  _der_otlp="${ES_URL%/}"
+  _der_otlp="${_der_otlp//.es./.ingest.}"
+  {
+    echo ""
+    echo "# WORKSHOP_OTLP_ENDPOINT derived from ES_URL (.es.→.ingest.) — same host as Kibana Add data → OpenTelemetry on Serverless"
+    printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$_der_otlp"
+    echo "# Restart Alloy + emitter: ./scripts/start_workshop_otel.sh"
+  } >>/root/.bashrc
 fi
 
 find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o -name 'solve-es3-api' -o -name 'cleanup-es3-api' \) -exec chmod +x {} \;

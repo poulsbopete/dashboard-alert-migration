@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
 # Start Grafana Alloy + Python OTLP emitter (same pipeline as track bootstrap when mOTLP URL is known).
-# Prerequisites: source ~/.bashrc — need ES_API_KEY (or ES_PASSWORD) and WORKSHOP_OTLP_ENDPOINT.
+# Prerequisites: source ~/.bashrc — ES_API_KEY (or ES_PASSWORD for seed only; OTLP needs API key).
+# WORKSHOP_OTLP_ENDPOINT: if unset, derived from ES_URL (.es.→.ingest.) or KIBANA_URL (.kb.→.ingest.) on Serverless.
+# Disable auto-derive: WORKSHOP_DERIVE_OTLP_FROM_ES=0
 set -euo pipefail
 cd /root/workshop
 # shellcheck disable=SC1090
 source ~/.bashrc
 
+if [ -z "${WORKSHOP_OTLP_ENDPOINT:-}" ] && [ "${WORKSHOP_DERIVE_OTLP_FROM_ES:-1}" != "0" ]; then
+  _mot=""
+  if [ -n "${ES_URL:-}" ] && [[ "$ES_URL" == *".es."* ]]; then
+    _mot="${ES_URL%/}"
+    _mot="${_mot//.es./.ingest.}"
+  elif [ -n "${KIBANA_URL:-}" ] && [[ "$KIBANA_URL" == *".kb."* ]]; then
+    _mot="${KIBANA_URL%/}"
+    _mot="${_mot//.kb./.ingest.}"
+  fi
+  if [ -n "$_mot" ]; then
+    export WORKSHOP_OTLP_ENDPOINT="$_mot"
+    echo "INFO: WORKSHOP_OTLP_ENDPOINT was unset — derived Serverless managed OTLP host:" >&2
+    echo "      $WORKSHOP_OTLP_ENDPOINT" >&2
+    echo "      (Copy from Kibana → Add data → OpenTelemetry to override, or set WORKSHOP_DERIVE_OTLP_FROM_ES=0 to force manual.)" >&2
+  fi
+fi
+
 if [ -z "${WORKSHOP_OTLP_ENDPOINT:-}" ]; then
-  echo "ERROR: WORKSHOP_OTLP_ENDPOINT is not set." >&2
-  echo "Copy the managed OTLP (mOTLP) URL from Kibana → Add data → OpenTelemetry (see Elastic docs)." >&2
+  echo "ERROR: WORKSHOP_OTLP_ENDPOINT is not set and could not be derived from ES_URL / KIBANA_URL." >&2
+  echo "Copy the managed OTLP (mOTLP) base URL from Kibana → Add data → OpenTelemetry (HTTPS host, no /v1/traces)." >&2
   echo "Same flow as track https://play.instruqt.com/manage/elastic/tracks/elastic-autonomous-observability/sandbox" >&2
   exit 1
 fi

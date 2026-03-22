@@ -14,7 +14,12 @@ fi
 if [ -n "${WORKSHOP_OTLP_ENDPOINT:-}" ]; then
   echo "WORKSHOP_OTLP_ENDPOINT: set (Alloy can export to Elastic mOTLP)"
 else
-  echo "WORKSHOP_OTLP_ENDPOINT: NOT SET — track setup may have skipped Alloy; copy URL from Kibana → Add data → OpenTelemetry"
+  echo "WORKSHOP_OTLP_ENDPOINT: NOT SET in env — ./scripts/start_workshop_otel.sh derives it from ES_URL (.es.→.ingest.) or KIBANA_URL on Serverless"
+  if [ -n "${ES_URL:-}" ] && [[ "$ES_URL" == *".es."* ]]; then
+    _d="${ES_URL%/}"
+    _d="${_d//.es./.ingest.}"
+    echo "  (would be: $_d)"
+  fi
 fi
 if [ -n "${WORKSHOP_OTLP_AUTH_HEADER:-}" ] || [ -n "${ES_API_KEY:-}" ]; then
   echo "API key for OTLP: present (ES_API_KEY or WORKSHOP_OTLP_AUTH_HEADER)"

@@ -43,7 +43,7 @@ Lab 1 **Path A** publishes dashboards via the **Dashboards HTTP API** (`POST /ap
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |
 | `tools/otel_workshop_emitter.py` | Sends OTLP **traces** + **metrics** to local Alloy (`127.0.0.1:4318`) |
 | `tools/datadog_otel_to_elastic.py` / `scripts/send_datadog_otel.sh` | **Datadog-style** OTLP traces + metrics + **logs** → Alloy → Elastic **mOTLP** |
-| `scripts/start_workshop_otel.sh` | Restart Alloy + emitter (**`WORKSHOP_OTLP_ENDPOINT`** + **`ES_API_KEY`** from `~/.bashrc`) |
+| `scripts/start_workshop_otel.sh` | Restart Alloy + emitter; **`WORKSHOP_OTLP_ENDPOINT`** from `~/.bashrc` or **derived** from **`ES_URL`** (`.es.`→`.ingest.`) / **`KIBANA_URL`** (`.kb.`→`.ingest.`) on Serverless |
 | `scripts/check_workshop_otel_pipeline.sh` | Verify Alloy (**`:12345/metrics`**), ports **4317/4318**, emitters, log tails |
 | `scripts/sync_workshop_from_git.sh` | **`git fetch` + `reset --hard origin/main`** so new scripts exist on old sandboxes |
 | `tools/seed_workshop_telemetry.py` / `scripts/seed_workshop_telemetry.sh` | **Fallback:** bulk-index **logs**, **metrics**, **traces** (`*-workshop-default`) for Discover / ES|QL — see **Discover vs Observability UIs** below |
