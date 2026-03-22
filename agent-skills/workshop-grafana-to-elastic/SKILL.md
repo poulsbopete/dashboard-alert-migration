@@ -30,7 +30,7 @@ cd /root/workshop && source ~/.bashrc
 ```
 
 Converts **20** Grafana exports and publishes dashboard shells via **`tools/publish_grafana_drafts_kibana.py`**
-(**`POST /api/saved_objects/_bulk_create`**, required on Observability Serverless).
+(**`POST /api/saved_objects/_import`** with NDJSON; Serverless does not enable saved-object create/bulk-create APIs).
 
 ## Path B — Drafts only (then Cursor / skills)
 

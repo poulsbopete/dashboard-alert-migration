@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Publish workshop Grafana→Elastic *draft* JSON files into Kibana as Dashboard saved objects
-via **POST /api/saved_objects/_bulk_create** (Observability Serverless does not allow
-**POST /api/saved_objects/dashboard/{id}**). Each dashboard carries title + description (PromQL / migration notes);
-panels start empty—add Lens in UI or use Path B (Cursor + Agent Skills).
+via **POST /api/saved_objects/_import** (multipart NDJSON). Observability Serverless only
+exposes **export** and **import** for saved objects—not **POST .../dashboard/{id}** or **_bulk_create**.
+Each dashboard carries title + description (PromQL / migration notes); panels start empty—add Lens in UI
+or use Path B (Cursor + Agent Skills).
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -50,6 +51,25 @@ def kibana_client() -> tuple[str, dict[str, str], Any]:
     return kibana, headers, auth
 
 
+def api_headers_no_content_type(headers: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in headers.items() if k.lower() != "content-type"}
+
+
+def fetch_core_migration_version(kibana: str, headers: dict[str, str], auth: Any) -> str:
+    """Stack version string for saved-object import metadata (e.g. 9.0.0)."""
+    h = api_headers_no_content_type(headers)
+    try:
+        r = requests.get(f"{kibana}/api/status", headers=h, auth=auth, timeout=30)
+        if r.ok:
+            data = r.json()
+            ver = (data.get("version") or {}).get("number")
+            if isinstance(ver, str) and ver.strip():
+                return ver.strip()
+    except (requests.RequestException, TypeError, ValueError, AttributeError):
+        pass
+    return "9.0.0"
+
+
 def sanitize_id(stem: str) -> str:
     base = stem.replace("-elastic-draft", "").lower().replace("_", "-")
     s = re.sub(r"[^a-z0-9-]+", "-", base)
@@ -80,17 +100,48 @@ def dashboard_payload(title: str, description: str) -> dict[str, Any]:
         "hidePanelTitles": False,
     }
     search_source = {"query": {"query": "", "language": "kuery"}, "filter": []}
+    control_group = {
+        "chainingSystem": "HIERARCHICAL",
+        "controlStyle": "oneLine",
+        "ignoreParentSettingsJSON": json.dumps(
+            {
+                "ignoreFilters": False,
+                "ignoreQuery": False,
+                "ignoreTimerange": False,
+                "ignoreValidations": False,
+            }
+        ),
+        "panelsJSON": "{}",
+    }
     return {
         "attributes": {
             "title": title[:255],
             "description": description,
+            "hits": 0,
             "panelsJSON": "[]",
             "optionsJSON": json.dumps(options),
             "version": 1,
             "timeRestore": False,
             "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps(search_source)},
+            "controlGroupInput": control_group,
         },
         "references": [],
+    }
+
+
+def saved_object_import_line(
+    dash_id: str, body: dict[str, Any], core_migration_version: str
+) -> dict[str, Any]:
+    """One NDJSON record compatible with Kibana import (Serverless)."""
+    return {
+        "type": "dashboard",
+        "id": dash_id,
+        "namespaces": ["default"],
+        "attributes": body["attributes"],
+        "references": body.get("references") or [],
+        "coreMigrationVersion": core_migration_version,
+        # Dashboard saved-object model version (see Kibana dashboard_saved_object modelVersions); compatibilityMode adjusts.
+        "typeMigrationVersion": "3",
     }
 
 
@@ -110,10 +161,10 @@ def main() -> int:
         return 1
 
     kibana, headers, auth = kibana_client()
+    core_ver = fetch_core_migration_version(kibana, headers, auth)
 
-    # Observability Serverless rejects POST /api/saved_objects/dashboard/{id}; use bulk create with id in body.
-    bulk_url = f"{kibana}/api/saved_objects/_bulk_create"
-    bulk: list[dict[str, Any]] = []
+    import_url = f"{kibana}/api/saved_objects/_import"
+    lines: list[str] = []
     meta: list[tuple[Path, str, str]] = []
     for path in files:
         draft = json.loads(path.read_text(encoding="utf-8"))
@@ -121,25 +172,22 @@ def main() -> int:
         desc = build_description(draft)
         dash_id = sanitize_id(path.stem)
         body = dashboard_payload(title, desc)
-        bulk.append(
-            {
-                "type": "dashboard",
-                "id": dash_id,
-                "attributes": body["attributes"],
-                "references": body.get("references") or [],
-            }
-        )
+        rec = saved_object_import_line(dash_id, body, core_ver)
+        lines.append(json.dumps(rec, separators=(",", ":"), ensure_ascii=False))
         meta.append((path, dash_id, title))
+
+    ndjson = "\n".join(lines) + "\n"
+    h = api_headers_no_content_type(headers)
 
     ok = 0
     failed: list[str] = []
     try:
         r = requests.post(
-            bulk_url,
-            params={"overwrite": "true"},
-            headers=headers,
+            import_url,
+            params={"overwrite": "true", "compatibilityMode": "true"},
+            headers=h,
             auth=auth,
-            json=bulk,
+            files={"file": ("workshop-grafana.ndjson", ndjson.encode("utf-8"), "application/ndjson")},
             timeout=300,
         )
     except requests.RequestException as e:
@@ -155,33 +203,38 @@ def main() -> int:
 
     if r.status_code not in (200, 201):
         for path, dash_id, _title in meta:
-            failed.append(f"{path.name}: HTTP {r.status_code} {r.text[:400]}")
+            failed.append(f"{path.name}: HTTP {r.status_code} {r.text[:800]}")
             print("FAIL", dash_id, r.status_code, file=sys.stderr)
     else:
         try:
             payload = r.json()
         except json.JSONDecodeError:
             for path, dash_id, _title in meta:
-                failed.append(f"{path.name}: invalid JSON response from Kibana")
-            print("FAIL bulk_create: non-JSON body", file=sys.stderr)
+                failed.append(f"{path.name}: invalid JSON response from Kibana import")
+            print("FAIL import: non-JSON body", file=sys.stderr)
         else:
-            saved = payload.get("saved_objects") or []
-            by_id = {str(o.get("id", "")): o for o in saved if o.get("id")}
-            for path, dash_id, title in meta:
-                item = by_id.get(dash_id)
-                if not item:
-                    failed.append(
-                        f"{path.name}: no entry for id {dash_id!r} in bulk_create response ({len(saved)} objects)"
+            err_list = payload.get("errors") or []
+            ok = int(payload.get("successCount") or 0)
+            success_results = payload.get("successResults") or []
+            success_ids = {str(x.get("id")) for x in success_results if x.get("id")}
+
+            if err_list:
+                for err in err_list:
+                    raw = err.get("meta") or err
+                    obj = raw if isinstance(raw, dict) else {}
+                    oid = str(obj.get("id") or err.get("id") or "")
+                    otype = str(obj.get("type") or "")
+                    msg = err.get("error", {}).get("message") if isinstance(err.get("error"), dict) else str(
+                        err.get("error") or err
                     )
-                    print("FAIL", dash_id, file=sys.stderr)
-                    continue
-                err = item.get("error")
-                if err:
-                    msg = err.get("message") if isinstance(err, dict) else str(err)
-                    failed.append(f"{path.name}: {msg or err}")
-                    print("FAIL", dash_id, file=sys.stderr)
-                else:
-                    ok += 1
+                    failed.append(f"import {otype}/{oid}: {msg}")
+                    print("FAIL", oid or "?", file=sys.stderr)
+                for _path, dash_id, title in meta:
+                    if dash_id in success_ids:
+                        print("OK", dash_id, title[:70])
+            else:
+                ok = int(payload.get("successCount") or 0) or len(meta)
+                for _path, dash_id, title in meta:
                     print("OK", dash_id, title[:70])
 
     print(f"\nPublished {ok}/{len(files)} dashboards to Kibana.")
@@ -193,10 +246,12 @@ def main() -> int:
             print(f"  ... and {len(failed) - 12} more", file=sys.stderr)
         return 1
 
-    marker = Path("build/.published_grafana_to_kibana_ok")
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps({"count": ok, "drafts": len(files)}), encoding="utf-8")
-    return 0
+    if ok == len(files):
+        marker = Path("build/.published_grafana_to_kibana_ok")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"count": ok, "drafts": len(files)}), encoding="utf-8")
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
