@@ -1,0 +1,55 @@
+// Workshop: Grafana Alloy forwards OTLP + Prometheus scrape → Elastic Observability Serverless (mOTLP).
+// Same pattern as the elastic-autonomous-observability Instruqt track: collector on the VM, Elastic as backend.
+// Env (set by track setup or scripts/start_workshop_otel.sh):
+//   WORKSHOP_OTLP_ENDPOINT — HTTPS managed OTLP base URL (no /v1/* path)
+//   WORKSHOP_OTLP_AUTH_HEADER — typically "ApiKey <base64-encoded-key>"
+//
+// References:
+//   https://www.elastic.co/docs/reference/opentelemetry/motlp
+//   https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/
+
+otelcol.receiver.otlp "ingest" {
+  grpc {
+    endpoint = "127.0.0.1:4317"
+  }
+  http {
+    endpoint = "127.0.0.1:4318"
+  }
+
+  output {
+    metrics = [otelcol.processor.batch.workshop.input]
+    logs    = [otelcol.processor.batch.workshop.input]
+    traces  = [otelcol.processor.batch.workshop.input]
+  }
+}
+
+prometheus.scrape "alloy_self" {
+  targets    = [{"__address__" = "127.0.0.1:12345"}]
+  forward_to = [otelcol.receiver.prometheus.prom.receiver]
+}
+
+otelcol.receiver.prometheus "prom" {
+  output {
+    metrics = [otelcol.processor.batch.workshop.input]
+  }
+}
+
+otelcol.processor.batch "workshop" {
+  timeout         = "5s"
+  send_batch_size = 256
+
+  output {
+    metrics = [otelcol.exporter.otlphttp.elastic.input]
+    logs    = [otelcol.exporter.otlphttp.elastic.input]
+    traces  = [otelcol.exporter.otlphttp.elastic.input]
+  }
+}
+
+otelcol.exporter.otlphttp "elastic" {
+  client {
+    endpoint = sys.env("WORKSHOP_OTLP_ENDPOINT")
+    headers = {
+      "Authorization" = sys.env("WORKSHOP_OTLP_AUTH_HEADER"),
+    }
+  }
+}
