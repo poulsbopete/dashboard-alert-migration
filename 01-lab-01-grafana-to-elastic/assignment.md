@@ -23,7 +23,7 @@ notes:
 
     ## Path B (skills + AI)
 
-    Copy **`KIBANA_URL`**, **`ES_URL`**, **`ES_API_KEY`** (or **`ES_PASSWORD`**) from the sandbox Terminal into your laptop env; use [Elastic Agent Skills](https://github.com/elastic/agent-skills) (**`kibana-dashboards`**) in **Cursor** with the same repo / drafts.
+    After **`source ~/.bashrc`**, run the **`grep`** one-liner under **Prep — credentials** to print **`export …`** lines you can copy into your laptop shell. Use [Elastic Agent Skills](https://github.com/elastic/agent-skills) (**`kibana-dashboards`**) in **Cursor** with the same repo / drafts.
 tabs:
 - id: lypopaehfkah
   title: Terminal
@@ -61,6 +61,14 @@ cd /root/workshop
 source ~/.bashrc
 # Exports: KIBANA_URL, ES_URL, ES_USERNAME, ES_PASSWORD, ES_API_KEY (when bootstrap succeeded)
 ```
+
+**Copy/paste all workshop-related `export` lines** (e.g. for Path B on your laptop, or a second Terminal session):
+
+```bash
+grep -E '^export (KIBANA_URL|ES_URL|ES_USERNAME|ES_PASSWORD|ES_API_KEY|ES_DEPLOYMENT_ID|WORKSHOP_ROOT)=' ~/.bashrc
+```
+
+Run that after `source ~/.bashrc`; copy the printed lines into your target shell. Do not commit secrets or paste API keys/passwords into model chat logs.
 
 The **`workshop-migration`** API key in Kibana (Admin → API keys) matches **`ES_API_KEY`** here when setup completed successfully. If `ES_API_KEY` is empty, create a key in the UI or use **`admin`** + **`ES_PASSWORD`** (basic auth).
 
@@ -100,7 +108,7 @@ Use this when you want the model and **[Elastic Agent Skills](https://github.com
 For **`GET` / `POST` / `PUT` / `DELETE /api/dashboards?apiVersion=1`** (headers, spaces, supported panels), see the repo guide **[`docs/dashboards-api-getting-started.md`](../../docs/dashboards-api-getting-started.md)**.
 
 1. **Clone** this workshop repository on your laptop (same layout as `/root/workshop`).
-2. In the **Instruqt Terminal**, run **`source ~/.bashrc`** and **copy** (do not paste into chat logs): **`KIBANA_URL`**, **`ES_URL`**, **`ES_API_KEY`** or **`ES_PASSWORD`**.
+2. In the **Instruqt Terminal**, run **`source ~/.bashrc`**, then the **`grep`** command in **Prep — credentials** above; **copy** the printed **`export`** lines into your laptop (do not paste secrets into chat logs).
 3. Export those variables in your laptop shell or `.env` for Cursor / skills.
 4. In **Cursor**, install skills (`npx skills add elastic/agent-skills --skill kibana-dashboards` or equivalent), attach **`kibana-dashboards`**, and follow **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**.
 5. Generate drafts locally:

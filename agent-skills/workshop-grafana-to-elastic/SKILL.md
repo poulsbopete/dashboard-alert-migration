@@ -50,8 +50,9 @@ Expect **20** files `*-elastic-draft.json`. Publish with **`kibana-dashboards`**
    - Map **PromQL** panels to **PromQL-native** metric views where available, or propose **ES|QL** / **TS** alternatives.
    - Produce a short **per-dashboard** note file under `build/migration-notes/` (create the directory) if you want an audit
      trail — optional but matches real migrations.
-4. Use **`source ~/.bashrc`** in the workshop Terminal to load `ES_URL` / `ES_PASSWORD` / `ES_API_KEY` when calling Kibana APIs
-   per the upstream skill.
+4. In the workshop Terminal: **`source ~/.bashrc`**, then print copy-pasteable exports with  
+   **`grep -E '^export (KIBANA_URL|ES_URL|ES_USERNAME|ES_PASSWORD|ES_API_KEY|ES_DEPLOYMENT_ID|WORKSHOP_ROOT)=' ~/.bashrc`**  
+   and paste those lines into your laptop shell when using the upstream skill.
 
 ## Safety
 
