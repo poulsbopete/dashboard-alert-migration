@@ -2,10 +2,11 @@
 """
 Publish workshop Grafana→Elastic *draft* JSON into Kibana.
 
-**Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels (rotating **line**, **area**,
-**bar**, **metric**, multi-series **line** with **breakdown**, and optional **AVG(workshop.requests.rate)** when the resolved
-`FROM` includes metrics). The same `FROM` clause as each volume probe is reused so panels stay consistent. If mixed layouts
-fail validation, the publisher falls back to **uniform line** charts only. **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
+**Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels: each widget’s **ES|QL** is
+chosen from that Grafana panel’s **PromQL + title** (e.g. Go/GC → CPU % / request-rate proxies, HTTP → status bars, latency
+→ traces or rate proxy). Padded “extra” panels still **vary** by index. The resolved `FROM` must include fields the query needs
+(logs vs metrics vs traces-only). If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
+**`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
 
 **Probes:** **`logs-*`**, **`metrics-*`**, workshop streams, unions, then **`traces-*`**. Override with **`WORKSHOP_ESQL_FROM`**.
 PromQL in drafts is **not** executed.
@@ -258,181 +259,416 @@ def _from_clause_from_probe(esql: str) -> str:
     return "logs-*"
 
 
-def _mixed_esql_templates(from_clause: str, tf: str) -> list[dict[str, Any]]:
-    """Rotating panel recipes; only include log- or metrics-specific ES|QL when the FROM pattern plausibly has those fields."""
-    fc = from_clause.strip()
+def _from_capabilities(fc: str) -> dict[str, bool]:
     low = fc.lower()
-    has_logs = "logs" in low
-    has_metrics = "metrics" in low
-    has_traces = "trace" in low
-    q_vol = f"FROM {fc} | STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
-    tpls: list[dict[str, Any]] = [
-        {
-            "viz": "xy",
-            "layer": "line",
-            "query": q_vol,
-            "x": "bucket",
-            "ys": [("c", None)],
-            "breakdown": None,
-        },
-        {
-            "viz": "xy",
-            "layer": "area",
-            "query": q_vol,
-            "x": "bucket",
-            "ys": [("c", None)],
-            "breakdown": None,
-        },
-    ]
-    if has_logs:
-        tpls.extend(
-            [
-                {
-                    "viz": "xy",
-                    "layer": "bar",
-                    "query": (
-                        f"FROM {fc} | STATS c = COUNT(*) BY code = http.response.status_code "
-                        f"| SORT c DESC | LIMIT 10"
-                    ),
-                    "x": "code",
-                    "ys": [("c", None)],
-                    "breakdown": None,
-                },
-                {
-                    "viz": "xy",
-                    "layer": "bar",
-                    "query": (
-                        f"FROM {fc} | STATS c = COUNT(*) BY lvl = log.level | SORT c DESC | LIMIT 8"
-                    ),
-                    "x": "lvl",
-                    "ys": [("c", None)],
-                    "breakdown": None,
-                },
-                {
-                    "viz": "xy",
-                    "layer": "bar",
-                    "query": (
-                        f"FROM {fc} | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 8"
-                    ),
-                    "x": "h",
-                    "ys": [("c", None)],
-                    "breakdown": None,
-                },
-                {
-                    "viz": "xy",
-                    "layer": "line",
-                    "query": (
-                        f"FROM {fc} | STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend), "
-                        f"svc = service.name"
-                    ),
-                    "x": "bucket",
-                    "ys": [("c", None)],
-                    "breakdown": "svc",
-                },
-            ]
+    return {"logs": "logs" in low, "metrics": "metrics" in low, "traces": "trace" in low}
+
+
+def _truncate_lens_title(panel_title: str, promql: str, *, max_len: int = 118) -> str:
+    pt = (panel_title or "").strip().replace("\n", " ") or "Grafana panel"
+    base = pt[:72]
+    if promql and len(promql.strip()) > 0:
+        pq = promql.strip().replace("\n", " ")
+        if len(pq) > 55:
+            pq = pq[:52] + "…"
+        s = f"{base} — {pq}"
+    else:
+        s = base
+    return s[:max_len]
+
+
+def _classify_grafana_panel(promql: str, panel_title: str) -> str:
+    """Coarse bucket from PromQL + title so each dashboard gets panel-appropriate ES|QL (workshop data)."""
+    s = f"{promql} {panel_title}".lower()
+    if re.search(r"go_gc|gc_duration|memstats|goroutines?|go_mem|process_cpu|runtime\.mem", s):
+        return "go_runtime"
+    if re.search(r"histogram_quantile|_bucket\b|quantile|p9[05]|p99|latency|duration_second", s):
+        return "latency"
+    if re.search(r"http_|http\.|requests_total|status_code|5xx|4xx|response_code", s):
+        return "http"
+    if re.search(r"\berror\b|exception|failed|failures|5[0-9]{2}\b", s) and "http" not in s[:80]:
+        return "errors"
+    if re.search(r"node_cpu|container_cpu|cpu_usage|cpu\.usage", s):
+        return "cpu"
+    if re.search(r"memory|mem_usage|heap|working_set|ram\b", s):
+        return "memory"
+    if re.search(r"disk|filesystem|pvc_|volume_|iops|io_", s):
+        return "storage"
+    if re.search(r"kube_|k8s|pod_|namespace_|container_", s):
+        return "k8s"
+    if re.search(r"mysql|postgres|redis|mongo|db_|jdbc|sql_", s):
+        return "db"
+    if re.search(r"probe_success|^up\b|scrape_duration|targets?$", s):
+        return "scrape"
+    if re.search(r"network|tcp_|bandwidth|transmit|receive", s):
+        return "network"
+    return "generic"
+
+
+def _spec_xy(
+    fc: str,
+    tf: str,
+    *,
+    layer: str,
+    query: str,
+    x: str,
+    ys: list[tuple[str, str | None]],
+    breakdown: str | None,
+    lens_title: str,
+) -> dict[str, Any]:
+    return {
+        "viz": "xy",
+        "layer": layer,
+        "query": query,
+        "x": x,
+        "ys": ys,
+        "breakdown": breakdown,
+        "lens_title": lens_title,
+    }
+
+
+def _spec_metric(fc: str, query: str, col: str, lens_title: str) -> dict[str, Any]:
+    return {"viz": "metric", "query": query, "col": col, "lens_title": lens_title}
+
+
+def _panel_esql_spec(
+    pan: dict[str, Any],
+    *,
+    from_clause: str,
+    tf: str,
+    panel_index: int,
+    cap: dict[str, bool],
+) -> dict[str, Any]:
+    """Pick one Lens recipe from this Grafana panel’s PromQL/title + resolved FROM capabilities."""
+    fc = from_clause.strip()
+    pq = str((pan.get("migration") or {}).get("promql") or "")
+    ptitle = str(pan.get("title") or "")
+    cat = _classify_grafana_panel(pq, ptitle)
+    lt = _truncate_lens_title(ptitle, pq)
+    q_b = f"BUCKET({tf}, 75, ?_tstart, ?_tend)"
+
+    def vol_line(layer: str) -> dict[str, Any]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer=layer,
+            query=f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}",
+            x="bucket",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=lt,
         )
-    if has_traces:
-        tpls.append(
-            {
-                "viz": "xy",
-                "layer": "bar",
-                "query": (
-                    f"FROM {fc} | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 10"
+
+    def vol_area() -> dict[str, Any]:
+        return vol_line("area")
+
+    # --- category-specific (workshop bulk seed + optional traces) ---
+    if cat == "go_runtime":
+        if cap["metrics"]:
+            if panel_index % 2 == 0:
+                return _spec_xy(
+                    fc,
+                    tf,
+                    layer="line",
+                    query=(
+                        f"FROM {fc} | STATS m = AVG(system.cpu.total.norm.pct) "
+                        f"BY bucket = {q_b}"
+                    ),
+                    x="bucket",
+                    ys=[("m", None)],
+                    breakdown=None,
+                    lens_title=f"{lt} (CPU % — workshop proxy for GC/runtime)",
+                )
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=(
+                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}"
                 ),
-                "x": "name",
-                "ys": [("c", None)],
-                "breakdown": None,
-            }
+                x="bucket",
+                ys=[("m", None)],
+                breakdown=None,
+                lens_title=f"{lt} (request rate — workshop proxy for Go/runtime)",
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=(
+                    f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (events by service — proxy)",
+            )
+
+    if cat == "latency":
+        # Trace-only FROM avoids ES|QL errors on logs/metrics unions (processor.event / duration fields).
+        if cap["traces"] and not cap["logs"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=(
+                    f'FROM {fc} | WHERE processor.event == "transaction" '
+                    f"| STATS m = AVG(transaction.duration.us) BY bucket = {q_b}"
+                ),
+                x="bucket",
+                ys=[("m", None)],
+                breakdown=None,
+                lens_title=f"{lt} (avg txn duration µs)",
+            )
+        if cap["metrics"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=(
+                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}"
+                ),
+                x="bucket",
+                ys=[("m", None)],
+                breakdown=None,
+                lens_title=f"{lt} (rate — latency proxy)",
+            )
+
+    if cat == "http" and cap["logs"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY code = http.response.status_code "
+                f"| SORT c DESC | LIMIT 12"
+            ),
+            x="code",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (HTTP status)",
         )
-    tpls.append(
-        {
-            "viz": "metric",
-            "query": f"FROM {fc} | STATS total = COUNT(*)",
-            "col": "total",
+
+    if cat == "errors" and cap["logs"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY lvl = log.level | SORT c DESC | LIMIT 8"
+            ),
+            x="lvl",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (log level)",
+        )
+
+    if cat == "cpu" and cap["metrics"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="line",
+            query=f"FROM {fc} | STATS m = AVG(system.cpu.total.norm.pct) BY bucket = {q_b}",
+            x="bucket",
+            ys=[("m", None)],
+            breakdown=None,
+            lens_title=f"{lt} (CPU %)",
+        )
+
+    if cat == "memory" and cap["metrics"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="area",
+            query=(
+                f"FROM {fc} | STATS m = AVG(system.memory.actual.used.pct) BY bucket = {q_b}"
+            ),
+            x="bucket",
+            ys=[("m", None)],
+            breakdown=None,
+            lens_title=f"{lt} (memory %)",
+        )
+
+    if cat == "storage" and cap["metrics"]:
+        return vol_line("line")
+
+    if cat == "k8s" and cap["logs"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=f"FROM {fc} | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 10",
+            x="h",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (by host — K8s proxy)",
+        )
+
+    if cat == "db":
+        if cap["logs"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=(
+                    f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (by service — DB proxy)",
+            )
+        if cap["traces"] and not cap["logs"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="bar",
+                query=(
+                    f"FROM {fc} | STATS c = COUNT(*) BY name = span.name "
+                    f"| SORT c DESC | LIMIT 10"
+                ),
+                x="name",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (span names — DB proxy)",
+            )
+
+    if cat == "scrape":
+        if cap["metrics"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="line",
+                query=f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}",
+                x="bucket",
+                ys=[("m", None)],
+                breakdown=None,
+                lens_title=f"{lt} (scrape/target proxy — request rate)",
+            )
+
+    if cat == "network" and cap["metrics"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="area",
+            query=f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}",
+            x="bucket",
+            ys=[("m", None)],
+            breakdown=None,
+            lens_title=f"{lt} (traffic proxy — request rate)",
+        )
+
+    # generic: vary chart type / breakdown so padded panels on one dashboard still differ
+    if cap["logs"] and panel_index % 3 == 1:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY path = url.path | SORT c DESC | LIMIT 10"
+            ),
+            x="path",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (URL path)",
+        )
+    if cap["logs"] and panel_index % 3 == 2:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="line",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+            ),
+            x="bucket",
+            ys=[("c", None)],
+            breakdown="svc",
+            lens_title=f"{lt} (by service)",
+        )
+    if cap["traces"] and not cap["logs"] and panel_index % 5 == 4:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 10"
+            ),
+            x="name",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (span.name)",
+        )
+
+    return vol_line("line") if panel_index % 2 == 0 else vol_area()
+
+
+def _lens_from_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    title = str(spec.get("lens_title") or "")[:255]
+    if spec["viz"] == "metric":
+        return {
+            "type": "lens",
+            "uid": str(uuid.uuid4()),
+            "config": {
+                "attributes": {
+                    "title": title,
+                    "type": "metric",
+                    "dataset": {"type": "esql", "query": spec["query"]},
+                    "metrics": [
+                        {
+                            "type": "primary",
+                            "operation": "value",
+                            "column": spec["col"],
+                        }
+                    ],
+                }
+            },
         }
-    )
-    if has_metrics:
-        tpls.append(
-            {
-                "viz": "xy",
-                "layer": "line",
-                "query": (
-                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) "
-                    f"BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
-                ),
-                "x": "bucket",
-                "ys": [("m", None)],
-                "breakdown": None,
+    layer: dict[str, Any] = {
+        "type": spec["layer"],
+        "dataset": {"type": "esql", "query": spec["query"]},
+        "x": {"operation": "value", "column": spec["x"]},
+        "y": [],
+    }
+    for col, label in spec["ys"]:
+        y_ent: dict[str, Any] = {"operation": "value", "column": col}
+        if label:
+            y_ent["label"] = label
+        layer["y"].append(y_ent)
+    br = spec.get("breakdown")
+    if isinstance(br, str) and br.strip():
+        layer["breakdown_by"] = {"operation": "value", "column": br.strip()}
+    return {
+        "type": "lens",
+        "uid": str(uuid.uuid4()),
+        "config": {
+            "attributes": {
+                "title": title,
+                "type": "xy",
+                "layers": [layer],
             }
-        )
-    return tpls
+        },
+    }
 
 
 def build_mixed_esql_panels(
     draft: dict[str, Any], *, from_clause: str, time_field: str
 ) -> list[dict[str, Any]]:
-    """Lens panels with varied ES|QL + chart types (Path A/B richer dashboards than duplicate volume lines)."""
+    """Lens panels: ES|QL + chart type chosen per Grafana panel (PromQL/title), not the same rotation on every dashboard."""
     if (os.environ.get("WORKSHOP_DISABLE_LENS") or "").strip() in ("1", "true", "yes"):
         return []
     if (os.environ.get("WORKSHOP_SIMPLE_LENS") or "").strip() in ("1", "true", "yes"):
         return []
     panel_rows = _expand_draft_panels_for_lens(draft)
     tf = time_field
-    templates = _mixed_esql_templates(from_clause, tf)
-    if not templates:
-        return []
+    fc = from_clause.strip()
+    cap = _from_capabilities(fc)
     out: list[dict[str, Any]] = []
     for i, pan in enumerate(panel_rows):
         if not isinstance(pan, dict):
             continue
-        spec = templates[i % len(templates)]
-        if spec["viz"] == "metric":
-            out.append(
-                {
-                    "type": "lens",
-                    "uid": str(uuid.uuid4()),
-                    "config": {
-                        "attributes": {
-                            "type": "metric",
-                            "dataset": {"type": "esql", "query": spec["query"]},
-                            "metrics": [
-                                {
-                                    "type": "primary",
-                                    "operation": "value",
-                                    "column": spec["col"],
-                                }
-                            ],
-                        }
-                    },
-                }
-            )
-            continue
-        layer: dict[str, Any] = {
-            "type": spec["layer"],
-            "dataset": {"type": "esql", "query": spec["query"]},
-            "x": {"operation": "value", "column": spec["x"]},
-            "y": [],
-        }
-        for col, label in spec["ys"]:
-            y_ent: dict[str, Any] = {"operation": "value", "column": col}
-            if label:
-                y_ent["label"] = label
-            layer["y"].append(y_ent)
-        br = spec.get("breakdown")
-        if isinstance(br, str) and br.strip():
-            layer["breakdown_by"] = {"operation": "value", "column": br.strip()}
-        out.append(
-            {
-                "type": "lens",
-                "uid": str(uuid.uuid4()),
-                "config": {
-                    "attributes": {
-                        "type": "xy",
-                        "layers": [layer],
-                    }
-                },
-            }
-        )
+        spec = _panel_esql_spec(pan, from_clause=fc, tf=tf, panel_index=i, cap=cap)
+        out.append(_lens_from_spec(spec))
     return out
 
 
@@ -445,16 +681,19 @@ def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict
         return []
     panel_rows = _expand_draft_panels_for_lens(draft)
     out: list[dict[str, Any]] = []
-    for i, pan in enumerate(panel_rows):
+    for pan in panel_rows:
         if not isinstance(pan, dict):
             continue
-        # Match kibana-dashboards API reference: xy + line layer only (extra keys can 400 on Serverless).
+        pq = str((pan.get("migration") or {}).get("promql") or "")
+        ptitle = str(pan.get("title") or "")
+        lens_title = _truncate_lens_title(ptitle, pq)
         out.append(
             {
                 "type": "lens",
                 "uid": str(uuid.uuid4()),
                 "config": {
                     "attributes": {
+                        "title": lens_title[:255],
                         "type": "xy",
                         "layers": [
                             {
