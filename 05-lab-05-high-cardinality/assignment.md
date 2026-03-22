@@ -1,8 +1,12 @@
 ---
 slug: lab-05-high-cardinality
+id: acx7y6xc0ssy
 type: challenge
-title: "Lab 5 — High cardinality optimization"
-teaser: "Turn on a cardinality stressor, observe label explosion, then apply collector-side protections."
+title: Lab 5 — High cardinality optimization
+teaser: Turn on a cardinality stressor, observe label explosion, then apply collector-side
+  protections.
+difficulty: ""
+enhanced_loading: null
 ---
 
 # Lab 5 — High cardinality optimization

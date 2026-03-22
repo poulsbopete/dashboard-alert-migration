@@ -1,8 +1,12 @@
 ---
 slug: lab-04-agent-skills-automation
+id: nbcewe3y3az0
 type: challenge
-title: "Lab 4 — Agent Skills automation"
-teaser: "Wire Elastic Agent Skills to CLI migration utilities and (optionally) drive them from an AI agent."
+title: Lab 4 — Agent Skills automation
+teaser: Wire Elastic Agent Skills to CLI migration utilities and (optionally) drive
+  them from an AI agent.
+difficulty: ""
+enhanced_loading: null
 ---
 
 # Lab 4 — Agent Skills automation

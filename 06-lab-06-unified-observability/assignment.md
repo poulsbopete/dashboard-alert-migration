@@ -1,8 +1,12 @@
 ---
 slug: lab-06-unified-observability
+id: vhw2fgovvr8u
 type: challenge
-title: "Lab 6 — Unified observability + before/after"
-teaser: "Tie metrics, logs, and traces to a merchant drill-down narrative and compare operational models."
+title: Lab 6 — Unified observability + before/after
+teaser: Tie metrics, logs, and traces to a merchant drill-down narrative and compare
+  operational models.
+difficulty: ""
+enhanced_loading: null
 ---
 
 # Lab 6 — Unified observability + before/after
