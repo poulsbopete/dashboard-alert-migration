@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Publish workshop Grafana→Elastic *draft* JSON files into Kibana as Dashboard saved objects
-via **POST /api/saved_objects/_import** (multipart NDJSON). Observability Serverless only
-exposes **export** and **import** for saved objects—not **POST .../dashboard/{id}** or **_bulk_create**.
-Each dashboard carries title + description (PromQL / migration notes); panels start empty—add Lens in UI
-or use Path B (Cursor + Agent Skills).
+Publish workshop Grafana→Elastic *draft* JSON into Kibana.
+
+**Primary (Observability Serverless):** **POST /api/dashboards?apiVersion=1** with optional **Markdown**
+panel holding PromQL / migration notes (see Elastic Dashboards API). Serverless often returns **500** on
+hand-crafted **saved_objects/_import** payloads when migration metadata does not match the stack.
+
+**Fallback:** one-object-at-a-time **POST /api/saved_objects/_import** with **minimal** dashboard attributes
+(no controlGroupInput / typeMigrationVersion) if the Dashboards API is unavailable.
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -20,6 +23,7 @@ import json
 import os
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +96,7 @@ def build_description(draft: dict[str, Any]) -> str:
 
 
 def dashboard_payload(title: str, description: str) -> dict[str, Any]:
+    """Classic saved-object-shaped attributes (import fallback only)."""
     options = {
         "useMargins": True,
         "syncColors": False,
@@ -100,49 +105,105 @@ def dashboard_payload(title: str, description: str) -> dict[str, Any]:
         "hidePanelTitles": False,
     }
     search_source = {"query": {"query": "", "language": "kuery"}, "filter": []}
-    control_group = {
-        "chainingSystem": "HIERARCHICAL",
-        "controlStyle": "oneLine",
-        "ignoreParentSettingsJSON": json.dumps(
-            {
-                "ignoreFilters": False,
-                "ignoreQuery": False,
-                "ignoreTimerange": False,
-                "ignoreValidations": False,
-            }
-        ),
-        "panelsJSON": "{}",
-    }
     return {
         "attributes": {
             "title": title[:255],
             "description": description,
-            "hits": 0,
             "panelsJSON": "[]",
             "optionsJSON": json.dumps(options),
             "version": 1,
             "timeRestore": False,
             "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps(search_source)},
-            "controlGroupInput": control_group,
         },
         "references": [],
     }
 
 
-def saved_object_import_line(
+def dashboards_api_headers(base: dict[str, str]) -> dict[str, str]:
+    h = api_headers_no_content_type(base)
+    h["Content-Type"] = "application/json"
+    h["Elastic-Api-Version"] = "1"
+    h["X-Elastic-Internal-Origin"] = "true"
+    return h
+
+
+def publish_one_dashboards_api(
+    kibana: str,
+    headers: dict[str, str],
+    auth: Any,
+    title: str,
+    description: str,
+) -> tuple[bool, str]:
+    """Create a dashboard via the supported Serverless Dashboards API."""
+    h = dashboards_api_headers(headers)
+    panels: list[dict[str, Any]] = []
+    if description.strip():
+        panels.append(
+            {
+                "grid": {"x": 0, "y": 0, "w": 48, "h": 24},
+                "config": {"content": description[:50000]},
+                "uid": str(uuid.uuid4()),
+                "type": "DASHBOARD_MARKDOWN",
+            }
+        )
+    body: dict[str, Any] = {
+        "title": title[:255],
+        "panels": panels,
+        "time_range": {"from": "now-30d", "to": "now"},
+    }
+    r = requests.post(
+        f"{kibana}/api/dashboards?apiVersion=1",
+        headers=h,
+        auth=auth,
+        json=body,
+        timeout=120,
+    )
+    if r.status_code in (200, 201):
+        return True, ""
+    return False, f"HTTP {r.status_code} {r.text[:600]}"
+
+
+def saved_object_minimal_import_line(
     dash_id: str, body: dict[str, Any], core_migration_version: str
 ) -> dict[str, Any]:
-    """One NDJSON record compatible with Kibana import (Serverless)."""
+    """Minimal NDJSON line—avoids typeMigrationVersion / controlGroupInput / namespaces (common 500 causes)."""
     return {
         "type": "dashboard",
         "id": dash_id,
-        "namespaces": ["default"],
-        "attributes": body["attributes"],
+        "attributes": dict(body["attributes"]),
         "references": body.get("references") or [],
         "coreMigrationVersion": core_migration_version,
-        # Dashboard saved-object model version (see Kibana dashboard_saved_object modelVersions); compatibilityMode adjusts.
-        "typeMigrationVersion": "3",
     }
+
+
+def import_one_ndjson(
+    kibana: str,
+    headers: dict[str, str],
+    auth: Any,
+    record: dict[str, Any],
+) -> tuple[bool, str]:
+    h = api_headers_no_content_type(headers)
+    line = json.dumps(record, separators=(",", ":"), ensure_ascii=False) + "\n"
+    r = requests.post(
+        f"{kibana}/api/saved_objects/_import",
+        params={"overwrite": "true", "compatibilityMode": "true"},
+        headers=h,
+        auth=auth,
+        files={"file": ("one.ndjson", line.encode("utf-8"), "application/ndjson")},
+        timeout=120,
+    )
+    if r.status_code not in (200, 201):
+        return False, f"HTTP {r.status_code} {r.text[:600]}"
+    try:
+        payload = r.json()
+    except json.JSONDecodeError:
+        return False, "non-JSON import response"
+    errs = payload.get("errors") or []
+    if errs:
+        return False, str(errs[0])[:600]
+    if payload.get("success") is False and int(payload.get("successCount") or 0) < 1:
+        return False, str(payload)[:600]
+    return True, ""
 
 
 def main() -> int:
@@ -163,79 +224,38 @@ def main() -> int:
     kibana, headers, auth = kibana_client()
     core_ver = fetch_core_migration_version(kibana, headers, auth)
 
-    import_url = f"{kibana}/api/saved_objects/_import"
-    lines: list[str] = []
-    meta: list[tuple[Path, str, str]] = []
+    ok = 0
+    failed: list[str] = []
     for path in files:
         draft = json.loads(path.read_text(encoding="utf-8"))
         title = str(draft.get("title") or path.stem)
         desc = build_description(draft)
         dash_id = sanitize_id(path.stem)
         body = dashboard_payload(title, desc)
-        rec = saved_object_import_line(dash_id, body, core_ver)
-        lines.append(json.dumps(rec, separators=(",", ":"), ensure_ascii=False))
-        meta.append((path, dash_id, title))
 
-    ndjson = "\n".join(lines) + "\n"
-    h = api_headers_no_content_type(headers)
-
-    ok = 0
-    failed: list[str] = []
-    try:
-        r = requests.post(
-            import_url,
-            params={"overwrite": "true", "compatibilityMode": "true"},
-            headers=h,
-            auth=auth,
-            files={"file": ("workshop-grafana.ndjson", ndjson.encode("utf-8"), "application/ndjson")},
-            timeout=300,
-        )
-    except requests.RequestException as e:
-        for path, dash_id, _title in meta:
-            failed.append(f"{path.name}: {e}")
-            print("FAIL", dash_id, e, file=sys.stderr)
-        print(f"\nPublished {ok}/{len(files)} dashboards to Kibana.")
-        if failed:
-            print("\nFailures:", file=sys.stderr)
-            for msg in failed[:12]:
-                print(f"  {msg}", file=sys.stderr)
-        return 1
-
-    if r.status_code not in (200, 201):
-        for path, dash_id, _title in meta:
-            failed.append(f"{path.name}: HTTP {r.status_code} {r.text[:800]}")
-            print("FAIL", dash_id, r.status_code, file=sys.stderr)
-    else:
         try:
-            payload = r.json()
-        except json.JSONDecodeError:
-            for path, dash_id, _title in meta:
-                failed.append(f"{path.name}: invalid JSON response from Kibana import")
-            print("FAIL import: non-JSON body", file=sys.stderr)
-        else:
-            err_list = payload.get("errors") or []
-            ok = int(payload.get("successCount") or 0)
-            success_results = payload.get("successResults") or []
-            success_ids = {str(x.get("id")) for x in success_results if x.get("id")}
+            good, err_dash = publish_one_dashboards_api(kibana, headers, auth, title, desc)
+        except requests.RequestException as e:
+            good, err_dash = False, str(e)
 
-            if err_list:
-                for err in err_list:
-                    raw = err.get("meta") or err
-                    obj = raw if isinstance(raw, dict) else {}
-                    oid = str(obj.get("id") or err.get("id") or "")
-                    otype = str(obj.get("type") or "")
-                    msg = err.get("error", {}).get("message") if isinstance(err.get("error"), dict) else str(
-                        err.get("error") or err
-                    )
-                    failed.append(f"import {otype}/{oid}: {msg}")
-                    print("FAIL", oid or "?", file=sys.stderr)
-                for _path, dash_id, title in meta:
-                    if dash_id in success_ids:
-                        print("OK", dash_id, title[:70])
-            else:
-                ok = int(payload.get("successCount") or 0) or len(meta)
-                for _path, dash_id, title in meta:
-                    print("OK", dash_id, title[:70])
+        if good:
+            ok += 1
+            print("OK", dash_id, title[:70])
+            continue
+
+        rec = saved_object_minimal_import_line(dash_id, body, core_ver)
+        try:
+            good_imp, err_imp = import_one_ndjson(kibana, headers, auth, rec)
+        except requests.RequestException as e:
+            good_imp, err_imp = False, str(e)
+
+        if good_imp:
+            ok += 1
+            print("OK", dash_id, title[:70], "(fallback: saved-objects import)")
+            continue
+
+        failed.append(f"{path.name}: Dashboards API: {err_dash} | import: {err_imp}")
+        print("FAIL", dash_id, file=sys.stderr)
 
     print(f"\nPublished {ok}/{len(files)} dashboards to Kibana.")
     if failed:

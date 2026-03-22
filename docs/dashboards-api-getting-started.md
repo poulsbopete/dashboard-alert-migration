@@ -12,8 +12,8 @@ This note summarizes the **Kibana Dashboards HTTP API** for **Observability / An
 
 | Goal | Mechanism |
 | --- | --- |
-| **20 empty dashboard shells** + titles/descriptions (Lab 1 Path A) | **Saved Objects import** — `tools/publish_grafana_drafts_kibana.py` (Serverless does not expose saved-object create/bulk-create). |
-| **Rich dashboards** (Lens panels, grid, time range) | **Dashboards API** — `POST/PUT /api/dashboards?apiVersion=1` (curl, Dev Tools, Terraform, or **[`kibana-dashboards`](https://github.com/elastic/agent-skills)** Agent Skill). |
+| **20 dashboards** + migration notes (Lab 1 Path A) | **Dashboards API** — `tools/publish_grafana_drafts_kibana.py` uses **`POST /api/dashboards?apiVersion=1`** (Markdown panel for notes), with **saved-objects import** only as a per-object fallback. |
+| **Rich dashboards** (Lens panels, grid, time range) | Same **Dashboards API** — `POST/PUT /api/dashboards?apiVersion=1` (curl, Dev Tools, Terraform, or **[`kibana-dashboards`](https://github.com/elastic/agent-skills)** Agent Skill). |
 
 In the Instruqt sandbox, use `KIBANA_URL`, `ES_API_KEY` (or `ES_USERNAME` / `ES_PASSWORD`) from `source ~/.bashrc`. Through **es3-api**, Kibana is reached at the proxied URL (port **8080** in the **Elastic Serverless** tab).
 

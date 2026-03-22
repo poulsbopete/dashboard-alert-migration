@@ -77,7 +77,7 @@ From **`/root/workshop`**, run:
 This will:
 
 1. Run **`tools/grafana_to_elastic.py`** on all **`assets/grafana/*.json`** → **`build/elastic-dashboards/*-elastic-draft.json`** (20 files).
-2. Run **`tools/publish_grafana_drafts_kibana.py`**, which **`POST`s `/api/saved_objects/_import`** with a multipart **NDJSON** file (one **dashboard** per line, `overwrite=true` + `compatibilityMode=true`). Observability Serverless only documents **export** / **import** for saved objects—not create or bulk-create. Each object is an empty dashboard shell + **title** + **description** with PromQL / migration notes.
+2. Run **`tools/publish_grafana_drafts_kibana.py`**, which creates dashboards via **`POST /api/dashboards?apiVersion=1`** (Markdown panel for PromQL / migration notes when present). If that fails for an object, it falls back to a **minimal** **`POST /api/saved_objects/_import`** (single-object NDJSON). Serverless is unreliable for hand-built bulk saved-object imports, so the Dashboards API is the primary path.
 
 Then open **Elastic Serverless → Dashboards** and confirm **~20** dashboards (titles end with **`(Grafana import draft)`**). Add **Lens** panels in the UI as needed.
 

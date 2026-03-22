@@ -17,7 +17,7 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 
 ## Dashboards API (reference)
 
-Lab 1 **Path A** publishes **empty** dashboard shells via the **Saved Objects import** API (see `tools/publish_grafana_drafts_kibana.py`). For **full** dashboards (Lens panels, grid layout, time range) use the **Dashboards HTTP API** or the **`kibana-dashboards`** skill. A concise workshop-oriented guide lives in **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** (CRUD, headers, spaces, supported panels, links to Elastic docs).
+Lab 1 **Path A** publishes dashboards via the **Dashboards HTTP API** (`POST /api/dashboards?apiVersion=1`; see `tools/publish_grafana_drafts_kibana.py`), with a **saved-objects import** fallback per dashboard if needed. For deeper Lens work, use the **`kibana-dashboards`** skill. A concise guide lives in **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** (CRUD, headers, spaces, supported panels, links to Elastic docs).
 
 ## Layout
 
@@ -31,9 +31,9 @@ Lab 1 **Path A** publishes **empty** dashboard shells via the **Saved Objects im
 | `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (`scripts/generate_datadog_dashboards.py`) |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
-| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Path A:** convert 20 Grafana exports + **Kibana Saved Objects API** publish |
+| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Path A:** convert 20 Grafana exports + **Dashboards API** publish (import fallback) |
 | `agent-skills/` | Workshop skills + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
-| `docs/dashboards-api-getting-started.md` | **Dashboards API** (`/api/dashboards?apiVersion=1`): CRUD, spaces, panel support — complements Saved Objects **import** used in Lab 1 Path A |
+| `docs/dashboards-api-getting-started.md` | **Dashboards API** (`/api/dashboards?apiVersion=1`): CRUD, spaces, panel support — matches Lab 1 Path A primary publish path |
 
 Loading / wait slides are defined in each **`assignment.md`** frontmatter (`notes:`), per Instruqt [loading experience](https://docs.instruqt.com/tracks/manage/loading-experience).
 
