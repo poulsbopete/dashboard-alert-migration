@@ -85,6 +85,8 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 ## Discover vs Observability UIs (OTLP default)
 
 - **Default path:** **OpenTelemetry** (Python SDK → Alloy → **mOTLP**) populates **logs-***, **metrics-***, **traces-*** data the same way customer OTLP would. **`publish_grafana_drafts_kibana.py`** probes **`logs-*`** / **`metrics-*`** first so Lens works against OTLP-backed streams.
+- **“Nothing in metrics-*” in Discover:** the **Observability → Discover** search bar often ships a **narrow** pattern (e.g. `metrics-*.otel-*`, `metrics-apm*`) and **does not include** the broad wildcard **`metrics-*`**. Edit the pattern and append **`,metrics-*`** (or switch to **Stack Management → Data views** and create **`metrics-*`** with **`@timestamp`**). In **ES|QL**, run **`FROM metrics-* | LIMIT 5`** to confirm documents exist regardless of that default.
+- **Histogram looks empty but the table has rows:** set the time picker to **Last 15 minutes** / **Last 24 hours** and ensure the **end** time includes **now**; the chart buckets may stop earlier than your newest `@timestamp`, so the table shows hits while the graph looks blank.
 - **Traces in Discover:** create a data view if needed: **Stack Management → Data views → Create** → **`traces-*`** → **`@timestamp`**.
 - **Applications**, **Infrastructure**, and **Hosts** align with **OTLP** / APM ingest — run **`./scripts/start_workshop_otel.sh`** if Alloy is not up.
 - **Legacy bulk seed** (`seed_workshop_telemetry.py`) bypasses OTLP; enable only via **`WORKSHOP_ALLOW_BULK_SEED=1`** on host bootstrap for special facilitator cases.

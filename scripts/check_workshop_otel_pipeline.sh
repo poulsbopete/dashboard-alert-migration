@@ -67,3 +67,7 @@ echo "  cd /root/workshop && source ~/.bashrc && ./scripts/start_workshop_otel.s
 echo "=== If Alloy is up but Elastic has no data ==="
 echo "  tail -50 /tmp/workshop-alloy.log   # look for export errors to mOTLP"
 echo "  echo \"\\\$WORKSHOP_OTLP_ENDPOINT\" should be the HTTPS base URL from Kibana (no /v1/traces path)."
+echo "=== Discover shows no metrics-* ==="
+echo "  Default Discover index pattern often omits broad metrics-* — add \`,metrics-*\` to the pattern or use ES|QL:"
+echo "  Observability → Discover → ES|QL:  FROM metrics-* | LIMIT 10"
+echo "  If the table has rows but charts are empty, shorten the time range (e.g. Last 15m) and end at now."
