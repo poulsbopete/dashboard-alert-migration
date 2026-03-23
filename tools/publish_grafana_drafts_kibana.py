@@ -261,6 +261,22 @@ def _esql_ident(name: str) -> str:
     return f"`{n.replace('`', '')}`"
 
 
+def _esql_bucket_count() -> int:
+    raw = (os.environ.get("WORKSHOP_ESQL_BUCKET_COUNT") or "168").strip()
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 168
+    return max(24, min(n, 512))
+
+
+def _esql_bucket_expr(tf: str) -> str:
+    """ES|QL time bucket for STATS BY bucket = … (range follows dashboard time picker)."""
+    col = _esql_ident(tf)
+    nb = _esql_bucket_count()
+    return f"BUCKET({col}, {nb})"
+
+
 def _esql_http_status_column() -> str | None:
     """
     When set, GROUP BY this column for HTTP status–style Lens bars.
