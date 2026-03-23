@@ -12,23 +12,6 @@ notes:
 
     **Live workshop data** flows like this (same as Lab 1 — Alloy → Elastic **mOTLP**):
 
-    ```mermaid
-    flowchart TB
-      subgraph vm["Workshop VM"]
-        PY["Python OTLP SDK\nfleet + Datadog-style emitters"]
-        AL["Grafana Alloy\nOTLP :4317 / :4318"]
-        PR["Prometheus scrape\nAlloy self-metrics :12345"]
-        PY --> AL
-        PR --> AL
-      end
-      AL -->|"OTLP/HTTP + API key\nWORKSHOP_OTLP_*"| M["Elastic managed OTLP\nmOTLP"]
-      M --> P["Observability\nServerless"]
-      P --> D["Data: logs-* · metrics-* · traces-*"]
-      D --> K["Kibana\nbrowser tab :8080"]
-    ```
-
-    **If the diagram does not render**, use this view:
-
     ```
                       ┌──────────────────────────────┐
                       │  Python OTLP (fleet, DD OTLP) │
