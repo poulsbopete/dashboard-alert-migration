@@ -3,9 +3,8 @@
 Publish workshop Grafana→Elastic or Datadog→Elastic *draft* JSON into Kibana.
 
 **Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels: each widget’s **ES|QL** is
-chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → CPU % / request-rate proxies, HTTP → status bars, latency
-→ traces or rate proxy). Padded “extra” panels still **vary** by index. The resolved `FROM` must include fields the query needs
-(logs vs metrics vs traces-only). If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
+chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → OTLP **system.cpu.utilization** / **http.server.request.count**, HTTP → **attributes.http.response.status_code**, latency
+→ **http.server.request.duration** or APM transactions). Type-specific panels use **narrow** ``FROM`` targets (**``metrics-*``**, **``logs-*``**, **``traces-*``**) so **logs|metrics** unions do not trip ES|QL verification. Padded “extra” panels still **vary** by index. If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
 **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
 
 **Probes:** **`logs-*`**, **`metrics-*`**, workshop streams, unions, then **`traces-*`**. Override with **`WORKSHOP_ESQL_FROM`**.
@@ -399,37 +398,38 @@ def _panel_esql_spec(
         if cap["metrics"]:
             if panel_index % 2 == 0:
                 return _spec_xy(
-                    fc,
+                    "metrics-*",
                     tf,
                     layer="line",
                     query=(
-                        f"FROM {fc} | STATS m = AVG(system.cpu.total.norm.pct) "
+                        f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) "
                         f"BY bucket = {q_b}"
                     ),
                     x="bucket",
                     ys=[("m", None)],
                     breakdown=None,
-                    lens_title=f"{lt} (CPU % — workshop proxy for GC/runtime)",
+                    lens_title=f"{lt} (CPU utilization — OTLP fleet gauge)",
                 )
             return _spec_xy(
-                fc,
+                "metrics-*",
                 tf,
                 layer="line",
                 query=(
-                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}"
+                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"BY bucket = {q_b}"
                 ),
                 x="bucket",
-                ys=[("m", None)],
+                ys=[("c", None)],
                 breakdown=None,
-                lens_title=f"{lt} (request rate — workshop proxy for Go/runtime)",
+                lens_title=f"{lt} (HTTP request count — workshop proxy for Go/runtime)",
             )
         if cap["logs"]:
             return _spec_xy(
-                fc,
+                "logs-*",
                 tf,
                 layer="line",
                 query=(
-                    f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
                 ),
                 x="bucket",
                 ys=[("c", None)],
@@ -438,14 +438,14 @@ def _panel_esql_spec(
             )
 
     if cat == "latency":
-        # Trace-only FROM avoids ES|QL errors on logs/metrics unions (processor.event / duration fields).
+        # Narrow indices: unions break when processor.event / histogram fields exist on one side only.
         if cap["traces"] and not cap["logs"]:
             return _spec_xy(
-                fc,
+                "traces-*",
                 tf,
                 layer="line",
                 query=(
-                    f'FROM {fc} | WHERE processor.event == "transaction" '
+                    f'FROM traces-* | WHERE processor.event == "transaction" '
                     f"| STATS m = AVG(transaction.duration.us) BY bucket = {q_b}"
                 ),
                 x="bucket",
@@ -455,16 +455,17 @@ def _panel_esql_spec(
             )
         if cap["metrics"]:
             return _spec_xy(
-                fc,
+                "metrics-*",
                 tf,
                 layer="line",
                 query=(
-                    f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}"
+                    f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
+                    f"BY bucket = {q_b}"
                 ),
                 x="bucket",
                 ys=[("m", None)],
                 breakdown=None,
-                lens_title=f"{lt} (rate — latency proxy)",
+                lens_title=f"{lt} (avg HTTP duration — latency proxy)",
             )
 
     if cat == "http":
@@ -577,11 +578,11 @@ def _panel_esql_spec(
 
     if cat == "errors" and cap["logs"]:
         return _spec_xy(
-            fc,
+            "logs-*",
             tf,
             layer="bar",
             query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY lvl = log.level | SORT c DESC | LIMIT 8"
+                "FROM logs-* | STATS c = COUNT(*) BY lvl = log.level | SORT c DESC | LIMIT 8"
             ),
             x="lvl",
             ys=[("c", None)],
@@ -591,28 +592,30 @@ def _panel_esql_spec(
 
     if cat == "cpu" and cap["metrics"]:
         return _spec_xy(
-            fc,
+            "metrics-*",
             tf,
             layer="line",
-            query=f"FROM {fc} | STATS m = AVG(system.cpu.total.norm.pct) BY bucket = {q_b}",
-            x="bucket",
-            ys=[("m", None)],
-            breakdown=None,
-            lens_title=f"{lt} (CPU %)",
-        )
-
-    if cat == "memory" and cap["metrics"]:
-        return _spec_xy(
-            fc,
-            tf,
-            layer="area",
             query=(
-                f"FROM {fc} | STATS m = AVG(system.memory.actual.used.pct) BY bucket = {q_b}"
+                f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) BY bucket = {q_b}"
             ),
             x="bucket",
             ys=[("m", None)],
             breakdown=None,
-            lens_title=f"{lt} (memory %)",
+            lens_title=f"{lt} (CPU utilization — OTLP)",
+        )
+
+    if cat == "memory" and cap["metrics"]:
+        return _spec_xy(
+            "metrics-*",
+            tf,
+            layer="area",
+            query=(
+                f"FROM metrics-* | STATS m = AVG(`system.memory.utilization`) BY bucket = {q_b}"
+            ),
+            x="bucket",
+            ys=[("m", None)],
+            breakdown=None,
+            lens_title=f"{lt} (memory utilization — OTLP)",
         )
 
     if cat == "storage" and cap["metrics"]:
@@ -620,10 +623,10 @@ def _panel_esql_spec(
 
     if cat == "k8s" and cap["logs"]:
         return _spec_xy(
-            fc,
+            "logs-*",
             tf,
             layer="bar",
-            query=f"FROM {fc} | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 10",
+            query="FROM logs-* | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 10",
             x="h",
             ys=[("c", None)],
             breakdown=None,
@@ -633,11 +636,11 @@ def _panel_esql_spec(
     if cat == "db":
         if cap["logs"]:
             return _spec_xy(
-                fc,
+                "logs-*",
                 tf,
                 layer="line",
                 query=(
-                    f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
                 ),
                 x="bucket",
                 ys=[("c", None)],
@@ -646,12 +649,12 @@ def _panel_esql_spec(
             )
         if cap["traces"] and not cap["logs"]:
             return _spec_xy(
-                fc,
+                "traces-*",
                 tf,
                 layer="bar",
                 query=(
-                    f"FROM {fc} | STATS c = COUNT(*) BY name = span.name "
-                    f"| SORT c DESC | LIMIT 10"
+                    "FROM traces-* | STATS c = COUNT(*) BY name = span.name "
+                    "| SORT c DESC | LIMIT 10"
                 ),
                 x="name",
                 ys=[("c", None)],
@@ -662,26 +665,32 @@ def _panel_esql_spec(
     if cat == "scrape":
         if cap["metrics"]:
             return _spec_xy(
-                fc,
+                "metrics-*",
                 tf,
                 layer="line",
-                query=f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}",
+                query=(
+                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"BY bucket = {q_b}"
+                ),
                 x="bucket",
-                ys=[("m", None)],
+                ys=[("c", None)],
                 breakdown=None,
-                lens_title=f"{lt} (scrape/target proxy — request rate)",
+                lens_title=f"{lt} (HTTP request volume — scrape proxy)",
             )
 
     if cat == "network" and cap["metrics"]:
         return _spec_xy(
-            fc,
+            "metrics-*",
             tf,
             layer="area",
-            query=f"FROM {fc} | STATS m = AVG(workshop.requests.rate) BY bucket = {q_b}",
+            query=(
+                f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                f"BY bucket = {q_b}"
+            ),
             x="bucket",
-            ys=[("m", None)],
+            ys=[("c", None)],
             breakdown=None,
-            lens_title=f"{lt} (traffic proxy — request rate)",
+            lens_title=f"{lt} (HTTP request volume — traffic proxy)",
         )
 
     # generic: vary chart type / breakdown so padded panels on one dashboard still differ
@@ -702,11 +711,11 @@ def _panel_esql_spec(
             )
         if cap["logs"]:
             return _spec_xy(
-                fc,
+                "logs-*",
                 tf,
                 layer="bar",
                 query=(
-                    f"FROM {fc} | STATS c = COUNT(*) BY path = service.name | SORT c DESC | LIMIT 10"
+                    "FROM logs-* | STATS c = COUNT(*) BY path = service.name | SORT c DESC | LIMIT 10"
                 ),
                 x="path",
                 ys=[("c", None)],
@@ -715,11 +724,11 @@ def _panel_esql_spec(
             )
     if cap["logs"] and panel_index % 3 == 2:
         return _spec_xy(
-            fc,
+            "logs-*",
             tf,
             layer="line",
             query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
             ),
             x="bucket",
             ys=[("c", None)],
@@ -728,11 +737,11 @@ def _panel_esql_spec(
         )
     if cap["traces"] and not cap["logs"] and panel_index % 5 == 4:
         return _spec_xy(
-            fc,
+            "traces-*",
             tf,
             layer="bar",
             query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 10"
+                "FROM traces-* | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 10"
             ),
             x="name",
             ys=[("c", None)],
@@ -1150,7 +1159,21 @@ def main() -> int:
     ok = 0
     failed: list[str] = []
     for path in files:
-        draft = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            raw = path.read_text(encoding="utf-8")
+            draft = json.loads(raw)
+        except OSError as e:
+            failed.append(f"{path.name}: read error: {e}")
+            print("FAIL", path.name, e, file=sys.stderr)
+            continue
+        except json.JSONDecodeError as e:
+            failed.append(f"{path.name}: invalid JSON: {e}")
+            print("FAIL", path.name, e, file=sys.stderr)
+            continue
+        if not isinstance(draft, dict):
+            failed.append(f"{path.name}: draft root must be a JSON object")
+            print("FAIL", path.name, "expected object at root", file=sys.stderr)
+            continue
         title = str(draft.get("title") or path.stem)
         list_desc = _short_listing_description(draft, title)
         dash_id = sanitize_id(path.stem)
