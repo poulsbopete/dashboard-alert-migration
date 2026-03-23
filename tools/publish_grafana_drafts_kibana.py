@@ -310,6 +310,8 @@ def _classify_grafana_panel(promql: str, panel_title: str) -> str:
         return "go_runtime"
     if re.search(r"histogram_quantile|_bucket\b|quantile|p9[05]|p99|latency|duration_second", s):
         return "latency"
+    if re.search(r"operation_errors", s):
+        return "operation_errors"
     if re.search(r"http_|http\.|requests_total|status_code|5xx|4xx|response_code", s):
         return "http"
     if re.search(r"\berror\b|exception|failed|failures|5[0-9]{2}\b", s) and "http" not in s[:80]:
@@ -476,6 +478,37 @@ def _panel_esql_spec(
             lens_title=f"{lt} (HTTP status)",
         )
 
+    if cat == "operation_errors" and cap["metrics"]:
+        # Prometheus "reason" label → OTLP HTTP status on workshop metrics (http.server.request.count)
+        return _spec_xy(
+            "metrics-*",
+            tf,
+            layer="bar",
+            query=(
+                "FROM metrics-* | STATS c = COUNT(*) BY reason = http.response.status_code "
+                "| SORT c DESC | LIMIT 12"
+            ),
+            x="reason",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (volume by HTTP status — OTLP proxy for operation_errors)",
+        )
+
+    if cat == "operation_errors" and cap["traces"] and not cap["metrics"]:
+        return _spec_xy(
+            fc,
+            tf,
+            layer="bar",
+            query=(
+                f"FROM {fc} | STATS c = COUNT(*) BY reason = http.response.status_code "
+                f"| SORT c DESC | LIMIT 12"
+            ),
+            x="reason",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (HTTP status on traces — proxy)",
+        )
+
     if cat == "errors" and cap["logs"]:
         return _spec_xy(
             fc,
@@ -586,19 +619,34 @@ def _panel_esql_spec(
         )
 
     # generic: vary chart type / breakdown so padded panels on one dashboard still differ
-    if cap["logs"] and panel_index % 3 == 1:
-        return _spec_xy(
-            fc,
-            tf,
-            layer="bar",
-            query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY path = url.path | SORT c DESC | LIMIT 10"
-            ),
-            x="path",
-            ys=[("c", None)],
-            breakdown=None,
-            lens_title=f"{lt} (URL path)",
-        )
+    # OTLP fleet sets http.route on metrics, not url.path (legacy bulk seed field).
+    if panel_index % 3 == 1:
+        if cap["metrics"]:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="bar",
+                query=(
+                    "FROM metrics-* | STATS c = COUNT(*) BY path = http.route | SORT c DESC | LIMIT 10"
+                ),
+                x="path",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (HTTP route)",
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                fc,
+                tf,
+                layer="bar",
+                query=(
+                    f"FROM {fc} | STATS c = COUNT(*) BY path = service.name | SORT c DESC | LIMIT 10"
+                ),
+                x="path",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (top services)",
+            )
     if cap["logs"] and panel_index % 3 == 2:
         return _spec_xy(
             fc,
