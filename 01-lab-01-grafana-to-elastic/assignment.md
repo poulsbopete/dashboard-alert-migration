@@ -8,6 +8,48 @@ teaser: One-click Terminal migration via Kibana API, or Agent Skills + Cursor on
 notes:
 - type: text
   contents: |
+    ## Telemetry workflow
+
+    **Live workshop data** flows like this (same path customers use with OTLP → Elastic):
+
+    ```mermaid
+    flowchart TB
+      subgraph vm["Workshop VM"]
+        PY["Python OTLP SDK\nfleet + Datadog-style emitters"]
+        AL["Grafana Alloy\nOTLP :4317 / :4318"]
+        PR["Prometheus scrape\nAlloy self-metrics :12345"]
+        PY --> AL
+        PR --> AL
+      end
+      AL -->|"OTLP/HTTP + API key\nWORKSHOP_OTLP_*"| M["Elastic managed OTLP\nmOTLP"]
+      M --> P["Observability\nServerless"]
+      P --> D["Data: logs-* · metrics-* · traces-*"]
+      D --> K["Kibana\nbrowser tab :8080"]
+    ```
+
+    **If the diagram does not render**, use this view:
+
+    ```
+                      ┌──────────────────────────────┐
+                      │  Python OTLP (fleet, DD OTLP) │
+                      └──────────────┬───────────────┘
+                                     │ OTLP
+    Prometheus :12345 ──► Grafana Alloy (:4317 / :4318)
+                                     │
+                          OTLP/HTTP + Authorization
+                                     ▼
+                        Elastic managed OTLP (mOTLP)
+                                     ▼
+                        Observability Serverless project
+                                     ▼
+                    logs-*    metrics-*    traces-*
+                                     ▼
+                           Kibana (proxied :8080)
+    ```
+
+    Track **bootstrap** creates the project, wires **nginx → Kibana**, installs **Alloy + emitters** when **mOTLP** URL and **API key** are available.
+- type: text
+  contents: |
     ## Track goal
 
     **Migrate Grafana (and in Lab 2, Datadog) workloads toward Elastic Observability Serverless**—this lab is the Grafana

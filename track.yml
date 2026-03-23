@@ -20,6 +20,8 @@ description: |
 
   The sandbox is a single **elastic/es3-api-v2** host: it **creates** an Observability Serverless project at track start,
   proxies **Kibana** on port **8080**, and includes the workshop repo (Python venv + **assets/**) for the CLIs.
+
+  **Telemetry diagram:** loading / wait slides include a **Mermaid + ASCII** workflow (**Python OTLP → Grafana Alloy → Elastic mOTLP → Serverless → Kibana**).
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - elastic
