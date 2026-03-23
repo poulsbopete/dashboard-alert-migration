@@ -8,6 +8,11 @@ teaser: Ten Datadog-style dashboards plus four monitors — CLI drafts, Cursor +
 notes:
 - type: text
   contents: |
+    ## Track goal
+
+    **Migrate Datadog (with Grafana in Lab 1) customers to Elastic Observability Serverless**—dashboards and monitors become
+    Kibana drafts, then rules and Lens panels on **live** OTLP-backed data where possible.
+
     ## This track (two labs)
 
     **Lab 1** — **20** Grafana dashboards → `build/elastic-dashboards/` (Cursor + **kibana-dashboards** skill).
@@ -31,7 +36,9 @@ notes:
     **KQL** for Kibana. Let **Agent Skills** own API details; use the model for translation and tedious JSON reshaping—always
     validate on **live** Serverless data.
 
-    Next: run both CLIs, then refine in the **Elastic Serverless** tab. (Terminal + Elastic Serverless only.)
+    Next: run both CLIs, **publish** dashboards with **`migrate_datadog_dashboards_to_serverless.sh`** or **`publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards`**, then refine in **Elastic Serverless**. (Terminal + Elastic Serverless only.)
+
+    **Live OTLP:** with Alloy + mOTLP running, **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) sends Datadog-style OpenTelemetry into the **Elastic managed OTLP** path (same as Lab 1 telemetry).
 tabs:
 - id: fsizfoyfjtag
   title: Terminal
@@ -60,6 +67,9 @@ enhanced_loading: null
 
 # Lab 2 — Datadog dashboards & monitors → Elastic
 
+This lab is the **Datadog → Elastic Observability Serverless** half of the track: representative **dashboard** and **monitor**
+exports become drafts you refine in Kibana—mirroring how you would onboard a Datadog estate without redoing every panel by hand.
+
 ## Outcome
 
 1. Convert **10** Datadog-style **dashboard** JSON files (`assets/datadog/dashboards/*.json`) into Elastic dashboard drafts in `build/elastic-datadog-dashboards/`.
@@ -82,6 +92,28 @@ mkdir -p build/elastic-datadog-dashboards
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
 ls -1 build/elastic-datadog-dashboards/*-elastic-draft.json | wc -l   # expect 10
 ```
+
+## 2b) Publish dashboards to Kibana (otherwise they only exist as JSON on disk)
+
+Same **Dashboards API** publisher as Lab 1 Grafana (`tools/publish_grafana_drafts_kibana.py` — it understands **`migration.datadog_query`** on drafts).
+
+**One command (Instruqt Terminal):** converts, ensures OTLP, publishes all **10**:
+
+```bash
+cd /root/workshop && source ~/.bashrc
+./scripts/migrate_datadog_dashboards_to_serverless.sh
+```
+
+**Or** if you already ran step **2**, only publish:
+
+```bash
+cd /root/workshop && source ~/.bashrc
+./scripts/start_workshop_otel.sh    # optional but helps Lens charts populate
+sleep 25
+python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
+```
+
+Open **Elastic Serverless → Dashboards** and filter or scroll for **`(Datadog dashboard import draft)`** in the title.
 
 ## 3) Monitor → alert drafts
 

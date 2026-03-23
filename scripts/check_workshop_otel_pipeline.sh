@@ -30,7 +30,7 @@ echo
 
 echo "--- Processes (alloy + Python emitters) ---"
 pgrep -af '[a]lloy run' || echo "  (no alloy run … process)"
-pgrep -af '[o]tel_workshop_emitter' || echo "  (no otel_workshop_emitter.py)"
+pgrep -af '[o]tel_workshop_fleet' || echo "  (no otel_workshop_fleet.py)"
 pgrep -af '[d]atadog_otel_to_elastic' || echo "  (no datadog_otel_to_elastic.py)"
 echo
 
@@ -56,7 +56,7 @@ unset _motlp_body 2>/dev/null || true
 echo
 
 echo "--- Recent log lines ---"
-for f in /tmp/workshop-alloy.log /tmp/workshop-emitter.log /tmp/workshop-datadog-otel.log; do
+for f in /tmp/workshop-alloy.log /tmp/workshop-fleet.log /tmp/workshop-fleet-supervisor.log /tmp/workshop-datadog-otel.log; do
   echo ">>> $f"
   tail -n 12 "$f" 2>/dev/null || echo "  (file missing)"
   echo

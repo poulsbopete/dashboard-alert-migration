@@ -6,7 +6,7 @@ description: >
   and Kibana Dashboards API publishing.
 metadata:
   author: workshop
-  version: 0.2.10
+  version: 0.2.13
 ---
 
 # Grafana → Elastic (workshop)
@@ -15,7 +15,7 @@ metadata:
 
 **Grafana → Elastic Serverless** migration practice: **Grafana** exports in `assets/grafana/` (**20** sample dashboards)
 → **Elastic** drafts under `build/elastic-dashboards/`, then **Kibana** on the **Observability Serverless** project from
-**es3-api**. **Telemetry:** **Grafana Alloy** → Elastic **mOTLP** (aligned with **elastic-autonomous-observability**); fallback bulk seed **`./scripts/seed_workshop_telemetry.sh`**. Restart OTLP pipeline: **`./scripts/start_workshop_otel.sh`**.
+**es3-api**. **Telemetry:** **OpenTelemetry SDK** (Python emitters) → **Grafana Alloy** → Elastic **mOTLP** — same path as production OTLP. Restart: **`./scripts/start_workshop_otel.sh`**. Legacy bulk JSON (**`seed_workshop_telemetry.py`**) exists only if **`WORKSHOP_ALLOW_BULK_SEED=1`** on bootstrap (not default).
 
 ## Prerequisites
 
@@ -29,19 +29,20 @@ cd /root/workshop && source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Converts **20** Grafana exports, runs **`tools/seed_workshop_telemetry.py`** ( **`@timestamp`** for ES|QL ), then publishes via **`tools/publish_grafana_drafts_kibana.py`**
+Converts **20** Grafana exports, runs **`./scripts/start_workshop_otel.sh`** (OTLP → mOTLP), brief wait, then publishes via **`tools/publish_grafana_drafts_kibana.py`**
 (**`POST /api/dashboards?apiVersion=1`**: Markdown + **mixed Lens** — each panel’s chart/ES|QL follows **PromQL + panel title** (not identical widgets on every dashboard); pad with **`WORKSHOP_MIN_LENS_PANELS`** / **`WORKSHOP_MAX_LENS_PANELS`**; **`WORKSHOP_SIMPLE_LENS=1`** = uniform lines).
 
 ## Path B — Laptop + Cursor (same flow as Lab 1 assignment)
 
 Use **Instruqt Terminal** (secrets in `~/.bashrc`) and **laptop** (clone + Cursor). Order matters.
 
-1. **Laptop:** clone **`git@github.com:poulsbopete/dashboard-alert-migration.git`**, **`cd dashboard-alert-migration`**. Grafana inputs: **`assets/grafana/*.json`**.
+1. **Laptop:** clone **`https://github.com/poulsbopete/dashboard-alert-migration.git`** (or **`git@github.com:poulsbopete/dashboard-alert-migration.git`**), **`cd dashboard-alert-migration`**. Repo: [github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration). Grafana inputs: **`assets/grafana/*.json`**.
 2. **Instruqt Terminal:** **`cd /root/workshop && source ~/.bashrc`**, then:
 
    ```bash
-   # When bootstrap succeeded: KIBANA_URL, ES_URL, ES_USERNAME, ES_PASSWORD, ES_API_KEY, ES_DEPLOYMENT_ID, WORKSHOP_ROOT.
-   # WORKSHOP_OTLP_ENDPOINT is often unset until you add it: Kibana → Add data → OpenTelemetry (…ingest….elastic.cloud).
+   # Exports: KIBANA_URL, ES_URL, ES_USERNAME, ES_PASSWORD, ES_API_KEY (when bootstrap succeeded), ES_DEPLOYMENT_ID,
+   # WORKSHOP_ROOT, WORKSHOP_OTLP_ENDPOINT (unique per Instruqt play — from ~/.bashrc / project_results or derived by
+   # ./scripts/start_workshop_otel.sh from ES_URL; never paste another lab’s ingest URL).
    grep -E '^export (KIBANA_URL|ES_URL|ES_USERNAME|ES_PASSWORD|ES_API_KEY|ES_DEPLOYMENT_ID|WORKSHOP_ROOT|WORKSHOP_OTLP_ENDPOINT|WORKSHOP_OTLP_AUTH_HEADER)=' ~/.bashrc
    ```
 

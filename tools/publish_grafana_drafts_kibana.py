@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Publish workshop Grafana→Elastic *draft* JSON into Kibana.
+Publish workshop Grafana→Elastic or Datadog→Elastic *draft* JSON into Kibana.
 
 **Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels: each widget’s **ES|QL** is
-chosen from that Grafana panel’s **PromQL + title** (e.g. Go/GC → CPU % / request-rate proxies, HTTP → status bars, latency
+chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → CPU % / request-rate proxies, HTTP → status bars, latency
 → traces or rate proxy). Padded “extra” panels still **vary** by index. The resolved `FROM` must include fields the query needs
 (logs vs metrics vs traces-only). If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
 **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
@@ -21,6 +21,7 @@ Requires (after `source ~/.bashrc` on es3-api):
 
 Usage:
   python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-dashboards
+  python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
 """
 from __future__ import annotations
 
@@ -81,6 +82,13 @@ def fetch_core_migration_version(kibana: str, headers: dict[str, str], auth: Any
     return "9.0.0"
 
 
+def _migration_source_query(mig: dict[str, Any]) -> str:
+    """Grafana drafts use migration.promql; Datadog drafts use migration.datadog_query."""
+    if not isinstance(mig, dict):
+        return ""
+    return str(mig.get("promql") or mig.get("datadog_query") or "").strip()
+
+
 def sanitize_id(stem: str) -> str:
     base = stem.replace("-elastic-draft", "").lower().replace("_", "-")
     s = re.sub(r"[^a-z0-9-]+", "-", base)
@@ -95,9 +103,13 @@ def build_description(draft: dict[str, Any]) -> str:
             continue
         title = pan.get("title") or "panel"
         mig = pan.get("migration") or {}
-        promql = mig.get("promql") or ""
+        src = _migration_source_query(mig)
         note = pan.get("note") or ""
-        parts.append(f"### {title}\n\nPromQL: `{promql}`\n\n{note}")
+        if (mig.get("datadog_query") or "").strip() and not (mig.get("promql") or "").strip():
+            qline = f"Datadog: `{src}`" if src else "Datadog: _(no query)_"
+        else:
+            qline = f"PromQL: `{src}`" if src else "PromQL: _(none)_"
+        parts.append(f"### {title}\n\n{qline}\n\n{note}")
     body = "\n\n".join(parts)
     return body[:50000]
 
@@ -111,15 +123,20 @@ def _short_listing_description(draft: dict[str, Any], title: str) -> str:
             if not isinstance(pan, dict):
                 continue
             mig = pan.get("migration") or {}
-            pq = (mig.get("promql") or "").strip()
+            pq = _migration_source_query(mig)
             ptitle = (pan.get("title") or "").strip()
             if pq:
                 lines.append(pq[:110] + ("…" if len(pq) > 110 else ""))
             elif ptitle:
                 lines.append(ptitle[:72])
+    tags = draft.get("tags") or []
+    is_dd = isinstance(tags, list) and any(
+        isinstance(t, str) and "datadog-dashboard" in t.lower() for t in tags
+    )
+    prefix = "Datadog→Elastic — " if is_dd else "Grafana→Elastic — "
     if lines:
-        return ("Grafana→Elastic — " + " · ".join(lines[:2]))[:300]
-    return ("Grafana→Elastic — " + (title.strip() or "import draft"))[:300]
+        return (prefix + " · ".join(lines[:2]))[:300]
+    return (prefix + (title.strip() or "import draft"))[:300]
 
 
 def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
@@ -127,7 +144,7 @@ def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
     tips = (
         "Lens panels use **ES|QL**; PromQL below is the Grafana source for migration.",
         "Use **Edit** to swap queries. Publisher options (**WORKSHOP_***) are in the repo **README**.",
-        "Traces on the VM: **`python3 tools/seed_workshop_telemetry.py`** (no lab restart).",
+        "Live data: **`./scripts/start_workshop_otel.sh`** on the workshop VM (OTLP → mOTLP).",
         "Force a data pattern: **`export WORKSHOP_ESQL_FROM=…`** then re-run **`publish_grafana_drafts_kibana.py`**.",
         "Many charts? Short Grafana JSON is padded — **`WORKSHOP_MIN_LENS_PANELS`** / **`WORKSHOP_MAX_LENS_PANELS`** in README.",
         "Duplicate lines only: **`WORKSHOP_SIMPLE_LENS=1`** when debugging.",
@@ -136,9 +153,18 @@ def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
     )
     idx = sum(ord(c) for c in dashboard_title) % len(tips)
     tip = tips[idx]
-    ttl = (dashboard_title.strip() or "Grafana import draft").replace("\n", " ")[:200]
-    header = f"## Grafana → Elastic\n\n**{ttl}** — {tip}\n\n---\n\n"
-    body = detail.strip() if detail.strip() else "_No per-panel PromQL was captured in this export._"
+    is_dd = "datadog" in dashboard_title.lower()
+    ttl = (dashboard_title.strip() or ("Datadog import draft" if is_dd else "Grafana import draft")).replace("\n", " ")[:200]
+    header = f"## {'Datadog' if is_dd else 'Grafana'} → Elastic\n\n**{ttl}** — {tip}\n\n---\n\n"
+    body = (
+        detail.strip()
+        if detail.strip()
+        else (
+            "_No per-panel source queries were captured in this export._"
+            if is_dd
+            else "_No per-panel PromQL was captured in this export._"
+        )
+    )
     return (header + body)[:50000]
 
 
@@ -341,7 +367,7 @@ def _panel_esql_spec(
 ) -> dict[str, Any]:
     """Pick one Lens recipe from this Grafana panel’s PromQL/title + resolved FROM capabilities."""
     fc = from_clause.strip()
-    pq = str((pan.get("migration") or {}).get("promql") or "")
+    pq = _migration_source_query(pan.get("migration") or {})
     ptitle = str(pan.get("title") or "")
     cat = _classify_grafana_panel(pq, ptitle)
     lt = _truncate_lens_title(ptitle, pq)
@@ -362,7 +388,7 @@ def _panel_esql_spec(
     def vol_area() -> dict[str, Any]:
         return vol_line("area")
 
-    # --- category-specific (workshop bulk seed + optional traces) ---
+    # --- category-specific (OTLP-backed logs/metrics/traces probes) ---
     if cat == "go_runtime":
         if cap["metrics"]:
             if panel_index % 2 == 0:
@@ -684,7 +710,7 @@ def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict
     for pan in panel_rows:
         if not isinstance(pan, dict):
             continue
-        pq = str((pan.get("migration") or {}).get("promql") or "")
+        pq = _migration_source_query(pan.get("migration") or {})
         ptitle = str(pan.get("title") or "")
         lens_title = _truncate_lens_title(ptitle, pq)
         out.append(
@@ -983,8 +1009,15 @@ def import_one_ndjson(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Create Kibana dashboards from Grafana migration drafts via HTTP API.")
-    ap.add_argument("--drafts-dir", type=Path, default=Path("build/elastic-dashboards"))
+    ap = argparse.ArgumentParser(
+        description="Create Kibana dashboards from Grafana or Datadog migration drafts (*-elastic-draft.json) via HTTP API."
+    )
+    ap.add_argument(
+        "--drafts-dir",
+        type=Path,
+        default=Path("build/elastic-dashboards"),
+        help="Directory containing *-elastic-draft.json (e.g. build/elastic-dashboards or build/elastic-datadog-dashboards)",
+    )
     args = ap.parse_args()
     drafts_dir: Path = args.drafts_dir
 

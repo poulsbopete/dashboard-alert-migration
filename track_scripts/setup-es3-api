@@ -251,44 +251,66 @@ fi
 
 mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards /root/workshop/build/elastic-alerts
 
-MOTLP_ENDPOINT=""
+# Managed OTLP base URL: project_results first, then same derivation as scripts/start_workshop_otel.sh
+MOTLP_FROM_API=""
 if [ -f /tmp/project_results.json ]; then
-  MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.motlp // empty' /tmp/project_results.json)"
-  if [ -z "$MOTLP_ENDPOINT" ] || [ "$MOTLP_ENDPOINT" = "null" ]; then
-    MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.otlp // empty' /tmp/project_results.json)"
+  MOTLP_FROM_API="$(jq -r --arg region "$REG" '.[$region].endpoints.motlp // empty' /tmp/project_results.json)"
+  if [ -z "$MOTLP_FROM_API" ] || [ "$MOTLP_FROM_API" = "null" ]; then
+    MOTLP_FROM_API="$(jq -r --arg region "$REG" '.[$region].endpoints.otlp // empty' /tmp/project_results.json)"
   fi
-  if [ -z "$MOTLP_ENDPOINT" ] || [ "$MOTLP_ENDPOINT" = "null" ]; then
-    MOTLP_ENDPOINT="$(jq -r --arg region "$REG" '.[$region].endpoints.otel // empty' /tmp/project_results.json)"
+  if [ -z "$MOTLP_FROM_API" ] || [ "$MOTLP_FROM_API" = "null" ]; then
+    MOTLP_FROM_API="$(jq -r --arg region "$REG" '.[$region].endpoints.otel // empty' /tmp/project_results.json)"
   fi
 fi
-if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
-  agent variable set ES_OTLP_ENDPOINT "$MOTLP_ENDPOINT" || true
+
+DERIVED_OTLP=""
+if [[ -n "${ES_URL:-}" ]] && [[ "$ES_URL" == *".es."* ]]; then
+  DERIVED_OTLP="${ES_URL%/}"
+  DERIVED_OTLP="${DERIVED_OTLP//.es./.ingest.}"
+elif [[ -n "${KIBANA_URL:-}" ]] && [[ "$KIBANA_URL" == *".kb."* ]]; then
+  DERIVED_OTLP="${KIBANA_URL%/}"
+  DERIVED_OTLP="${DERIVED_OTLP//.kb./.ingest.}"
+fi
+
+WORKSHOP_OTLP_BASE=""
+if [ -n "$MOTLP_FROM_API" ] && [ "$MOTLP_FROM_API" != "null" ]; then
+  WORKSHOP_OTLP_BASE="$MOTLP_FROM_API"
+elif [ -n "$DERIVED_OTLP" ]; then
+  WORKSHOP_OTLP_BASE="$DERIVED_OTLP"
+fi
+
+if [ -n "$WORKSHOP_OTLP_BASE" ]; then
+  agent variable set ES_OTLP_ENDPOINT "$WORKSHOP_OTLP_BASE" || true
 fi
 
 PIPELINE_OK=0
-if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ] && [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
+if [ -n "$WORKSHOP_OTLP_BASE" ] && [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
   echo "Starting Grafana Alloy → Elastic managed OTLP (same pattern as elastic-autonomous-observability track)..."
-  export WORKSHOP_OTLP_ENDPOINT="$MOTLP_ENDPOINT"
+  export WORKSHOP_OTLP_ENDPOINT="$WORKSHOP_OTLP_BASE"
   export WORKSHOP_OTLP_AUTH_HEADER="ApiKey ${WORKSHOP_ES_API_KEY}"
   mkdir -p /tmp/alloy-storage
   nohup /usr/local/bin/alloy run --storage.path=/tmp/alloy-storage "$TRACK_ROOT/assets/alloy/workshop.alloy" >>/tmp/workshop-alloy.log 2>&1 &
   sleep 4
-  nohup /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/otel_workshop_emitter.py" >>/tmp/workshop-emitter.log 2>&1 &
+  nohup /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/otel_workshop_fleet.py" >>/tmp/workshop-fleet-supervisor.log 2>&1 &
   nohup /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/datadog_otel_to_elastic.py" >>/tmp/workshop-datadog-otel.log 2>&1 &
   PIPELINE_OK=1
   echo "Alloy + OTLP emitters running (alloy.log, workshop-emitter.log, workshop-datadog-otel.log)."
-elif [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
-  echo "WARN: mOTLP URL in project_results but ES_API_KEY missing — cannot export via Alloy; using bulk seed fallback." >&2
+elif [ -n "$WORKSHOP_OTLP_BASE" ]; then
+  echo "WARN: OTLP endpoint resolved but ES_API_KEY missing — cannot start Alloy. Create an API key, source ~/.bashrc, run ./scripts/start_workshop_otel.sh" >&2
 fi
 
 if [ "$PIPELINE_OK" != "1" ]; then
-  echo "Seeding workshop telemetry (bulk API fallback: logs-workshop-default, metrics-workshop-default)..."
-  if [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
-    ES_URL="$ES_URL" ES_API_KEY="$WORKSHOP_ES_API_KEY" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
-      || echo "WARN: telemetry seed failed (Discover may be empty until you re-run scripts/seed_workshop_telemetry.sh)" >&2
-  else
-    ES_URL="$ES_URL" ES_USERNAME=admin ES_PASSWORD="$ELASTICSEARCH_PASSWORD" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
-      || echo "WARN: telemetry seed failed (Discover may be empty until you re-run scripts/seed_workshop_telemetry.sh)" >&2
+  echo "WARN: Live telemetry uses OpenTelemetry only (Grafana Alloy → mOTLP + Python OTLP SDK emitters). Bulk JSON seed is disabled by default." >&2
+  echo "      After bootstrap: cd /root/workshop && source ~/.bashrc && ./scripts/start_workshop_otel.sh" >&2
+  if [ "${WORKSHOP_ALLOW_BULK_SEED:-0}" = "1" ]; then
+    echo "WORKSHOP_ALLOW_BULK_SEED=1 — indexing legacy bulk workshop docs (not OTLP ingest)..." >&2
+    if [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
+      ES_URL="$ES_URL" ES_API_KEY="$WORKSHOP_ES_API_KEY" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
+        || echo "WARN: telemetry seed failed" >&2
+    else
+      ES_URL="$ES_URL" ES_USERNAME=admin ES_PASSWORD="$ELASTICSEARCH_PASSWORD" /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/seed_workshop_telemetry.py" \
+        || echo "WARN: telemetry seed failed" >&2
+    fi
   fi
 fi
 
@@ -303,28 +325,27 @@ fi
     printf 'export ES_API_KEY=%q\n' "$WORKSHOP_ES_API_KEY"
     echo "# Same key as Kibana → Admin and settings → API keys → workshop-migration (created by track setup)"
   fi
+  _dep_id="$(jq -r --arg region "$REG" '.[$region].id // empty' /tmp/project_results.json)"
+  if [ -n "$_dep_id" ] && [ "$_dep_id" != "null" ]; then
+    printf 'export ES_DEPLOYMENT_ID=%q\n' "$_dep_id"
+  fi
 } >>/root/.bashrc
 
-if [ -n "$MOTLP_ENDPOINT" ] && [ "$MOTLP_ENDPOINT" != "null" ]; then
+if [ -n "$WORKSHOP_OTLP_BASE" ]; then
   {
     echo ""
-    echo "# Managed OTLP (OpenTelemetry) — Alloy forwards here; copy URL from Kibana if empty: Add data → OpenTelemetry"
-    printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$MOTLP_ENDPOINT"
-    echo "# Restart Alloy + emitter: ./scripts/start_workshop_otel.sh"
-  } >>/root/.bashrc
-elif [[ -n "$ES_URL" ]] && [[ "$ES_URL" == *".es."* ]]; then
-  _der_otlp="${ES_URL%/}"
-  _der_otlp="${_der_otlp//.es./.ingest.}"
-  {
-    echo ""
-    echo "# WORKSHOP_OTLP_ENDPOINT derived from ES_URL (.es.→.ingest.) — same host as Kibana Add data → OpenTelemetry on Serverless"
-    printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$_der_otlp"
-    echo "# Restart Alloy + emitter: ./scripts/start_workshop_otel.sh"
+    echo "# Managed OTLP (mOTLP) — unique per play; from project_results and/or .es./.kb.→.ingest. (see scripts/start_workshop_otel.sh)"
+    printf 'export WORKSHOP_OTLP_ENDPOINT=%q\n' "$WORKSHOP_OTLP_BASE"
+    if [ -n "${WORKSHOP_ES_API_KEY:-}" ]; then
+      printf 'export WORKSHOP_OTLP_AUTH_HEADER=%q\n' "ApiKey ${WORKSHOP_ES_API_KEY}"
+    fi
+    echo "# Restart Alloy + emitters: ./scripts/start_workshop_otel.sh"
   } >>/root/.bashrc
 fi
 
 find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o -name 'solve-es3-api' -o -name 'cleanup-es3-api' \) -exec chmod +x {} \;
 [[ -f "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh"
+[[ -f "$TRACK_ROOT/scripts/migrate_datadog_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_datadog_dashboards_to_serverless.sh"
 [[ -f "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh" ]] && chmod +x "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh"
 [[ -f "$TRACK_ROOT/scripts/start_workshop_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/start_workshop_otel.sh"
 [[ -f "$TRACK_ROOT/scripts/send_datadog_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/send_datadog_otel.sh"

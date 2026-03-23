@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Bulk-index minimal ECS-style documents into Observability data streams so Discover and
-ES|QL (e.g. FROM logs-*,metrics-*,traces-*) have @timestamp-backed data.
+Legacy: bulk-index ECS-shaped documents directly into Elasticsearch (bypasses OTLP).
 
-Fallback when Grafana Alloy → managed OTLP is not configured (see assets/alloy/workshop.alloy
-and track_scripts/setup-es3-api). Prefer OTLP ingest for parity with elastic-autonomous-observability.
+The workshop default is OpenTelemetry SDK → Grafana Alloy → managed OTLP. Track bootstrap runs this
+script only when WORKSHOP_ALLOW_BULK_SEED=1. Prefer ./scripts/start_workshop_otel.sh for real OTLP.
 
 Uses ES_URL + ES_API_KEY, or ES_USERNAME + ES_PASSWORD (same as workshop ~/.bashrc).
 

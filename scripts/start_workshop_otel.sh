@@ -88,15 +88,16 @@ fi
 
 mkdir -p /tmp/alloy-storage
 pkill -f "alloy run.*workshop.alloy" 2>/dev/null || true
+pkill -f "otel_workshop_fleet.py" 2>/dev/null || true
 pkill -f "otel_workshop_emitter.py" 2>/dev/null || true
 pkill -f "datadog_otel_to_elastic.py" 2>/dev/null || true
 sleep 1
 nohup "$ALLOY_BIN" run --storage.path=/tmp/alloy-storage "$ALLOY_CFG" >>/tmp/workshop-alloy.log 2>&1 &
 echo $! >/tmp/workshop-alloy.pid
 sleep 3
-nohup python3 /root/workshop/tools/otel_workshop_emitter.py >>/tmp/workshop-emitter.log 2>&1 &
-echo $! >/tmp/workshop-emitter.pid
+nohup python3 /root/workshop/tools/otel_workshop_fleet.py >>/tmp/workshop-fleet-supervisor.log 2>&1 &
+echo $! >/tmp/workshop-fleet.pid
 nohup python3 /root/workshop/tools/datadog_otel_to_elastic.py >>/tmp/workshop-datadog-otel.log 2>&1 &
 echo $! >/tmp/workshop-datadog-otel.pid
-echo "Alloy PID $(cat /tmp/workshop-alloy.pid), generic emitter $(cat /tmp/workshop-emitter.pid), Datadog-style OTLP $(cat /tmp/workshop-datadog-otel.pid)"
-echo "Logs: /tmp/workshop-alloy.log /tmp/workshop-emitter.log /tmp/workshop-datadog-otel.log"
+echo "Alloy PID $(cat /tmp/workshop-alloy.pid), OTLP fleet supervisor $(cat /tmp/workshop-fleet.pid), Datadog-style OTLP $(cat /tmp/workshop-datadog-otel.pid)"
+echo "Logs: /tmp/workshop-alloy.log /tmp/workshop-fleet.log /tmp/workshop-fleet-supervisor.log /tmp/workshop-datadog-otel.log"

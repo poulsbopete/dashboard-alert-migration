@@ -46,7 +46,7 @@ def main() -> int:
     meter = metrics.get_meter(__name__)
     req_counter = meter.create_counter(
         "workshop.http_requests",
-        description="Synthetic counter for Grafana→Elastic migration workshop",
+        description="Sample HTTP request counter emitted via OTLP (OpenTelemetry SDK → Alloy → mOTLP)",
     )
 
     tracer = trace.get_tracer(__name__)

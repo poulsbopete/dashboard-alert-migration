@@ -39,7 +39,7 @@ def _resource() -> Resource:
             "service.name": (os.environ.get("DD_SERVICE") or "shopist-checkout"),
             "deployment.environment": (os.environ.get("DD_ENV") or "staging"),
             "service.version": (os.environ.get("DD_VERSION") or "2.7.0"),
-            "host.name": (os.environ.get("DD_HOSTNAME") or "workshop-dd-otel-host"),
+            "host.name": (os.environ.get("DD_HOSTNAME") or "workshop-node-07"),
             "telemetry.sdk.name": "opentelemetry",
             "telemetry.sdk.language": "python",
         }

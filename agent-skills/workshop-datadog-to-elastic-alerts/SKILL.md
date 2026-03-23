@@ -1,18 +1,19 @@
 ---
 name: workshop-datadog-to-elastic-alerts
 description: >
-  Workshop skill: convert Datadog-style monitor JSON into Kibana alerting rule drafts. Complements upstream Elastic
-  Agent Skills for alerting rule APIs.
+  Workshop skill for Datadog-customer migrations to Elastic Observability Serverless: convert Datadog-style monitor JSON
+  into Kibana alerting rule drafts; complements upstream Elastic Agent Skills for alerting APIs.
 metadata:
   author: workshop
-  version: 0.1.0
+  version: 0.1.1
 ---
 
 # Datadog-style monitors → Elastic alerts (workshop)
 
 ## When to use
 
-Use when translating exports under `assets/datadog/` into **Kibana alerting** JSON skeletons.
+Use when **migrating Datadog monitors** to **Elastic Serverless**: translate `assets/datadog/monitor-*.json` into **Kibana
+alerting** JSON skeletons, then tune for live indices and rules APIs.
 
 ## Workflow
 

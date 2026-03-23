@@ -2,6 +2,11 @@
 set -e
 echo "Cleaning up Elastic Serverless project"
 
+pkill -f "alloy run.*workshop.alloy" 2>/dev/null || true
+pkill -f "otel_workshop_fleet.py" 2>/dev/null || true
+pkill -f "otel_workshop_emitter.py" 2>/dev/null || true
+pkill -f "datadog_otel_to_elastic.py" 2>/dev/null || true
+
 echo "Project type: ${PROJECT_TYPE:-}"
 echo "Regions: ${REGIONS:-}"
 

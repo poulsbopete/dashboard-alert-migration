@@ -1,12 +1,11 @@
 ---
 name: workshop-datadog-dashboards-to-elastic
 description: >
-  Workshop skill: bulk-migrate Datadog-style dashboard JSON (widgets with metric/logs queries) into Elastic
-  Observability Serverless dashboard drafts using the bundled CLI; pair with upstream kibana-dashboards Agent Skill and
-  Cursor for AI-assisted query rewriting.
+  Workshop skill for Datadog-customer migrations to Elastic Observability Serverless: bulk-convert Datadog-style dashboard
+  JSON into Kibana dashboard drafts via CLI; pair with kibana-dashboards Agent Skill and Cursor for query rewriting.
 metadata:
   author: workshop
-  version: 0.1.0
+  version: 0.1.3
 ---
 
 # Datadog dashboards → Elastic (workshop)
@@ -21,11 +20,32 @@ optionally driving **batch steps** from **Cursor** with [Elastic Agent Skills](h
 - Python 3.10+
 - This repository (workshop VM: `/root/workshop`)
 
+## Live telemetry (OTLP → Elastic mOTLP)
+
+With Alloy running (**`./scripts/start_workshop_otel.sh`** after `source ~/.bashrc`), run **`./scripts/send_datadog_otel.sh`** to push **Datadog-style** OpenTelemetry **traces, metrics, and logs** to **`127.0.0.1:4318`** → Alloy → Elastic **managed OTLP** (see **`tools/datadog_otel_to_elastic.py`**).
+
 ## Batch CLI
 
 ```bash
 mkdir -p build/elastic-datadog-dashboards
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
+```
+
+## Publish to Kibana (drafts are not visible in the UI until you publish)
+
+Lab 1 uses **`tools/publish_grafana_drafts_kibana.py`**; the same tool publishes Datadog-derived **`*-elastic-draft.json`** when you point **`--drafts-dir`** at **`build/elastic-datadog-dashboards`** (it reads **`migration.datadog_query`**).
+
+**All-in-one on the workshop VM:**
+
+```bash
+cd /root/workshop && source ~/.bashrc
+./scripts/migrate_datadog_dashboards_to_serverless.sh
+```
+
+**Publish only** (after CLI conversion):
+
+```bash
+python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
 ```
 
 ## Cursor + AI workflow

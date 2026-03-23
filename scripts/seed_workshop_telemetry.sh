@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-seed synthetic logs + metrics (same as track bootstrap). Idempotent in the sense
+# Legacy bulk index (not default; bootstrap uses OTLP unless WORKSHOP_ALLOW_BULK_SEED=1). Idempotent in the sense
 # that it adds more documents each run; safe for demos.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
