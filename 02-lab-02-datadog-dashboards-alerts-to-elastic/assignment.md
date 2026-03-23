@@ -31,10 +31,9 @@ notes:
     ```
 - type: text
   contents: |
-    ## Track goal
+    ## This lab
 
-    **Lab 2** — **10** Datadog dashboard JSON → `build/elastic-datadog-dashboards/`, **4** monitors → `build/elastic-alerts/`.
-    Refine in Kibana or with **Cursor** + **`kibana-dashboards`** / **`kibana-alerting-rules`** skills.
+    **10** Datadog dashboards + **4** monitors → Kibana. Pick **Path A** (Terminal migrate script) or **Path B** (laptop: converters + publish, same idea as Lab 1).
 
     **Live OTLP:** **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) — same pipeline as Lab 1.
 tabs:
@@ -67,7 +66,9 @@ enhanced_loading: null
 
 **10** dashboards and **4** monitors import as Kibana **Dashboards** (`(Datadog dashboard import draft)`) and **Rules** (imported **disabled**, no connectors until you edit).
 
-## Terminal
+Pick **Path A** or **Path B** (or both).
+
+## Path A — one script (same idea as Lab 1)
 
 ```bash
 cd /root/workshop
@@ -79,10 +80,30 @@ Then **Dashboards** and **Observability → Rules** in the Elastic Serverless ta
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
-## Cursor (optional)
+## Path B — Cursor on your laptop
 
-Clone **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** — use **`export`** lines from **`~/.bashrc`** on the VM to publish from your laptop, or only **refine** dashboards/rules in Kibana after the migrate script ran on the VM. Skills: **`workshop-datadog-dashboards-to-elastic`**, **`workshop-datadog-to-elastic-alerts`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**.
+Clone **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)**. On the **Instruqt** VM, print env to copy:
+
+```bash
+cd /root/workshop && source ~/.bashrc
+grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc
+```
+
+Paste those **`export`** lines into your laptop terminal (not the AI chat). Run **`./scripts/start_workshop_otel.sh`** on the **VM** once so Lens has data, then from the **clone**:
+
+```bash
+mkdir -p build/elastic-datadog-dashboards build/elastic-alerts
+python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
+for f in assets/datadog/monitor-*.json; do
+  base="$(basename "$f" .json)"
+  python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"
+done
+python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
+python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
+```
+
+Optional skills: **`workshop-datadog-dashboards-to-elastic`**, **`workshop-datadog-to-elastic-alerts`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**.
 
 ## Done
 
-**Check** when **`build/elastic-datadog-dashboards/`** has **10** `*-elastic-draft.json` and **`build/elastic-alerts/`** has **4** `monitor-*-elastic.json`.
+**Check** when **`build/elastic-datadog-dashboards/`** has **10** `*-elastic-draft.json` and **`build/elastic-alerts/`** has **4** `monitor-*-elastic.json` (Path A: **`/root/workshop/build/`**; Path B: your clone).

@@ -35,7 +35,7 @@ notes:
   contents: |
     ## This lab
 
-    **20** Grafana JSON → Elastic drafts → Kibana. **Terminal:** **`./scripts/migrate_grafana_dashboards_to_serverless.sh`**. **Laptop:** clone the repo, **`export`** from VM **`~/.bashrc`**, **`grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** (or **`kibana-dashboards`** skill).
+    **20** Grafana JSON → Elastic drafts → Kibana. Pick **Path A** (Instruqt Terminal + migrate script) or **Path B** (clone repo on your laptop, **`export`** from VM **`~/.bashrc`**, converter + publish, or **`kibana-dashboards`** skill).
 tabs:
 - id: lypopaehfkah
   title: Terminal
@@ -64,7 +64,9 @@ enhanced_loading: null
 
 # Lab 1 — Grafana → Elastic Serverless (**20 dashboards**)
 
-## Terminal
+Pick **Path A** or **Path B** (or both).
+
+## Path A — dashboard migration (Instruqt)
 
 ```bash
 cd /root/workshop
@@ -76,7 +78,7 @@ Open **Elastic Serverless → Dashboards** → titles **`(Grafana import draft)`
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min. *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
-## Cursor (optional)
+## Path B — Cursor on your laptop
 
 Repo: **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** — copy **`export`** lines from the VM (`grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`), then:
 
