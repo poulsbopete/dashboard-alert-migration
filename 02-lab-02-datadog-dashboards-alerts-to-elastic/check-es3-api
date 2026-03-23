@@ -7,6 +7,6 @@ if [ "${dc:-0}" -lt 10 ]; then
   fail-message "Expected 10 Datadog dashboard drafts in build/elastic-datadog-dashboards (*-elastic-draft.json). Found: ${dc:-0}. Run: python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards"
 fi
 if [ "${ac:-0}" -lt 4 ]; then
-  fail-message "Expected 4 monitor-derived alert drafts (monitor-*-elastic.json) in build/elastic-alerts. Found: ${ac:-0}."
+  fail-message "Expected 4 monitor-derived alert drafts (monitor-*-elastic.json) in build/elastic-alerts. Found: ${ac:-0}. From /root/workshop run ./scripts/migrate_datadog_dashboards_to_serverless.sh, or step 2 in the assignment (Step by step)."
 fi
 echo "Lab 2 checks passed."

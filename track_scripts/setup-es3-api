@@ -251,6 +251,15 @@ fi
 
 mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards /root/workshop/build/elastic-alerts
 
+# Lab 2 check expects 4 monitor-*-elastic.json under build/elastic-alerts; generate at track bootstrap so Check passes
+# even if learners only convert dashboards (matches migrate_datadog step 2).
+for f in "$TRACK_ROOT"/assets/datadog/monitor-*.json; do
+  [ -f "$f" ] || continue
+  base="$(basename "$f" .json)"
+  /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/datadog_to_elastic_alert.py" "$f" \
+    -o "/root/workshop/build/elastic-alerts/${base}-elastic.json"
+done
+
 # Managed OTLP base URL: project_results first, then same derivation as scripts/start_workshop_otel.sh
 MOTLP_FROM_API=""
 if [ -f /tmp/project_results.json ]; then

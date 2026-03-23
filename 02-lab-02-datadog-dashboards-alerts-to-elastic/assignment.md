@@ -91,38 +91,32 @@ Then open **Elastic Serverless** → **Dashboards** (titles contain **`(Datadog 
 
 ---
 
-## Optional — run pieces by hand
+## Step by step (same result as Path A)
 
-**Inputs check:**
+Use this when you want each stage explicit instead of **`migrate_datadog_dashboards_to_serverless.sh`**. From **`/root/workshop`**, run **`source ~/.bashrc`** once.
+
+**1 — Check inputs** (10 dashboard JSON files, 4 monitors):
 
 ```bash
 cd /root/workshop
-ls -1 assets/datadog/dashboards/*.json | wc -l   # 10
-ls -1 assets/datadog/monitor-*.json
+ls -1 assets/datadog/dashboards/*.json | wc -l   # expect 10
+ls -1 assets/datadog/monitor-*.json              # 4 files
 ```
 
-**Dashboard drafts only:**
+**2 — Build dashboard and alert drafts:**
 
 ```bash
-source ~/.bashrc
-mkdir -p build/elastic-datadog-dashboards
+mkdir -p build/elastic-datadog-dashboards build/elastic-alerts
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
-```
-
-**Monitor → rule JSON only:**
-
-```bash
-mkdir -p build/elastic-alerts
 for f in assets/datadog/monitor-*.json; do
   base="$(basename "$f" .json)"
   python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"
 done
 ```
 
-**Publish only** (after drafts exist):
+**3 — OTLP + publish to Kibana:**
 
 ```bash
-cd /root/workshop && source ~/.bashrc
 ./scripts/start_workshop_otel.sh && sleep 25
 python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
 python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
@@ -144,4 +138,4 @@ Clone **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/po
 Click **Check** when:
 
 - `build/elastic-datadog-dashboards/` has **10** files matching `*-elastic-draft.json`, and
-- `build/elastic-alerts/` has **4** files matching `*-elastic.json`.
+- `build/elastic-alerts/` has **4** files matching `monitor-*-elastic.json`.
