@@ -15,7 +15,7 @@ PromQL in drafts is **not** executed.
 **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
 **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** — optional ES|QL column for HTTP status bars (e.g. **`http.response.status_code`**). If unset, HTTP panels use **request volume by `service.name`** (avoids **Unknown column [attributes.http.…]** on some Serverless mappings).
 **`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** — optional (default **`http.route`**) for route breakdown panels on **metrics-***.
-**`WORKSHOP_ESQL_BUCKET_COUNT`** — time buckets for line/area charts (default **168**, clamped **24–512**); higher = denser series.
+**`WORKSHOP_ESQL_BUCKET_DURATION`** — ES|QL time histogram width for line/area charts (default **`1 hour`**). Datetime **`BUCKET(field, integer)`** requires explicit from/to on Serverless; **duration** form **`BUCKET(field, 1 hour)`** avoids that and tracks the dashboard time picker.
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -261,20 +261,27 @@ def _esql_ident(name: str) -> str:
     return f"`{n.replace('`', '')}`"
 
 
-def _esql_bucket_count() -> int:
-    raw = (os.environ.get("WORKSHOP_ESQL_BUCKET_COUNT") or "168").strip()
-    try:
-        n = int(raw)
-    except ValueError:
-        n = 168
-    return max(24, min(n, 512))
+def _esql_bucket_duration_literal() -> str:
+    """
+    Second argument to BUCKET() for date fields.
+
+    ES|QL requires four arguments for BUCKET(datetime, integer) (field, target count, from, to).
+    Serverless rejects two-arg integer form. Using a time_duration (two-arg) works with the
+    dashboard’s applied time filter and does not need explicit bounds.
+    """
+    raw = (os.environ.get("WORKSHOP_ESQL_BUCKET_DURATION") or "1 hour").strip()
+    if not raw:
+        raw = "1 hour"
+    if re.search(r'["\'\\|`]', raw):
+        raw = "1 hour"
+    return raw
 
 
 def _esql_bucket_expr(tf: str) -> str:
-    """ES|QL time bucket for STATS BY bucket = … (range follows dashboard time picker)."""
+    """ES|QL time bucket for STATS BY bucket = … (width from WORKSHOP_ESQL_BUCKET_DURATION)."""
     col = _esql_ident(tf)
-    nb = _esql_bucket_count()
-    return f"BUCKET({col}, {nb})"
+    dur = _esql_bucket_duration_literal()
+    return f"BUCKET({col}, {dur})"
 
 
 def _esql_http_status_column() -> str | None:
