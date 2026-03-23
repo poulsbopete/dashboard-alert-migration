@@ -3,7 +3,7 @@
 Publish workshop Grafana→Elastic or Datadog→Elastic *draft* JSON into Kibana.
 
 **Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels: each widget’s **ES|QL** is
-chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → OTLP **system.cpu.utilization** / **http.server.request.count**, HTTP → **attributes.http.response.status_code**, latency
+chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → OTLP **system.cpu.utilization** / **http.server.request.count**, HTTP → **http.server.request.count** by **service.name** (or **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** when set), latency
 → **http.server.request.duration** or APM transactions). Type-specific panels use **narrow** ``FROM`` targets (**``metrics-*``**, **``logs-*``**, **``traces-*``**) so **logs|metrics** unions do not trip ES|QL verification. Padded “extra” panels still **vary** by index. If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
 **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
 
@@ -13,6 +13,8 @@ PromQL in drafts is **not** executed.
 **Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MIN_LENS_PANELS`**
 (pad short Grafana drafts so more mixed charts appear), **`WORKSHOP_MAX_LENS_PANELS`**, **`WORKSHOP_SIMPLE_LENS`**, **`WORKSHOP_ESQL_FROM`**,
 **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
+**`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** — optional ES|QL column for HTTP status bars (e.g. **`http.response.status_code`**). If unset, HTTP panels use **request volume by `service.name`** (avoids **Unknown column [attributes.http.…]** on some Serverless mappings).
+**`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** — optional (default **`http.route`**) for route breakdown panels on **metrics-***.
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -248,6 +250,38 @@ def _esql_time_bucket_field() -> str:
     return raw if raw else "@timestamp"
 
 
+def _esql_ident(name: str) -> str:
+    """Quote a possibly dotted field name for ES|QL."""
+    n = (name or "").strip()
+    if not n:
+        return "`service.name`"
+    if n.startswith("`") and n.endswith("`"):
+        return n
+    return f"`{n.replace('`', '')}`"
+
+
+def _esql_http_status_column() -> str | None:
+    """
+    When set, GROUP BY this column for HTTP status–style Lens bars.
+    Native mOTLP metrics often do not expose ``attributes.http.response.status_code`` as an ES|QL column
+    (mapping uses ECS top-level fields or omits status on aggregates).
+    """
+    raw = (os.environ.get("WORKSHOP_ESQL_HTTP_STATUS_COLUMN") or "").strip()
+    return raw if raw else None
+
+
+def _esql_http_route_column() -> str:
+    """Metric attribute / ECS field for HTTP route bars (OTel: http.route)."""
+    raw = (os.environ.get("WORKSHOP_ESQL_HTTP_ROUTE_COLUMN") or "http.route").strip()
+    return raw if raw else "http.route"
+
+
+def _esql_service_name_column() -> str:
+    """Service dimension on metrics (OTel resource → often service.name)."""
+    raw = (os.environ.get("WORKSHOP_ESQL_SERVICE_NAME_COLUMN") or "service.name").strip()
+    return raw if raw else "service.name"
+
+
 def _esql_volume_probe_queries() -> list[str]:
     """
     Ordered ES|QL lines for Lens (save succeeds only when @timestamp exists on the resolved union).
@@ -469,35 +503,65 @@ def _panel_esql_spec(
             )
 
     if cat == "http":
-        # Managed OTLP / native OTel metrics use semconv under attributes.* — top-level
-        # http.response.status_code is absent, and logs-*|metrics-* unions fail verification.
+        # mOTLP metric mappings vary: attributes.http.response.status_code often does not exist as a column.
+        # Default: SUM(http.server.request.count) BY service — matches workshop OTLP; optional status column via env.
+        status_src = _esql_http_status_column()
+        svc = _esql_ident(_esql_service_name_column())
         if cap["metrics"]:
+            if status_src:
+                st = _esql_ident(status_src)
+                return _spec_xy(
+                    "metrics-*",
+                    tf,
+                    layer="bar",
+                    query=(
+                        f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) BY code = {st} "
+                        f"| SORT c DESC | LIMIT 12"
+                    ),
+                    x="code",
+                    ys=[("c", None)],
+                    breakdown=None,
+                    lens_title=f"{lt} (HTTP requests by status)",
+                )
             return _spec_xy(
                 "metrics-*",
                 tf,
                 layer="bar",
                 query=(
-                    "FROM metrics-* | STATS c = COUNT(*) BY code = `attributes.http.response.status_code` "
-                    "| SORT c DESC | LIMIT 12"
+                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) BY svc = {svc} "
+                    f"| SORT c DESC | LIMIT 12"
                 ),
-                x="code",
+                x="svc",
                 ys=[("c", None)],
                 breakdown=None,
-                lens_title=f"{lt} (HTTP status)",
+                lens_title=f"{lt} (HTTP request volume by service — availability proxy)",
             )
         if cap["logs"]:
+            if status_src:
+                st = _esql_ident(status_src)
+                return _spec_xy(
+                    "logs-*",
+                    tf,
+                    layer="bar",
+                    query=(
+                        f"FROM logs-* | STATS c = COUNT(*) BY code = {st} | SORT c DESC | LIMIT 12"
+                    ),
+                    x="code",
+                    ys=[("c", None)],
+                    breakdown=None,
+                    lens_title=f"{lt} (HTTP status — logs)",
+                )
             return _spec_xy(
                 "logs-*",
                 tf,
                 layer="bar",
                 query=(
-                    "FROM logs-* | STATS c = COUNT(*) BY code = `attributes.http.response.status_code` "
-                    "| SORT c DESC | LIMIT 12"
+                    f"FROM logs-* | STATS c = COUNT(*) BY svc = {svc} | SORT c DESC | LIMIT 12"
                 ),
-                x="code",
+                x="svc",
                 ys=[("c", None)],
                 breakdown=None,
-                lens_title=f"{lt} (HTTP status)",
+                lens_title=f"{lt} (log volume by service — HTTP proxy)",
             )
 
     if cat == "operation_errors" and cap["metrics"]:
@@ -567,13 +631,12 @@ def _panel_esql_spec(
             tf,
             layer="bar",
             query=(
-                "FROM traces-* | STATS c = COUNT(*) BY reason = `attributes.http.response.status_code` "
-                "| SORT c DESC | LIMIT 12"
+                "FROM traces-* | STATS c = COUNT(*) BY name = span.name | SORT c DESC | LIMIT 12"
             ),
-            x="reason",
+            x="name",
             ys=[("c", None)],
             breakdown=None,
-            lens_title=f"{lt} (HTTP status on traces — proxy)",
+            lens_title=f"{lt} (trace spans — operation_errors proxy)",
         )
 
     if cat == "errors" and cap["logs"]:
@@ -702,7 +765,8 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    "FROM metrics-* | STATS c = COUNT(*) BY path = `attributes.http.route` | SORT c DESC | LIMIT 10"
+                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"BY path = {_esql_ident(_esql_http_route_column())} | SORT c DESC | LIMIT 10"
                 ),
                 x="path",
                 ys=[("c", None)],
