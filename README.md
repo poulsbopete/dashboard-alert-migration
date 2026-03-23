@@ -106,6 +106,24 @@ Time series use **`BUCKET(\`@timestamp\`, <duration>)`** where **`<duration>`** 
 
 Implementation details live in **`tools/publish_grafana_drafts_kibana.py`** (`_classify_grafana_panel`, `_panel_esql_spec`, `_expand_draft_panels_for_lens`).
 
+### Grafana Cloud app dashboards (`dashboard.grafana.app/v2beta1`) with Elasticsearch datasource
+
+Grafana **Kubernetes / Elasticsearch** exports (app platform JSON, **not** classic `panels[].targets[].expr` PromQL) are **not** handled by **`grafana_to_elastic.py`**. Use **`tools/publish_grafana_es_app_dashboard.py`** instead: it walks **`spec.layout`** → **`spec.elements`**, reads each panel’s **Elasticsearch** `DataQuery` (Lucene `query`, `bucketAggs`, `metrics`), and builds **Lens** panels with **ES|QL** for **`POST /api/dashboards?apiVersion=1`**.
+
+1. Save the dashboard JSON to a file (e.g. **`prom-demo.app-v2.json`**).
+2. Set **`KIBANA_URL`** and **`ES_API_KEY`** (same as the workshop / Serverless project).
+3. Run from the **repo root**:
+
+```bash
+python3 tools/publish_grafana_es_app_dashboard.py --input ./prom-demo.app-v2.json
+```
+
+Optional: **`--title "…"`** to override the Kibana title; **`GRAFANA_IMPORT_FROM=metrics-*`** (default) or **`logs-*`** if panels are log-based. **`WORKSHOP_ESQL_BUCKET_DURATION`** is honored via the shared publisher helpers.
+
+**Caveats:** translation is **best-effort** (simple `field:value AND …` Lucene, common aggregations). Field names must exist in your **`metrics-*` / `logs-*`** mapping. Panels with **multiple** Elasticsearch queries only use the **first** query. A tiny fixture for smoke tests lives at **`assets/grafana/fixtures/grafana-app-v2-elasticsearch-min.json`** (`--dry-run` prints panel count).
+
+This script **cannot** run against your Serverless project from CI without your credentials; execute it **locally** or on a host where **`export`** lines from Kibana/ES are configured.
+
 ## Dashboards API (reference)
 
 **`tools/publish_grafana_drafts_kibana.py`** publishes **both** Grafana- and Datadog-derived **`*-elastic-draft.json`** files via **`POST /api/dashboards?apiVersion=1`**, with a **saved-objects import** fallback. It reads **`migration.promql`** (Grafana) or **`migration.datadog_query`** (Datadog). Point **`--drafts-dir`** at **`build/elastic-dashboards`** or **`build/elastic-datadog-dashboards`**. **Datadog** imports default to **no** padded “Workshop insights” rows; set **`WORKSHOP_DD_PAD_LENS=1`** to match Grafana-style **`WORKSHOP_MIN_LENS_PANELS`**. Datadog disk-style queries map to **OTEL CPU / memory / HTTP** proxies (workshop fleet has no host disk I/O metrics). If Lens reports **Unknown column** on HTTP panels, set **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** or rely on the default **request volume by `service.name`**. **Line charts** use **multi-series** by **`service.name`** and **`WORKSHOP_ESQL_BUCKET_DURATION`**. See **[Grafana and Datadog: how conversion to ES|QL works](#grafana-and-datadog-how-conversion-to-esql-works)** above for the full pipeline.

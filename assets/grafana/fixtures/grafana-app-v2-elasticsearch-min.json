@@ -1,0 +1,76 @@
+{
+  "apiVersion": "dashboard.grafana.app/v2beta1",
+  "kind": "Dashboard",
+  "metadata": {"name": "fixture-es-min", "uid": "fixture-es-min"},
+  "spec": {
+    "title": "Fixture — ES datasource (min)",
+    "timeSettings": {"from": "now-24h", "to": "now"},
+    "elements": {
+      "panel-a": {
+        "kind": "Panel",
+        "spec": {
+          "id": 1,
+          "title": "Log volume",
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "elasticsearch",
+                      "version": "v0",
+                      "spec": {
+                        "bucketAggs": [
+                          {
+                            "field": "@timestamp",
+                            "id": "2",
+                            "settings": {"interval": "auto"},
+                            "type": "date_histogram"
+                          }
+                        ],
+                        "metrics": [{"id": "1", "type": "logs"}],
+                        "query": "",
+                        "timeField": "@timestamp"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {"drawStyle": "line"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "layout": {
+      "kind": "GridLayout",
+      "spec": {
+        "items": [
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 8,
+              "element": {"kind": "ElementReference", "name": "panel-a"}
+            }
+          }
+        ]
+      }
+    }
+  }
+}
