@@ -18,8 +18,6 @@ notes:
     **Lab 1 — Grafana (20 dashboards)** — Pick **Path A** (script + Kibana API in Terminal) or **Path B** (API key + Cursor + Elastic Agent Skills on your laptop).
 
     **Lab 2 — Datadog** — Ten dashboard JSON + four monitor JSON → Elastic drafts.
-
-    This challenge uses only **Terminal** and **Elastic Serverless** (no Workshop tab).
 - type: text
   contents: |
     ## Path A
