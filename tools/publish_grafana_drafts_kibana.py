@@ -467,20 +467,37 @@ def _panel_esql_spec(
                 lens_title=f"{lt} (rate — latency proxy)",
             )
 
-    if cat == "http" and cap["logs"]:
-        return _spec_xy(
-            fc,
-            tf,
-            layer="bar",
-            query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY code = http.response.status_code "
-                f"| SORT c DESC | LIMIT 12"
-            ),
-            x="code",
-            ys=[("c", None)],
-            breakdown=None,
-            lens_title=f"{lt} (HTTP status)",
-        )
+    if cat == "http":
+        # Managed OTLP / native OTel metrics use semconv under attributes.* — top-level
+        # http.response.status_code is absent, and logs-*|metrics-* unions fail verification.
+        if cap["metrics"]:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="bar",
+                query=(
+                    "FROM metrics-* | STATS c = COUNT(*) BY code = `attributes.http.response.status_code` "
+                    "| SORT c DESC | LIMIT 12"
+                ),
+                x="code",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (HTTP status)",
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                "logs-*",
+                tf,
+                layer="bar",
+                query=(
+                    "FROM logs-* | STATS c = COUNT(*) BY code = `attributes.http.response.status_code` "
+                    "| SORT c DESC | LIMIT 12"
+                ),
+                x="code",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (HTTP status)",
+            )
 
     if cat == "operation_errors" and cap["metrics"]:
         # Prefer workshop OTLP counter operation_errors_total{reason,entity_id}; fallback-style HTTP status otherwise.
@@ -490,7 +507,8 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    "FROM metrics-* | STATS c = SUM(`operation_errors_total`) BY reason = reason "
+                    "FROM metrics-* | STATS c = SUM(`operation_errors_total`) "
+                    "BY reason = `attributes.reason` "
                     "| SORT c DESC | LIMIT 12"
                 ),
                 x="reason",
@@ -503,7 +521,8 @@ def _panel_esql_spec(
             tf,
             layer="bar",
             query=(
-                "FROM metrics-* | STATS c = SUM(`operation_errors_total`) BY e = entity_id "
+                "FROM metrics-* | STATS c = SUM(`operation_errors_total`) "
+                "BY e = `attributes.entity_id` "
                 "| SORT c DESC | LIMIT 10"
             ),
             x="e",
@@ -518,7 +537,7 @@ def _panel_esql_spec(
             tf,
             layer="bar",
             query=(
-                "FROM metrics-* | STATS c = COUNT(*) BY e = entity_id | SORT c DESC | LIMIT 10"
+                "FROM metrics-* | STATS c = COUNT(*) BY e = `attributes.entity_id` | SORT c DESC | LIMIT 10"
             ),
             x="e",
             ys=[("c", None)],
@@ -533,7 +552,7 @@ def _panel_esql_spec(
             layer="line",
             query=(
                 f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
-                f"BY bucket = {q_b}, e = entity_id"
+                f"BY bucket = {q_b}, e = `attributes.entity_id`"
             ),
             x="bucket",
             ys=[("m", None)],
@@ -543,12 +562,12 @@ def _panel_esql_spec(
 
     if cat == "operation_errors" and cap["traces"] and not cap["metrics"]:
         return _spec_xy(
-            fc,
+            "traces-*",
             tf,
             layer="bar",
             query=(
-                f"FROM {fc} | STATS c = COUNT(*) BY reason = http.response.status_code "
-                f"| SORT c DESC | LIMIT 12"
+                "FROM traces-* | STATS c = COUNT(*) BY reason = `attributes.http.response.status_code` "
+                "| SORT c DESC | LIMIT 12"
             ),
             x="reason",
             ys=[("c", None)],
@@ -674,7 +693,7 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    "FROM metrics-* | STATS c = COUNT(*) BY path = http.route | SORT c DESC | LIMIT 10"
+                    "FROM metrics-* | STATS c = COUNT(*) BY path = `attributes.http.route` | SORT c DESC | LIMIT 10"
                 ),
                 x="path",
                 ys=[("c", None)],
