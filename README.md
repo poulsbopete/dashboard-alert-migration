@@ -47,11 +47,70 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 - **Agent Skills**: upstream skills (`kibana-dashboards`, `kibana-alerting-rules`) plus workshop wrappers under
   `agent-skills/` so migrations are repeatable and automatable.
 
+## Grafana and Datadog: how conversion to ES|QL works
+
+Migrations here are **two stages**. Learners should understand both: **(1)** how source queries are **captured** in draft JSON, and **(2)** how the **publisher** turns each panel into **Lens** panels whose **executable** language is **ES|QL** against **`logs-*` / `metrics-*` / `traces-*`**. Original **PromQL** and **Datadog `q`** strings are **not** run inside Elasticsearch; they are preserved in panel **descriptions** and in **`migration.*`** for traceability and for you to refine in Kibana or Cursor.
+
+### Stage 1 — Converters (source JSON → `*-elastic-draft.json`)
+
+| Script | What it reads | What it writes per panel |
+| --- | --- | --- |
+| **`tools/grafana_to_elastic.py`** | Grafana dashboard JSON: walks **`panels`** (and nested layout) and collects **`targets[].expr`** (PromQL). | **`migration.promql`**, **`migration.legend`**, plus human **`description`** / **`note`** (lightweight PromQL→ES|QL *hints* in `promql_to_esql_note()` — not auto-generated queries). |
+| **`tools/datadog_dashboard_to_elastic.py`** | Datadog export JSON: walks **`widgets[].definition`** for **`timeseries`**, **`query_value`**, and **`toplist`** widgets and collects each **`requests[].q`**. | **`migration.datadog_query`**, **`description`**, **`note`** from `query_to_note()` (logs vs trace vs metric narrative). |
+| **`tools/datadog_to_elastic_alert.py`** | Monitor JSON | Rule drafts for **`publish_datadog_alert_drafts_kibana.py`** (separate from dashboard ES|QL). |
+
+Draft files are **Kibana-oriented shapes**: **`title`**, **`tags`**, **`panels[]`** with **`type: lens`** placeholders; the **real** chart definition is applied in Stage 2.
+
+### Stage 2 — Publisher (`tools/publish_grafana_drafts_kibana.py`)
+
+Called with **`--drafts-dir`** pointing at **`build/elastic-dashboards`** or **`build/elastic-datadog-dashboards`**. It builds a **Dashboards API** payload: **Markdown** canvas (source queries as documentation) + **Lens** panels with **inline ES|QL**.
+
+**1) Resolve index pattern (`FROM …`)**  
+The publisher must pick a **`FROM`** clause that **verifies** on Serverless (unions of logs+metrics can fail ES|QL checks if columns differ). It tries, in order: optional **`WORKSHOP_ESQL_FROM`** override; then **`logs-*`**, **`metrics-*`**, workshop streams, unions, and finally **`traces-*`**. First probe that succeeds drives **`_from_capabilities()`** (which of logs / metrics / traces are in play).
+
+**2) Classify each panel**  
+For every panel, it builds a string from **`migration.promql`** *or* **`migration.datadog_query`** plus the **panel title**, then **`_classify_grafana_panel()`** assigns a **category** via regex (same function for both sources). Datadog-style prefixes are handled first, e.g. **`avg:system.cpu…`**, **`avg:system.mem…`**, **`kubernetes.`**, **`system.disk`**, **`system.io`**, **`trace.`**, **`logs(`**. Then PromQL-style patterns (**`http_requests_total`**, **`histogram_quantile`**, **`entity_id`**, **`process_cpu`**, etc.). Categories include **`cpu`**, **`memory`**, **`http`**, **`latency`**, **`errors`**, **`storage`**, **`k8s`**, **`network`**, **`db`**, **`scrape`**, **`go_runtime`**, **`operation_errors`**, **`by_entity`**, **`generic`**, and related variants.
+
+**3) Map category → Lens ES|QL**  
+**`_panel_esql_spec()`** returns a **viz** (line, area, bar, metric) and one **ES|QL** string per panel. Examples aligned with **workshop OTLP** ( **`otel_workshop_fleet.py`** ):
+
+| Category | Typical workshop mapping (simplified) |
+| --- | --- |
+| **cpu** | **`AVG(\`system.cpu.utilization\`)`** by time bucket + **`service.name`**. |
+| **memory** | **`AVG(\`system.memory.utilization\`)`** by bucket + service. |
+| **http** | **`SUM(\`http.server.request.count\`)`** by **`service.name`** or optional HTTP status column (**`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`**). |
+| **latency** | **`AVG(\`http.server.request.duration\`)`** on **metrics-***, or **`AVG(transaction.duration.us)`** on **traces-*** when logs are not mixed in. |
+| **operation_errors** | **`SUM(\`operation_errors_total\`)`** by **`attributes.reason`** / **`attributes.entity_id`**. |
+| **storage** (disk-style DD/Grafana) | No real disk I/O in the fleet → **rotating proxies**: CPU, memory, or HTTP request activity by bucket + service. |
+| **k8s** | **metrics-***: requests **`SUM(\`http.server.request.count\`)`** by **`host.name`**; else logs by host. |
+| **generic** | Rotates **route bars**, **CPU lines**, **volume** line/area by **`panel_index`**. |
+
+Time series use **`BUCKET(\`@timestamp\`, <duration>)`** where **`<duration>`** comes from **`WORKSHOP_ESQL_BUCKET_DURATION`** (default **`1 hour`**). Integer-only **`BUCKET(datetime, n)`** is avoided because current Serverless ES|QL expects **four** arguments for that form; the **duration** two-argument form matches the dashboard time picker.
+
+**4) Padding and Datadog-specific behavior**  
+**Grafana** drafts are often short; **`WORKSHOP_MIN_LENS_PANELS`** / **`WORKSHOP_MAX_LENS_PANELS`** pad or cap how many Lens slots are emitted. **Datadog** imports use tag **`datadog-dashboard-import`**: by default **`WORKSHOP_DD_PAD_LENS`** is **off**, so only **real** widgets become panels (no duplicate filler rows). Set **`WORKSHOP_DD_PAD_LENS=1`** to pad like Grafana.
+
+**5) Fallbacks**  
+**`WORKSHOP_SIMPLE_LENS=1`**, **`WORKSHOP_DISABLE_LENS=1`**, and saved-object import paths exist for debugging; see the script module docstring.
+
+### Publisher environment variables (quick reference)
+
+| Variable | Role |
+| --- | --- |
+| **`WORKSHOP_ESQL_FROM`** | Force **`FROM`** for probes and panels. |
+| **`WORKSHOP_ESQL_TIME_FIELD`** | Time field for **`BUCKET()`** (default **`@timestamp`**). |
+| **`WORKSHOP_ESQL_BUCKET_DURATION`** | e.g. **`1 hour`**, **`15 minutes`**. |
+| **`WORKSHOP_ESQL_SERVICE_NAME_COLUMN`** / **`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** / **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** | Adjust field names if your mapping differs. |
+| **`WORKSHOP_MIN_LENS_PANELS`** / **`WORKSHOP_MAX_LENS_PANELS`** | Panel count for Grafana-style padding / caps. |
+| **`WORKSHOP_DD_PAD_LENS`** | **`1`** = pad Datadog dashboards like Grafana. |
+
+Implementation details live in **`tools/publish_grafana_drafts_kibana.py`** (`_classify_grafana_panel`, `_panel_esql_spec`, `_expand_draft_panels_for_lens`).
+
 ## Dashboards API (reference)
 
-**`tools/publish_grafana_drafts_kibana.py`** publishes **both** Grafana- and Datadog-derived **`*-elastic-draft.json`** files via **`POST /api/dashboards?apiVersion=1`**, with a **saved-objects import** fallback. It reads **`migration.promql`** (Grafana) or **`migration.datadog_query`** (Datadog). Point **`--drafts-dir`** at **`build/elastic-dashboards`** or **`build/elastic-datadog-dashboards`**. **Datadog** imports default to **no** padded “Workshop insights” rows (avoids duplicate widgets); set **`WORKSHOP_DD_PAD_LENS=1`** to match Grafana-style **`WORKSHOP_MIN_LENS_PANELS`**. Datadog **`avg:system.disk.*`** and similar map to **OTEL CPU / memory / HTTP** proxies (workshop fleet has no host disk I/O metrics). If Lens reports **Unknown column** on HTTP panels, set **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** (e.g. **`http.response.status_code`**) or rely on the default **request volume by `service.name`**; **`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** / **`WORKSHOP_ESQL_SERVICE_NAME_COLUMN`** adjust route/service field names for your mapping. **Line charts** use **multi-series** breakdown by **`service.name`** and **`WORKSHOP_ESQL_BUCKET_DURATION`** (default **`1 hour`**) for ES|QL **`BUCKET(@timestamp, …)`** so Serverless accepts the query and series track the time picker.
+**`tools/publish_grafana_drafts_kibana.py`** publishes **both** Grafana- and Datadog-derived **`*-elastic-draft.json`** files via **`POST /api/dashboards?apiVersion=1`**, with a **saved-objects import** fallback. It reads **`migration.promql`** (Grafana) or **`migration.datadog_query`** (Datadog). Point **`--drafts-dir`** at **`build/elastic-dashboards`** or **`build/elastic-datadog-dashboards`**. **Datadog** imports default to **no** padded “Workshop insights” rows; set **`WORKSHOP_DD_PAD_LENS=1`** to match Grafana-style **`WORKSHOP_MIN_LENS_PANELS`**. Datadog disk-style queries map to **OTEL CPU / memory / HTTP** proxies (workshop fleet has no host disk I/O metrics). If Lens reports **Unknown column** on HTTP panels, set **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** or rely on the default **request volume by `service.name`**. **Line charts** use **multi-series** by **`service.name`** and **`WORKSHOP_ESQL_BUCKET_DURATION`**. See **[Grafana and Datadog: how conversion to ES|QL works](#grafana-and-datadog-how-conversion-to-esql-works)** above for the full pipeline.
 
-Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this publisher after OTLP is up. For deeper Lens work, use the **`kibana-dashboards`** skill. A concise guide lives in **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** (CRUD, headers, spaces, supported panels, links to Elastic docs).
+Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this publisher after OTLP is up. For deeper Lens work, use the **`kibana-dashboards`** skill. **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** covers CRUD, headers, spaces, and supported panels.
 
 ## Layout
 
