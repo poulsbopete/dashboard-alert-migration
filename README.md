@@ -76,7 +76,7 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | `scripts/check_workshop_otel_pipeline.sh` | Verify Alloy (**`:12345/metrics`**), ports **4317/4318**, emitters, log tails |
 | `scripts/sync_workshop_from_git.sh` | **`git fetch` + `reset --hard origin/main`** so new scripts exist on old sandboxes |
 | `scripts/push_git_and_instruqt.sh` | Maintainer: **`git push`** + **`instruqt track validate/push`** after a commit |
-| `tools/seed_workshop_telemetry.py` / `scripts/seed_workshop_telemetry.sh` | **Legacy / opt-in:** direct-to-ES bulk docs (`*-workshop-default`) — only when **`WORKSHOP_ALLOW_BULK_SEED=1`** on bootstrap; not the default workshop path |
+| `tools/seed_workshop_telemetry.py` / `scripts/seed_workshop_telemetry.sh` | **Legacy / opt-in:** direct-to-ES bulk docs (`*-workshop-default`); **`--metrics-time-series`** backfills a regular metric grid for Discover TS; not the default OTLP path |
 | `agent-skills/` | Workshop skills + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
 | `docs/dashboards-api-getting-started.md` | **Dashboards API** (`/api/dashboards?apiVersion=1`): CRUD, spaces, panel support — matches Lab 1 Path A primary publish path |
 
@@ -87,6 +87,7 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 - **Default path:** **OpenTelemetry** (Python SDK → Alloy → **mOTLP**) populates **logs-***, **metrics-***, **traces-*** data the same way customer OTLP would. **`publish_grafana_drafts_kibana.py`** probes **`logs-*`** / **`metrics-*`** first so Lens works against OTLP-backed streams.
 - **“Nothing in metrics-*” in Discover:** the **Observability → Discover** search bar often ships a **narrow** pattern (e.g. `metrics-*.otel-*`, `metrics-apm*`) and **does not include** the broad wildcard **`metrics-*`**. Edit the pattern and append **`,metrics-*`** (or switch to **Stack Management → Data views** and create **`metrics-*`** with **`@timestamp`**). In **ES|QL**, run **`FROM metrics-* | LIMIT 5`** to confirm documents exist regardless of that default.
 - **Histogram looks empty but the table has rows:** set the time picker to **Last 15 minutes** / **Last 24 hours** and ensure the **end** time includes **now**; the chart buckets may stop earlier than your newest `@timestamp`, so the table shows hits while the graph looks blank.
+- **Sparse multi-day metric charts (Alloy self-metrics + fresh OTLP):** the fleet only writes **from startup onward**; for a filled **Last 30 days** view in Discover, run **`python3 tools/seed_workshop_telemetry.py --metrics-time-series --days 30`** (bulk to **`metrics-workshop-default`**; same **`service.name`** values as **`otel_workshop_fleet.py`**). Tune **`--metric-time-step-minutes`** / **`--metric-series-cap`** if needed.
 - **Traces in Discover:** create a data view if needed: **Stack Management → Data views → Create** → **`traces-*`** → **`@timestamp`**.
 - **Applications**, **Infrastructure**, and **Hosts** align with **OTLP** / APM ingest — run **`./scripts/start_workshop_otel.sh`** if Alloy is not up.
 - **Legacy bulk seed** (`seed_workshop_telemetry.py`) bypasses OTLP; enable only via **`WORKSHOP_ALLOW_BULK_SEED=1`** on host bootstrap for special facilitator cases.

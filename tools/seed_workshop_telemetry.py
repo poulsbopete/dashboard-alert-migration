@@ -10,11 +10,14 @@ Uses ES_URL + ES_API_KEY, or ES_USERNAME + ES_PASSWORD (same as workshop ~/.bash
 Usage:
   cd /root/workshop && source ~/.bashrc
   python3 tools/seed_workshop_telemetry.py
+  # Continuous metric history for Discover **ts metrics-*** (bulk, same service names as OTLP fleet):
+  python3 tools/seed_workshop_telemetry.py --metrics-time-series --days 30 --metric-time-step-minutes 60
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import secrets
@@ -22,6 +25,16 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import requests
+
+# Align names with tools/otel_workshop_fleet.py so Discover / ES|QL match live OTLP.
+_FLEET_SERVICES_HOSTS: tuple[tuple[str, str], ...] = (
+    ("checkout-api", "workshop-node-01"),
+    ("inventory-api", "workshop-node-02"),
+    ("notifications-worker", "workshop-node-03"),
+    ("frontend-web", "workshop-node-04"),
+    ("pricing-api", "workshop-node-05"),
+    ("auth-service", "workshop-node-06"),
+)
 
 
 def es_client() -> tuple[str, dict[str, str], object]:
@@ -55,7 +68,29 @@ def _hex_id16() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Seed workshop logs + metrics + traces for Discover / ES|QL demos.")
     ap.add_argument("--log-docs", type=int, default=400, help="Number of synthetic log documents")
-    ap.add_argument("--metric-docs", type=int, default=200, help="Number of synthetic metric documents")
+    ap.add_argument(
+        "--metric-docs",
+        type=int,
+        default=200,
+        help="Number of synthetic metric documents (random mode only)",
+    )
+    ap.add_argument(
+        "--metrics-time-series",
+        action="store_true",
+        help="Emit metrics on a regular time grid (fleet service × time step) for full-width TS in Discover / Lens",
+    )
+    ap.add_argument(
+        "--metric-time-step-minutes",
+        type=int,
+        default=60,
+        help="Minutes between grid points when --metrics-time-series (default 60)",
+    )
+    ap.add_argument(
+        "--metric-series-cap",
+        type=int,
+        default=20000,
+        help="Max metric documents when --metrics-time-series (default 20000; full grid may be smaller)",
+    )
     ap.add_argument(
         "--trace-transactions",
         type=int,
@@ -110,26 +145,64 @@ def main() -> int:
             },
         )
 
-    for i in range(args.metric_docs):
-        ts = now - timedelta(minutes=rng.randint(0, window_mins))
-        ts_s = ts.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-        hn = rng.choice(hosts)
-        svc = rng.choice(services_log)
-        add_create(
-            "metrics-workshop-default",
-            {
-                "@timestamp": ts_s,
-                "host.name": hn,
-                "host.hostname": hn,
-                "service.name": svc,
-                "agent.type": "workshop-seed",
-                "event.dataset": "workshop.synthetic",
-                "workshop.requests": {"rate": round(rng.uniform(10, 500), 2)},
-                # Common numeric shape so Lens / metrics views can aggregate something beyond custom workshop.* :
-                "system.cpu.total.norm.pct": round(rng.uniform(0.05, 0.85), 4),
-                "system.memory.actual.used.pct": round(rng.uniform(0.2, 0.92), 4),
-            },
-        )
+    metric_docs_written = 0
+    if args.metrics_time_series:
+        step = max(1, int(args.metric_time_step_minutes))
+        slots = (window_mins // step) + 1
+        planned = slots * len(_FLEET_SERVICES_HOSTS)
+        ts_cap = min(max(1, args.metric_series_cap), planned)
+        routes = ["/health", "/api/v1/orders", "/api/v1/users", "/api/v1/cart", "/readyz"]
+        for mn in range(0, window_mins + 1, step):
+            for si, (svc, hn) in enumerate(_FLEET_SERVICES_HOSTS):
+                if metric_docs_written >= ts_cap:
+                    break
+                ts = now - timedelta(minutes=mn)
+                ts_s = ts.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+                phase = (mn / 180.0) + si * 0.7
+                cpu_pct = 0.28 + 0.35 * math.sin(phase) + rng.uniform(-0.04, 0.04)
+                mem_pct = 0.42 + 0.22 * math.sin(phase * 0.83 + 1.1) + rng.uniform(-0.03, 0.03)
+                rate_v = max(5.0, 120.0 + 180.0 * (0.5 + 0.5 * math.sin(phase * 0.5)) + rng.uniform(-20, 20))
+                add_create(
+                    "metrics-workshop-default",
+                    {
+                        "@timestamp": ts_s,
+                        "host.name": hn,
+                        "host.hostname": hn,
+                        "service.name": svc,
+                        "service.version": "workshop-seed",
+                        "agent.type": "workshop-seed",
+                        "event.dataset": "workshop.synthetic",
+                        "http.route": routes[(mn + si) % len(routes)],
+                        "workshop.requests": {"rate": round(rate_v, 2)},
+                        "system.cpu.total.norm.pct": round(max(0.02, min(0.98, cpu_pct)), 4),
+                        "system.memory.actual.used.pct": round(max(0.05, min(0.98, mem_pct)), 4),
+                    },
+                )
+                metric_docs_written += 1
+            if metric_docs_written >= ts_cap:
+                break
+    else:
+        for i in range(args.metric_docs):
+            ts = now - timedelta(minutes=rng.randint(0, window_mins))
+            ts_s = ts.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            hn = rng.choice(hosts)
+            svc = rng.choice(services_log)
+            add_create(
+                "metrics-workshop-default",
+                {
+                    "@timestamp": ts_s,
+                    "host.name": hn,
+                    "host.hostname": hn,
+                    "service.name": svc,
+                    "agent.type": "workshop-seed",
+                    "event.dataset": "workshop.synthetic",
+                    "workshop.requests": {"rate": round(rng.uniform(10, 500), 2)},
+                    # Common numeric shape so Lens / metrics views can aggregate something beyond custom workshop.* :
+                    "system.cpu.total.norm.pct": round(rng.uniform(0.05, 0.85), 4),
+                    "system.memory.actual.used.pct": round(rng.uniform(0.2, 0.92), 4),
+                },
+            )
+            metric_docs_written += 1
 
     n_spans = max(0, min(int(args.spans_per_trace), 8))
     trace_docs = 0
@@ -220,9 +293,10 @@ def main() -> int:
 
     print(
         f"OK: indexed {args.log_docs} → logs-workshop-default, "
-        f"{args.metric_docs} → metrics-workshop-default, "
+        f"{metric_docs_written} → metrics-workshop-default, "
         f"{trace_docs} → traces-workshop-default "
-        f"({args.trace_transactions} transactions × (1 + {n_spans}) docs; last {args.days}d window)."
+        f"({args.trace_transactions} transactions × (1 + {n_spans}) docs; last {args.days}d window"
+        f"{'; metrics-time-series grid' if args.metrics_time_series else ''})."
     )
     print(
         "\nDiscover / data views:\n"

@@ -16,9 +16,11 @@ so `pkill -f otel_workshop_fleet.py` stops the whole fleet.
 
 Env:
   WORKSHOP_ALLOY_OTLP_HTTP — default http://127.0.0.1:4318
-  WORKSHOP_EMIT_INTERVAL_SEC — base sleep between trace ticks per worker (default 8)
+  WORKSHOP_EMIT_INTERVAL_SEC — base sleep between trace ticks per worker (default 5)
+  WORKSHOP_REQUEST_BURST — synchronous http.server.request.* records per tick (default 4) for denser TS in mOTLP
   WORKSHOP_ERROR_EMIT_PROB — probability [0,1] to emit one operation error per tick (default 0.18)
-  WORKSHOP_METRIC_EXPORT_INTERVAL_MS — OTLP metric reader export interval (default 8000, clamp 3000–60000)
+  WORKSHOP_METRIC_EXPORT_INTERVAL_MS — OTLP metric reader export interval (default 5000, clamp 3000–60000)
+  For historical **metrics-*** lines in Discover over multi-day ranges, run **tools/seed_workshop_telemetry.py --metrics-time-series** (bulk; optional).
 """
 from __future__ import annotations
 
@@ -146,7 +148,7 @@ def _run_worker(spec: dict[str, str]) -> int:
         v = 0.38 + 0.28 * math.sin(phase * 0.85) + rng.uniform(-0.05, 0.05)
         yield Observation(max(0.18, min(0.93, v)))
 
-    export_ms = int((os.environ.get("WORKSHOP_METRIC_EXPORT_INTERVAL_MS") or "8000").strip() or "8000")
+    export_ms = int((os.environ.get("WORKSHOP_METRIC_EXPORT_INTERVAL_MS") or "5000").strip() or "5000")
     export_ms = max(3_000, min(export_ms, 60_000))
     reader = PeriodicExportingMetricReader(
         OTLPMetricExporter(endpoint=f"{base}/v1/metrics"),
@@ -185,7 +187,12 @@ def _run_worker(spec: dict[str, str]) -> int:
     )
 
     routes = ["/health", "/api/v1/orders", "/api/v1/users", "/api/v1/cart", "/readyz"]
-    interval = float((os.environ.get("WORKSHOP_EMIT_INTERVAL_SEC") or "8").strip() or "8")
+    interval = float((os.environ.get("WORKSHOP_EMIT_INTERVAL_SEC") or "5").strip() or "5")
+    try:
+        burst = int((os.environ.get("WORKSHOP_REQUEST_BURST") or "4").strip() or "4")
+    except ValueError:
+        burst = 4
+    burst = max(1, min(burst, 64))
     try:
         err_prob = float((os.environ.get("WORKSHOP_ERROR_EMIT_PROB") or "0.18").strip() or "0.18")
     except ValueError:
@@ -197,7 +204,6 @@ def _run_worker(spec: dict[str, str]) -> int:
     while True:
         n += 1
         route = routes[n % len(routes)]
-        duration_s = round(rng.uniform(0.006, 0.42), 4)
         status = rng.choice([200, 200, 200, 201, 204, 429, 500])
         method = "GET" if n % 3 else "POST"
         span_name = f"{method} {route}"
@@ -215,8 +221,10 @@ def _run_worker(spec: dict[str, str]) -> int:
             span.set_attribute("server.address", host)
             span.set_attribute("entity_id", entity_id)
 
-        duration_hist.record(duration_s, base_attrs)
-        req_counter.add(1, base_attrs)
+        for _ in range(burst):
+            duration_s = round(rng.uniform(0.006, 0.42), 4)
+            duration_hist.record(duration_s, base_attrs)
+            req_counter.add(1, base_attrs)
 
         if status >= 500 or rng.random() < err_prob:
             reason = (
