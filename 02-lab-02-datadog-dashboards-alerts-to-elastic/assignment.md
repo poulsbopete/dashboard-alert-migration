@@ -33,7 +33,7 @@ notes:
   contents: |
     ## This lab
 
-    **10** Datadog dashboards + **4** monitors → Kibana. Pick **Path A** (Terminal migrate script) or **Path B** (laptop: converters + publish, same idea as Lab 1).
+    **10** Datadog dashboards + **4** monitors → Kibana. Pick **Path A** (VM migrate script) or **Path B** (clone in **Cursor**, paste **`export`** from the VM, run convert + publish in the **integrated terminal** — OTLP is already up from track bootstrap).
 
     **Live OTLP:** **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) — same pipeline as Lab 1.
 tabs:
@@ -82,14 +82,15 @@ Then **Dashboards** and **Observability → Rules** in the Elastic Serverless ta
 
 ## Path B — Cursor on your laptop
 
-Clone **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)**. On the **Instruqt** VM, print env to copy:
+1. **Clone** **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** and open that folder in **Cursor**.
+2. On the **Instruqt** VM only to copy credentials:
 
 ```bash
 cd /root/workshop && source ~/.bashrc
 grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc
 ```
 
-Paste those **`export`** lines into your laptop terminal (not the AI chat). Run **`./scripts/start_workshop_otel.sh`** on the **VM** once so Lens has data, then from the **clone**:
+3. In **Cursor**, open the **integrated terminal** (not the AI chat), **paste** those **`export`** lines, then run:
 
 ```bash
 mkdir -p build/elastic-datadog-dashboards build/elastic-alerts
@@ -102,7 +103,9 @@ python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datado
 python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
 ```
 
-Optional skills: **`workshop-datadog-dashboards-to-elastic`**, **`workshop-datadog-to-elastic-alerts`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**.
+The sandbox **already runs Alloy + OTLP** for the project; you do **not** need to start emitters on the VM before this import. If Lens panels look empty afterward, on the VM run **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
+
+Optional skills: **`workshop-datadog-dashboards-to-elastic`**, **`workshop-datadog-to-elastic-alerts`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**. Do not paste API keys into the AI chat.
 
 ## Done
 

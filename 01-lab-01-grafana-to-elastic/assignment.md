@@ -35,7 +35,7 @@ notes:
   contents: |
     ## This lab
 
-    **20** Grafana JSON → Elastic drafts → Kibana. Pick **Path A** (Instruqt Terminal + migrate script) or **Path B** (clone repo on your laptop, **`export`** from VM **`~/.bashrc`**, converter + publish, or **`kibana-dashboards`** skill).
+    **20** Grafana JSON → Elastic drafts → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: open clone, paste **`export`** from VM **`~/.bashrc`**, run converter + publish in integrated terminal — OTLP already running from bootstrap).
 tabs:
 - id: lypopaehfkah
   title: Terminal
@@ -80,7 +80,10 @@ Open **Elastic Serverless → Dashboards** → titles **`(Grafana import draft)`
 
 ## Path B — Cursor on your laptop
 
-Repo: **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** — copy **`export`** lines from the VM (`grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`), then:
+1. **Clone** **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** and open the folder in **Cursor**.
+2. On the **VM**, copy env: `cd /root/workshop && source ~/.bashrc` then  
+   `grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`
+3. In Cursor’s **integrated terminal**, paste those **`export`** lines, then:
 
 ```bash
 mkdir -p build/elastic-dashboards
@@ -88,7 +91,9 @@ python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elasti
 python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-dashboards
 ```
 
-Run **`./scripts/start_workshop_otel.sh`** on the **VM** before publishing from a laptop so Lens has data. Optional: **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** **`kibana-dashboards`**, **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**. Do not paste API keys into AI chat.
+The sandbox **already runs Alloy + OTLP**; you do **not** need **`start_workshop_otel.sh`** on the VM before importing from Cursor. If charts look empty, troubleshoot on the VM with **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
+
+Optional: **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** **`kibana-dashboards`**, **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**. Do not paste API keys into the AI chat.
 
 ## Done
 
