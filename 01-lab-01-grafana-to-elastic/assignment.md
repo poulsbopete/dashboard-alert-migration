@@ -81,7 +81,7 @@ Open **Elastic Serverless → Dashboards** → titles **`(Grafana import draft)`
 ## Path B — Cursor on your laptop
 
 1. **Clone** **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** and open the folder in **Cursor**.
-2. On the **VM**, copy env: `cd /root/workshop && source ~/.bashrc` then  
+2. On the **VM**, copy env: `cd /root/workshop && source ~/.bashrc` then
    `grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`
 3. In Cursor’s **integrated terminal**, paste those **`export`** lines, then:
 
