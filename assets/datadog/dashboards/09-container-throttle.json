@@ -1,11 +1,11 @@
 {
   "title": "Container CPU throttle",
-  "description": "Synthetic Datadog-style export for migration workshop",
+  "description": "Synthetic Datadog-style export for migration workshop (multi-widget)",
   "widgets": [
     {
       "definition": {
         "type": "timeseries",
-        "title": "Primary",
+        "title": "CPU throttled",
         "requests": [
           {
             "q": "avg:container.cpu.throttled{*} by {container_name}",
@@ -16,7 +16,205 @@
       "layout": {
         "x": 0,
         "y": 0,
-        "width": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "CPU usage",
+        "requests": [
+          {
+            "q": "avg:container.cpu.usage{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 0,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "CPU user",
+        "requests": [
+          {
+            "q": "avg:container.cpu.user{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "CPU system",
+        "requests": [
+          {
+            "q": "avg:container.cpu.system{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Mem usage",
+        "requests": [
+          {
+            "q": "avg:container.memory.usage{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Mem limit",
+        "requests": [
+          {
+            "q": "avg:container.memory.limit{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Network RX",
+        "requests": [
+          {
+            "q": "sum:container.net.rcvd{*}.as_rate() by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Network TX",
+        "requests": [
+          {
+            "q": "sum:container.net.sent{*}.as_rate() by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Restarts",
+        "requests": [
+          {
+            "q": "sum:container.restarts{*}.as_count() by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "CPU shares",
+        "requests": [
+          {
+            "q": "avg:container.cpu.shares{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "OOM kills",
+        "requests": [
+          {
+            "q": "sum:container.oom_events{*}.as_count() by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 20,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Filesystem usage",
+        "requests": [
+          {
+            "q": "avg:container.filesystem.usage{*} by {container_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 20,
+        "width": 6,
         "height": 4
       }
     }

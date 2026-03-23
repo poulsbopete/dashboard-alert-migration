@@ -1,11 +1,11 @@
 {
   "title": "Apdex-style satisfaction",
-  "description": "Synthetic Datadog-style export for migration workshop",
+  "description": "Synthetic Datadog-style export for migration workshop (multi-widget)",
   "widgets": [
     {
       "definition": {
         "type": "timeseries",
-        "title": "Primary",
+        "title": "Apdex by service",
         "requests": [
           {
             "q": "avg:app.apdex.score{*} by {service}",
@@ -16,7 +16,205 @@
       "layout": {
         "x": 0,
         "y": 0,
-        "width": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Satisfied count",
+        "requests": [
+          {
+            "q": "sum:app.apdex.satisfied{*}.as_count() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 0,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Tolerating",
+        "requests": [
+          {
+            "q": "sum:app.apdex.tolerating{*}.as_count() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Frustrated",
+        "requests": [
+          {
+            "q": "sum:app.apdex.frustrated{*}.as_count() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "HTTP duration vs apdex",
+        "requests": [
+          {
+            "q": "avg:trace.http.request.duration{*} by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Hits for context",
+        "requests": [
+          {
+            "q": "sum:trace.http.request.hits{*}.as_count() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Errors vs satisfaction",
+        "requests": [
+          {
+            "q": "sum:trace.http.request.errors{*}.as_count() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Apdex by host",
+        "requests": [
+          {
+            "q": "avg:app.apdex.score{*} by {host}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Request rate",
+        "requests": [
+          {
+            "q": "sum:trace.http.request.hits{*}.as_rate() by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "p95 alongside apdex",
+        "requests": [
+          {
+            "q": "p95:trace.http.request.duration{*} by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Client apdex proxy",
+        "requests": [
+          {
+            "q": "avg:trace.http.client.duration{*} by {service}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 20,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Resource apdex",
+        "requests": [
+          {
+            "q": "avg:app.apdex.score{*} by {resource_name}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 20,
+        "width": 6,
         "height": 4
       }
     }

@@ -62,7 +62,7 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | `01-lab-01-grafana-to-elastic/` | Lab 1: **20** Grafana → `build/elastic-dashboards/*-elastic-draft.json` |
 | `02-lab-02-datadog-dashboards-alerts-to-elastic/` | Lab 2: **10** DD dashboards + **4** monitors → `build/elastic-datadog-dashboards/`, `build/elastic-alerts/` |
 | `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`) |
-| `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (`scripts/generate_datadog_dashboards.py`) |
+| `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (**12** timeseries widgets each; regenerate with **`scripts/generate_datadog_dashboards.py`**) |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** Grafana → drafts + OTLP + **`publish_grafana_drafts_kibana.py`** |

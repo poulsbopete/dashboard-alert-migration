@@ -1,11 +1,11 @@
 {
   "title": "Disk I/O",
-  "description": "Synthetic Datadog-style export for migration workshop",
+  "description": "Synthetic Datadog-style export for migration workshop (multi-widget)",
   "widgets": [
     {
       "definition": {
         "type": "timeseries",
-        "title": "Series A",
+        "title": "Disk IO avg",
         "requests": [
           {
             "q": "avg:system.disk.io{*} by {device}",
@@ -16,14 +16,14 @@
       "layout": {
         "x": 0,
         "y": 0,
-        "width": 12,
+        "width": 6,
         "height": 4
       }
     },
     {
       "definition": {
         "type": "timeseries",
-        "title": "Series B",
+        "title": "Disk in use",
         "requests": [
           {
             "q": "avg:system.disk.in_use{*} by {device}",
@@ -32,9 +32,189 @@
         ]
       },
       "layout": {
-        "x": 0,
+        "x": 6,
         "y": 0,
-        "width": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Read bytes",
+        "requests": [
+          {
+            "q": "sum:system.disk.read_bytes{*}.as_rate() by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Write bytes",
+        "requests": [
+          {
+            "q": "sum:system.disk.write_bytes{*}.as_rate() by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 4,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Read time",
+        "requests": [
+          {
+            "q": "avg:system.disk.read_time_pct{*} by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Write time",
+        "requests": [
+          {
+            "q": "avg:system.disk.write_time_pct{*} by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 8,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Queue length",
+        "requests": [
+          {
+            "q": "avg:system.disk.queue_size{*} by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "IOPS read",
+        "requests": [
+          {
+            "q": "sum:system.disk.read_ops{*}.as_rate() by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 12,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "IOPS write",
+        "requests": [
+          {
+            "q": "sum:system.disk.write_ops{*}.as_rate() by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Filesystem free %",
+        "requests": [
+          {
+            "q": "avg:system.disk.free{*} by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 16,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "Inode usage",
+        "requests": [
+          {
+            "q": "avg:system.disk.in_use{*} by {host}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 0,
+        "y": 20,
+        "width": 6,
+        "height": 4
+      }
+    },
+    {
+      "definition": {
+        "type": "timeseries",
+        "title": "IO utilization",
+        "requests": [
+          {
+            "q": "avg:system.io.util{*} by {device}",
+            "display_type": "line"
+          }
+        ]
+      },
+      "layout": {
+        "x": 6,
+        "y": 20,
+        "width": 6,
         "height": 4
       }
     }

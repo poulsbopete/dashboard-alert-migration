@@ -227,12 +227,13 @@ def _min_lens_panels() -> int:
 
 
 def _max_lens_panels() -> int:
-    raw = (os.environ.get("WORKSHOP_MAX_LENS_PANELS") or "12").strip()
+    # Default 20: dense Datadog workshop dashboards ship ~12 Lens panels each (see generate_datadog_dashboards.py).
+    raw = (os.environ.get("WORKSHOP_MAX_LENS_PANELS") or "20").strip()
     try:
         n = int(raw)
     except ValueError:
-        n = 12
-    return max(0, min(n, 24))
+        n = 20
+    return max(0, min(n, 48))
 
 
 def _datadog_pad_lens() -> bool:
