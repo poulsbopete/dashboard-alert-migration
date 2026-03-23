@@ -8,6 +8,13 @@ cd /root/workshop
 # shellcheck disable=SC1090
 source ~/.bashrc
 
+# Prefer track venv — system python3 often lacks opentelemetry-* (silent failures if PATH is wrong).
+if [ -x /opt/workshop-venv/bin/python3 ]; then
+  PYTHON="${WORKSHOP_PYTHON:-/opt/workshop-venv/bin/python3}"
+else
+  PYTHON="${WORKSHOP_PYTHON:-python3}"
+fi
+
 if [ -z "${WORKSHOP_OTLP_ENDPOINT:-}" ] && [ "${WORKSHOP_DERIVE_OTLP_FROM_ES:-1}" != "0" ]; then
   _mot=""
   if [ -n "${ES_URL:-}" ] && [[ "$ES_URL" == *".es."* ]]; then
@@ -95,9 +102,9 @@ sleep 1
 nohup "$ALLOY_BIN" run --storage.path=/tmp/alloy-storage "$ALLOY_CFG" >>/tmp/workshop-alloy.log 2>&1 &
 echo $! >/tmp/workshop-alloy.pid
 sleep 3
-nohup python3 /root/workshop/tools/otel_workshop_fleet.py >>/tmp/workshop-fleet-supervisor.log 2>&1 &
+nohup "$PYTHON" /root/workshop/tools/otel_workshop_fleet.py >>/tmp/workshop-fleet-supervisor.log 2>&1 &
 echo $! >/tmp/workshop-fleet.pid
-nohup python3 /root/workshop/tools/datadog_otel_to_elastic.py >>/tmp/workshop-datadog-otel.log 2>&1 &
+nohup "$PYTHON" /root/workshop/tools/datadog_otel_to_elastic.py >>/tmp/workshop-datadog-otel.log 2>&1 &
 echo $! >/tmp/workshop-datadog-otel.pid
 echo "Alloy PID $(cat /tmp/workshop-alloy.pid), OTLP fleet supervisor $(cat /tmp/workshop-fleet.pid), Datadog-style OTLP $(cat /tmp/workshop-datadog-otel.pid)"
 echo "Logs: /tmp/workshop-alloy.log /tmp/workshop-fleet.log /tmp/workshop-fleet-supervisor.log /tmp/workshop-datadog-otel.log"

@@ -22,7 +22,7 @@ notes:
   contents: |
     ## Path A
 
-    In Terminal: **`cd /root/workshop`**, **`source ~/.bashrc`**, then **`./scripts/migrate_grafana_dashboards_to_serverless.sh`**. That runs the dashboard migration and publishes to Kibana.
+    In Terminal: **`cd /root/workshop`**, **`source ~/.bashrc`**, then **`./scripts/migrate_grafana_dashboards_to_serverless.sh`**. Converts drafts, ensures OTLP (or leaves bootstrap pipeline running), publishes to Kibana. **`git pull`**: run **`./scripts/sync_workshop_from_git.sh`** on the VM if scripts look old.
 
     ## Path B
 
@@ -69,7 +69,11 @@ source ~/.bashrc
 
 Open **Elastic Serverless → Dashboards** and look for titles ending in **`(Grafana import draft)`**.
 
-*If charts look empty:* on the VM run **`./scripts/start_workshop_otel.sh`** (after **`source ~/.bashrc`**), wait a minute, refresh. The track ships **several OTLP “apps”** (distinct services and **host** names) so **Applications**, **Infrastructure**, and **Hosts** populate—details in **`README.md`**.
+**Path A vs Path B:** Track bootstrap usually starts **Alloy + OTLP emitters** before you open the lab. The migrate script now **skips restarting** that pipeline when it is already healthy (same steady data Path B publishes against). If you need a clean restart: **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. Converter + publisher use **`/opt/workshop-venv/bin/python3`** when present so **`python3`** PATH issues do not break Path A.
+
+*If charts look empty:* **`./scripts/check_workshop_otel_pipeline.sh`**, then **`./scripts/start_workshop_otel.sh`**, wait ~1 minute, refresh. Some Grafana JSON uses **labels that do not exist** in workshop OTLP (e.g. arbitrary **`entity_id`**); padded Lens panels still show **volume / HTTP / services** proxies—see draft **Markdown** for the original PromQL.
+
+*Scripts out of date on the VM:* **`./scripts/sync_workshop_from_git.sh`** (needs **`git`** checkout under **`/root/workshop`**).
 
 ---
 
