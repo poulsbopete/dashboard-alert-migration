@@ -12,6 +12,7 @@ PromQL in drafts is **not** executed.
 
 **Fallback:** **saved_objects/_import** then **PUT** the same attempts. Env: **`WORKSHOP_DISABLE_LENS=1`**, **`WORKSHOP_MIN_LENS_PANELS`**
 (pad short Grafana drafts so more mixed charts appear), **`WORKSHOP_MAX_LENS_PANELS`**, **`WORKSHOP_SIMPLE_LENS`**, **`WORKSHOP_ESQL_FROM`**,
+**`WORKSHOP_DD_PAD_LENS=1`** — pad Datadog imports to **`WORKSHOP_MIN_LENS_PANELS`** (default is **no** padding so duplicate “Workshop insights” rows are avoided),
 **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
 **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** — optional ES|QL column for HTTP status bars (e.g. **`http.response.status_code`**). If unset, HTTP panels use **request volume by `service.name`** (avoids **Unknown column [attributes.http.…]** on some Serverless mappings).
 **`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** — optional (default **`http.route`**) for route breakdown panels on **metrics-***.
@@ -143,7 +144,8 @@ def _short_listing_description(draft: dict[str, Any], title: str) -> str:
 
 def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
     """Compact Markdown panel: unique title line + rotating one-liner; full PromQL detail below."""
-    tips = (
+    is_dd = "datadog" in dashboard_title.lower()
+    tips: list[str] = [
         "Lens panels use **ES|QL**; PromQL below is the Grafana source for migration.",
         "Use **Edit** to swap queries. Publisher options (**WORKSHOP_***) are in the repo **README**.",
         "Live data: **`./scripts/start_workshop_otel.sh`** on the workshop VM (OTLP → mOTLP).",
@@ -152,10 +154,17 @@ def markdown_for_canvas(detail: str, *, dashboard_title: str) -> str:
         "Duplicate lines only: **`WORKSHOP_SIMPLE_LENS=1`** when debugging.",
         "Community JSON: **assignment B5b** — same **`grafana_to_elastic.py`** pipeline.",
         "Path A parity: mixed Lens types match **`migrate_grafana_dashboards_to_serverless.sh`** output.",
-    )
+    ]
+    if is_dd:
+        tips[0] = (
+            "Lens panels use **ES|QL**; Datadog **`q`** strings below are migration context (not executed in Elastic)."
+        )
+        tips.append(
+            "**Datadog imports** skip filler “Workshop insights” panels by default — "
+            "**`WORKSHOP_DD_PAD_LENS=1`** restores Grafana-style padding (**`WORKSHOP_MIN_LENS_PANELS`**)."
+        )
     idx = sum(ord(c) for c in dashboard_title) % len(tips)
     tip = tips[idx]
-    is_dd = "datadog" in dashboard_title.lower()
     ttl = (dashboard_title.strip() or ("Datadog import draft" if is_dd else "Grafana import draft")).replace("\n", " ")[:200]
     header = f"## {'Datadog' if is_dd else 'Grafana'} → Elastic\n\n**{ttl}** — {tip}\n\n---\n\n"
     body = (
@@ -226,6 +235,21 @@ def _max_lens_panels() -> int:
     return max(0, min(n, 24))
 
 
+def _datadog_pad_lens() -> bool:
+    """When false (default), Datadog dashboard drafts are not padded with empty Workshop panels."""
+    return (os.environ.get("WORKSHOP_DD_PAD_LENS") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _is_datadog_import_draft(draft: dict[str, Any]) -> bool:
+    tags = draft.get("tags") or []
+    if isinstance(tags, list) and any(
+        isinstance(t, str) and "datadog-dashboard" in t.lower() for t in tags
+    ):
+        return True
+    title = str(draft.get("title") or "").lower()
+    return "datadog" in title and "import draft" in title
+
+
 def _expand_draft_panels_for_lens(draft: dict[str, Any]) -> list[dict[str, Any]]:
     raw = draft.get("panels") or []
     if not isinstance(raw, list):
@@ -238,6 +262,9 @@ def _expand_draft_panels_for_lens(draft: dict[str, Any]) -> list[dict[str, Any]]
     if max_n == 0:
         return []
     target_min = min(min_n, max_n)
+    if _is_datadog_import_draft(draft) and not _datadog_pad_lens():
+        # Avoid repeating the same Lens recipe six times on 2-query dashboards.
+        target_min = min(target_min, len(panels))
     k = 1
     while len(panels) < target_min:
         panels.append({"title": f"Workshop insights {k}", "migration": {"promql": ""}})
@@ -362,8 +389,25 @@ def _truncate_lens_title(panel_title: str, promql: str, *, max_len: int = 118) -
 
 
 def _classify_grafana_panel(promql: str, panel_title: str) -> str:
-    """Coarse bucket from PromQL + title so each dashboard gets panel-appropriate ES|QL (workshop data)."""
+    """Coarse bucket from PromQL / Datadog query + title so each dashboard gets panel-appropriate ES|QL (workshop data)."""
     s = f"{promql} {panel_title}".lower()
+    # Datadog metric syntax: avg:system.cpu.user{*}, sum:kubernetes.io.*, etc.
+    if re.search(r"(avg|sum|max|min|p\d{2,3}):\s*system\.cpu[\w.]*", s) or re.search(
+        r"system\.cpu\.(user|system|idle|iowait)", s
+    ):
+        return "cpu"
+    if re.search(r"(avg|sum|max|min|p\d{2,3}):\s*system\.mem[\w.]*", s) or re.search(
+        r"system\.mem\.|system\.memory\.|memory\.used", s
+    ):
+        return "memory"
+    if re.search(r"\btrace\.|apm\.|datadog\.apm|\bspan\.", s):
+        return "latency"
+    if re.search(r"kubernetes\.|kube\.|k8s\.|container\.cpu|container\.memory", s):
+        return "k8s"
+    if re.search(r"(avg|sum|max|min):[\w.]*\bnetwork[\w.]*", s) or re.search(
+        r"system\.net\.|net\.bytes|bandwidth", s
+    ):
+        return "network"
     # Prometheus CPU saturation (process_cpu_seconds_total, node_exporter, etc.) → OTEL system.cpu.utilization
     if re.search(
         r"process_cpu_seconds|node_cpu|container_cpu|cpu_usage|cpu\.usage|cpu_saturation",
@@ -386,7 +430,9 @@ def _classify_grafana_panel(promql: str, panel_title: str) -> str:
         return "errors"
     if re.search(r"memory|mem_usage|heap|working_set|ram\b", s):
         return "memory"
-    if re.search(r"disk|filesystem|pvc_|volume_|iops|io_", s):
+    if re.search(
+        r"system\.disk|system\.io|disk\.io|disk\.in_use|ioutil|read\.bytes|write\.bytes", s
+    ) or re.search(r"disk|filesystem|pvc_|volume_|iops|io_", s):
         return "storage"
     if re.search(r"kube_|k8s|pod_|namespace_|container_", s):
         return "k8s"
@@ -739,19 +785,78 @@ def _panel_esql_spec(
         )
 
     if cat == "storage" and cap["metrics"]:
+        # Workshop OTLP has no host disk I/O metrics — rotate OTEL signals so lines are not empty COUNT(*) buckets.
+        v = panel_index % 3
+        if v == 0:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="line",
+                query=(
+                    f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) "
+                    f"BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("m", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (host load proxy — CPU; disk query → OTEL)",
+            )
+        if v == 1:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="area",
+                query=(
+                    f"FROM metrics-* | STATS m = AVG(`system.memory.utilization`) "
+                    f"BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("m", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (memory pressure proxy — disk query → OTEL)",
+            )
+        return _spec_xy(
+            "metrics-*",
+            tf,
+            layer="line",
+            query=(
+                f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                f"BY bucket = {q_b}, svc = {svc}"
+            ),
+            x="bucket",
+            ys=[("c", None)],
+            breakdown="svc",
+            lens_title=f"{lt} (request activity proxy — disk I/O → OTEL)",
+        )
+    if cat == "storage" and cap["logs"] and not cap["metrics"]:
         return vol_line("line")
 
-    if cat == "k8s" and cap["logs"]:
-        return _spec_xy(
-            "logs-*",
-            tf,
-            layer="bar",
-            query="FROM logs-* | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 10",
-            x="h",
-            ys=[("c", None)],
-            breakdown=None,
-            lens_title=f"{lt} (by host — K8s proxy)",
-        )
+    if cat == "k8s":
+        if cap["metrics"]:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="bar",
+                query=(
+                    "FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    "BY h = host.name | SORT c DESC | LIMIT 10"
+                ),
+                x="h",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (requests by host — K8s / OTEL)",
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                "logs-*",
+                tf,
+                layer="bar",
+                query="FROM logs-* | STATS c = COUNT(*) BY h = host.name | SORT c DESC | LIMIT 10",
+                x="h",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (by host — K8s proxy)",
+            )
 
     if cat == "db":
         if cap["logs"]:
@@ -850,12 +955,13 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM metrics-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
+                    f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) "
+                    f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
-                ys=[("c", None)],
+                ys=[("m", None)],
                 breakdown="svc",
-                lens_title=f"{lt} (metric docs by service)",
+                lens_title=f"{lt} (CPU by service — generic)",
             )
         if cap["logs"]:
             return _spec_xy(
