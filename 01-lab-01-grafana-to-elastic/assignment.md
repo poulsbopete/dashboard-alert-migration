@@ -71,7 +71,7 @@ Open **Elastic Serverless → Dashboards** and look for titles ending in **`(Gra
 
 **Path A vs Path B:** Track bootstrap usually starts **Alloy + OTLP emitters** before you open the lab. The migrate script now **skips restarting** that pipeline when it is already healthy (same steady data Path B publishes against). If you need a clean restart: **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. Converter + publisher use **`/opt/workshop-venv/bin/python3`** when present so **`python3`** PATH issues do not break Path A.
 
-*If charts look empty:* **`./scripts/check_workshop_otel_pipeline.sh`**, then **`./scripts/start_workshop_otel.sh`**, wait ~1 minute, refresh. Some Grafana JSON uses **labels that do not exist** in workshop OTLP (e.g. arbitrary **`entity_id`**); padded Lens panels still show **volume / HTTP / services** proxies—see draft **Markdown** for the original PromQL.
+*If charts look empty:* **`./scripts/check_workshop_otel_pipeline.sh`**, then **`./scripts/start_workshop_otel.sh`**, wait ~1 minute, refresh. **`otel_workshop_fleet.py`** emits **`entity_id`** (e.g. `shoplist-checkout`) and an **`operation_errors_total`** counter with **`reason`** so **entity / error** Grafana panels map to real OTLP metrics; other PromQL may still be a **Lens proxy**—see draft **Markdown**.
 
 *Scripts out of date on the VM:* **`./scripts/sync_workshop_from_git.sh`** (needs **`git`** checkout under **`/root/workshop`**).
 

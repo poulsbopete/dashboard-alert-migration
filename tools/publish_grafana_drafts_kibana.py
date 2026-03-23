@@ -312,6 +312,10 @@ def _classify_grafana_panel(promql: str, panel_title: str) -> str:
         return "latency"
     if re.search(r"operation_errors", s):
         return "operation_errors"
+    if re.search(r"\bentity_id\b", s):
+        if re.search(r"histogram|quantile|duration_second|_bucket", s):
+            return "by_entity_latency"
+        return "by_entity"
     if re.search(r"http_|http\.|requests_total|status_code|5xx|4xx|response_code", s):
         return "http"
     if re.search(r"\berror\b|exception|failed|failures|5[0-9]{2}\b", s) and "http" not in s[:80]:
@@ -479,19 +483,62 @@ def _panel_esql_spec(
         )
 
     if cat == "operation_errors" and cap["metrics"]:
-        # Prometheus "reason" label → OTLP HTTP status on workshop metrics (http.server.request.count)
+        # Prefer workshop OTLP counter operation_errors_total{reason,entity_id}; fallback-style HTTP status otherwise.
+        if panel_index % 2 == 0:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="bar",
+                query=(
+                    "FROM metrics-* | STATS c = SUM(`operation_errors_total`) BY reason = reason "
+                    "| SORT c DESC | LIMIT 12"
+                ),
+                x="reason",
+                ys=[("c", None)],
+                breakdown=None,
+                lens_title=f"{lt} (operation_errors_total by reason)",
+            )
         return _spec_xy(
             "metrics-*",
             tf,
             layer="bar",
             query=(
-                "FROM metrics-* | STATS c = COUNT(*) BY reason = http.response.status_code "
-                "| SORT c DESC | LIMIT 12"
+                "FROM metrics-* | STATS c = SUM(`operation_errors_total`) BY e = entity_id "
+                "| SORT c DESC | LIMIT 10"
             ),
-            x="reason",
+            x="e",
             ys=[("c", None)],
             breakdown=None,
-            lens_title=f"{lt} (volume by HTTP status — OTLP proxy for operation_errors)",
+            lens_title=f"{lt} (operation_errors_total by entity_id)",
+        )
+
+    if cat == "by_entity" and cap["metrics"]:
+        return _spec_xy(
+            "metrics-*",
+            tf,
+            layer="bar",
+            query=(
+                "FROM metrics-* | STATS c = COUNT(*) BY e = entity_id | SORT c DESC | LIMIT 10"
+            ),
+            x="e",
+            ys=[("c", None)],
+            breakdown=None,
+            lens_title=f"{lt} (volume by entity_id — http_requests_total proxy)",
+        )
+
+    if cat == "by_entity_latency" and cap["metrics"]:
+        return _spec_xy(
+            "metrics-*",
+            tf,
+            layer="line",
+            query=(
+                f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
+                f"BY bucket = {q_b}, e = entity_id"
+            ),
+            x="bucket",
+            ys=[("m", None)],
+            breakdown="e",
+            lens_title=f"{lt} (avg request duration by entity_id — p95 proxy)",
         )
 
     if cat == "operation_errors" and cap["traces"] and not cap["metrics"]:

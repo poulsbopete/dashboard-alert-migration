@@ -5,12 +5,19 @@ Multiple synthetic microservices → OTLP → local Grafana Alloy → Elastic mO
 Launches one Python subprocess per service (each has distinct service.name + host.name) so
 **Applications**, **Infrastructure**, and **Hosts** in Observability show multiple entities.
 
+Also emits **Grafana-shaped dimensions** so migrated dashboards and ES|QL can break down like the
+source PromQL samples under ``assets/grafana/``:
+
+- **entity_id** — stable per-service logical id (mirrors ``sum by (entity_id)`` panels).
+- **operation_errors_total** — counter with **reason** (mirrors ``operation_errors_total{reason=...}``).
+
 Parent process only supervises; workers are spawned with this same file + "worker" + JSON spec
 so `pkill -f otel_workshop_fleet.py` stops the whole fleet.
 
 Env:
   WORKSHOP_ALLOY_OTLP_HTTP — default http://127.0.0.1:4318
   WORKSHOP_EMIT_INTERVAL_SEC — base sleep between trace ticks per worker (default 8)
+  WORKSHOP_ERROR_EMIT_PROB — probability [0,1] to emit one operation error per tick (default 0.18)
 """
 from __future__ import annotations
 
@@ -22,14 +29,61 @@ import sys
 import time
 from pathlib import Path
 
+# entity_id aligns with Grafana JSON that uses sum by (entity_id) (rate(http_requests_total...)) etc.
 FLEET: list[dict[str, str]] = [
-    {"service": "checkout-api", "host": "workshop-node-01", "version": "1.4.2", "lang": "python"},
-    {"service": "inventory-api", "host": "workshop-node-02", "version": "2.0.1", "lang": "python"},
-    {"service": "notifications-worker", "host": "workshop-node-03", "version": "0.9.8", "lang": "go"},
-    {"service": "frontend-web", "host": "workshop-node-04", "version": "3.2.0", "lang": "nodejs"},
-    {"service": "pricing-api", "host": "workshop-node-05", "version": "1.1.0", "lang": "python"},
-    {"service": "auth-service", "host": "workshop-node-06", "version": "4.0.0", "lang": "python"},
+    {
+        "service": "checkout-api",
+        "entity_id": "shoplist-checkout",
+        "host": "workshop-node-01",
+        "version": "1.4.2",
+        "lang": "python",
+    },
+    {
+        "service": "inventory-api",
+        "entity_id": "shoplist-inventory",
+        "host": "workshop-node-02",
+        "version": "2.0.1",
+        "lang": "python",
+    },
+    {
+        "service": "notifications-worker",
+        "entity_id": "shoplist-notify",
+        "host": "workshop-node-03",
+        "version": "0.9.8",
+        "lang": "go",
+    },
+    {
+        "service": "frontend-web",
+        "entity_id": "shoplist-web",
+        "host": "workshop-node-04",
+        "version": "3.2.0",
+        "lang": "nodejs",
+    },
+    {
+        "service": "pricing-api",
+        "entity_id": "shoplist-pricing",
+        "host": "workshop-node-05",
+        "version": "1.1.0",
+        "lang": "python",
+    },
+    {
+        "service": "auth-service",
+        "entity_id": "shoplist-auth",
+        "host": "workshop-node-06",
+        "version": "4.0.0",
+        "lang": "python",
+    },
 ]
+
+# Mirrors Grafana ``operation_errors_total`` breakdown by reason (not HTTP status alone).
+_OPERATION_ERROR_REASONS: tuple[str, ...] = (
+    "timeout",
+    "validation_failed",
+    "rate_limited",
+    "downstream_5xx",
+    "circuit_open",
+    "internal",
+)
 
 
 def _run_worker(spec: dict[str, str]) -> int:
@@ -48,6 +102,7 @@ def _run_worker(spec: dict[str, str]) -> int:
 
     base = (os.environ.get("WORKSHOP_ALLOY_OTLP_HTTP") or "http://127.0.0.1:4318").rstrip("/")
     service = spec["service"]
+    entity_id = (spec.get("entity_id") or service).strip()
     host = spec["host"]
     version = spec["version"]
     lang = spec["lang"]
@@ -68,6 +123,8 @@ def _run_worker(spec: dict[str, str]) -> int:
             "cloud.provider": "aws",
             "cloud.region": "us-east-1",
             "cloud.availability_zone": "us-east-1a",
+            # Custom resource attr — may appear as labels.workshop.entity_id / workshop.entity_id in ES
+            "workshop.entity_id": entity_id,
         }
     )
 
@@ -117,9 +174,20 @@ def _run_worker(spec: dict[str, str]) -> int:
         "http.server.request.count",
         description="HTTP server requests",
     )
+    # Name matches Grafana ``operation_errors_total`` so Elastic / mOTLP can surface a familiar metric.
+    operation_errors = meter.create_counter(
+        "operation_errors_total",
+        unit="1",
+        description="Synthetic operation errors (workshop) with Prometheus-style name for dashboard parity",
+    )
 
     routes = ["/health", "/api/v1/orders", "/api/v1/users", "/api/v1/cart", "/readyz"]
     interval = float((os.environ.get("WORKSHOP_EMIT_INTERVAL_SEC") or "8").strip() or "8")
+    try:
+        err_prob = float((os.environ.get("WORKSHOP_ERROR_EMIT_PROB") or "0.18").strip() or "0.18")
+    except ValueError:
+        err_prob = 0.18
+    err_prob = max(0.0, min(1.0, err_prob))
 
     print(f"fleet worker {service} @ {host} → {base}", flush=True)
     n = 0
@@ -130,28 +198,38 @@ def _run_worker(spec: dict[str, str]) -> int:
         status = rng.choice([200, 200, 200, 201, 204, 429, 500])
         method = "GET" if n % 3 else "POST"
         span_name = f"{method} {route}"
+        base_attrs = {
+            "http.route": route,
+            "http.request.method": method,
+            "http.response.status_code": str(status),
+            "entity_id": entity_id,
+        }
         with tracer.start_as_current_span(span_name) as span:
             span.set_attribute("http.request.method", method)
             span.set_attribute("http.route", route)
             span.set_attribute("http.response.status_code", status)
             span.set_attribute("url.scheme", "http")
             span.set_attribute("server.address", host)
+            span.set_attribute("entity_id", entity_id)
 
-        duration_hist.record(
-            duration_s,
-            {
-                "http.route": route,
-                "http.request.method": method,
-                "http.response.status_code": str(status),
-            },
-        )
-        req_counter.add(
-            1,
-            {
-                "http.route": route,
-                "http.response.status_code": str(status),
-            },
-        )
+        duration_hist.record(duration_s, base_attrs)
+        req_counter.add(1, base_attrs)
+
+        if status >= 500 or rng.random() < err_prob:
+            reason = (
+                "http_5xx"
+                if status >= 500
+                else rng.choice(_OPERATION_ERROR_REASONS)
+            )
+            operation_errors.add(
+                1,
+                {
+                    "reason": reason,
+                    "entity_id": entity_id,
+                    "http.route": route,
+                },
+            )
+
         time.sleep(max(2.0, interval + rng.uniform(-1.0, 2.0)))
 
 
