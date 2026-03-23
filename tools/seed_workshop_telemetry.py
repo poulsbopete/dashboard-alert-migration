@@ -66,7 +66,10 @@ def _hex_id16() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Seed workshop logs + metrics + traces for Discover / ES|QL demos.")
+    ap = argparse.ArgumentParser(
+        description="Seed workshop logs + metrics + traces for Discover / ES|QL demos.",
+        epilog="VM out of date? Run: ./scripts/sync_workshop_from_git.sh (then retry).",
+    )
     ap.add_argument("--log-docs", type=int, default=400, help="Number of synthetic log documents")
     ap.add_argument(
         "--metric-docs",
