@@ -4,7 +4,7 @@
 
 Ten dashboards under `assets/datadog/dashboards/` → `datadog_dashboard_to_elastic.py` → `build/elastic-datadog-dashboards/`.
 
-**Kibana:** drafts are only files until **`publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards`** runs (or **`./scripts/migrate_datadog_dashboards_to_serverless.sh`** for convert + OTLP + publish).
+**Kibana:** **`./scripts/migrate_datadog_dashboards_to_serverless.sh`** converts dashboards + monitors, runs OTLP, publishes **Dashboards** and **Rules** (see **`tools/publish_datadog_alert_drafts_kibana.py`**).
 
 Four `monitor-*.json` → `datadog_to_elastic_alert.py` → `build/elastic-alerts/`. Optional: **`send_datadog_otel.sh`** for OTLP
 into Elastic **managed OTLP** (Alloy on the VM).

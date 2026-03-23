@@ -21,7 +21,7 @@ source ~/.bashrc
 | Lab | One-liner (Terminal) |
 | --- | --- |
 | **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → opens **Elastic Serverless** → Dashboards (titles end in `(Grafana import draft)`). |
-| **Lab 2 — Datadog dashboards** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → same tab → `(Datadog dashboard import draft)`. |
+| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → Dashboards **`(Datadog dashboard import draft)`** + **Rules** (imports disabled until you edit). |
 
 **Path B (laptop + Cursor):** clone the repo above, copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same `tools/*.py` steps locally. **Dashboards** only appear in Kibana after **`publish_grafana_drafts_kibana.py`** (included in the migrate scripts).
 
@@ -66,7 +66,8 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** Grafana → drafts + OTLP + **`publish_grafana_drafts_kibana.py`** |
-| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** Datadog dashboards → drafts + OTLP + publish **`build/elastic-datadog-dashboards`** to Kibana |
+| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** dashboards + monitors → drafts + OTLP + publish Dashboards + **Rules** (`publish_datadog_alert_drafts_kibana.py`) |
+| `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |
 | `tools/otel_workshop_fleet.py` | **Six** OTLP worker subprocesses (distinct **service.name** + **host.name**) + **`system.*`**-style utilization metrics → Alloy; plus **`datadog_otel_to_elastic.py`** (**shopist-checkout** on **`workshop-node-07`**) for **Applications / Infrastructure / Hosts** variety |
 | `tools/otel_workshop_emitter.py` | Legacy single-service OTLP emitter (not started by default; use fleet) |
@@ -74,6 +75,7 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | `scripts/start_workshop_otel.sh` | Restart Alloy + emitter; **`WORKSHOP_OTLP_ENDPOINT`** from `~/.bashrc` or **derived** from **`ES_URL`** (`.es.`→`.ingest.`) / **`KIBANA_URL`** (`.kb.`→`.ingest.`) on Serverless |
 | `scripts/check_workshop_otel_pipeline.sh` | Verify Alloy (**`:12345/metrics`**), ports **4317/4318**, emitters, log tails |
 | `scripts/sync_workshop_from_git.sh` | **`git fetch` + `reset --hard origin/main`** so new scripts exist on old sandboxes |
+| `scripts/push_git_and_instruqt.sh` | Maintainer: **`git push`** + **`instruqt track validate/push`** after a commit |
 | `tools/seed_workshop_telemetry.py` / `scripts/seed_workshop_telemetry.sh` | **Legacy / opt-in:** direct-to-ES bulk docs (`*-workshop-default`) — only when **`WORKSHOP_ALLOW_BULK_SEED=1`** on bootstrap; not the default workshop path |
 | `agent-skills/` | Workshop skills + [elastic/agent-skills](https://github.com/elastic/agent-skills) |
 | `docs/dashboards-api-getting-started.md` | **Dashboards API** (`/api/dashboards?apiVersion=1`): CRUD, spaces, panel support — matches Lab 1 Path A primary publish path |

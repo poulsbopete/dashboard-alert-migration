@@ -5,7 +5,7 @@ description: >
   JSON into Kibana dashboard drafts via CLI; pair with kibana-dashboards Agent Skill and Cursor for query rewriting.
 metadata:
   author: workshop
-  version: 0.1.3
+  version: 0.1.4
 ---
 
 # Datadog dashboards → Elastic (workshop)
@@ -31,21 +31,22 @@ mkdir -p build/elastic-datadog-dashboards
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
 ```
 
-## Publish to Kibana (drafts are not visible in the UI until you publish)
+## Publish to Kibana (drafts are not visible until you publish)
 
-Lab 1 uses **`tools/publish_grafana_drafts_kibana.py`**; the same tool publishes Datadog-derived **`*-elastic-draft.json`** when you point **`--drafts-dir`** at **`build/elastic-datadog-dashboards`** (it reads **`migration.datadog_query`**).
-
-**All-in-one on the workshop VM:**
+**All-in-one on the workshop VM** (dashboards + monitors + OTLP + Dashboards API + Rules API — same pattern as Lab 1 Grafana migrate):
 
 ```bash
 cd /root/workshop && source ~/.bashrc
 ./scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
+Uses **`tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards`** and **`tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts`**.
+
 **Publish only** (after CLI conversion):
 
 ```bash
 python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
+python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
 ```
 
 ## Cursor + AI workflow

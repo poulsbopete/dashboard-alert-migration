@@ -36,7 +36,7 @@ notes:
     **KQL** for Kibana. Let **Agent Skills** own API details; use the model for translation and tedious JSON reshaping—always
     validate on **live** Serverless data.
 
-    Next: run both CLIs, **publish** dashboards with **`migrate_datadog_dashboards_to_serverless.sh`** or **`publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards`**, then refine in **Elastic Serverless**. (Terminal + Elastic Serverless only.)
+    One Terminal script (**`migrate_datadog_dashboards_to_serverless.sh`**) converts dashboards + monitors, starts OTLP, **publishes Dashboards and Rules** to Kibana (like Lab 1 Grafana migrate). Optional: refine in Cursor with Agent Skills. (Terminal + Elastic Serverless only.)
 
     **Live OTLP:** with Alloy + mOTLP running, **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) sends Datadog-style OpenTelemetry into the **Elastic managed OTLP** path (same as Lab 1 telemetry).
 tabs:
@@ -72,11 +72,28 @@ exports become drafts you refine in Kibana—mirroring how you would onboard a D
 
 ## Outcome
 
-1. Convert **10** Datadog-style **dashboard** JSON files (`assets/datadog/dashboards/*.json`) into Elastic dashboard drafts in `build/elastic-datadog-dashboards/`.
-2. Convert **4** Datadog-style **monitor** JSON files (`assets/datadog/monitor-*.json`) into Kibana alerting drafts in `build/elastic-alerts/`.
-3. Use **Cursor** + **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** (**`kibana-dashboards`**, **`kibana-alerting-rules`**) to push from drafts into **Kibana** / **Rules** on your **Observability Serverless** project.
+1. **10** Datadog dashboards and **4** monitors become Kibana **Dashboards** (in the UI) and **Rules** (draft imports).
+2. Optional: use **Cursor** + **`kibana-dashboards`** / **`kibana-alerting-rules`** to tighten **ES|QL** and connectors after the automated import.
 
-## 1) Inspect inputs
+---
+
+## Path A — one script (same idea as Lab 1 Grafana)
+
+```bash
+cd /root/workshop
+source ~/.bashrc
+./scripts/migrate_datadog_dashboards_to_serverless.sh
+```
+
+This runs **five** steps: convert dashboards → convert monitors → **OTLP** (Alloy) + short wait → **publish dashboards** → **publish rules** (`tools/publish_datadog_alert_drafts_kibana.py`). Rules are created **disabled** with **no connectors** so nothing fires until you edit them.
+
+Then open **Elastic Serverless** → **Dashboards** (titles contain **`(Datadog dashboard import draft)`**) and **Observability → Rules** (Datadog import drafts).
+
+---
+
+## Optional — run pieces by hand
+
+**Inputs check:**
 
 ```bash
 cd /root/workshop
@@ -84,38 +101,15 @@ ls -1 assets/datadog/dashboards/*.json | wc -l   # 10
 ls -1 assets/datadog/monitor-*.json
 ```
 
-## 2) Dashboard batch CLI
+**Dashboard drafts only:**
 
 ```bash
 source ~/.bashrc
 mkdir -p build/elastic-datadog-dashboards
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards
-ls -1 build/elastic-datadog-dashboards/*-elastic-draft.json | wc -l   # expect 10
 ```
 
-## 2b) Publish dashboards to Kibana (otherwise they only exist as JSON on disk)
-
-Same **Dashboards API** publisher as Lab 1 Grafana (`tools/publish_grafana_drafts_kibana.py` — it understands **`migration.datadog_query`** on drafts).
-
-**One command (Instruqt Terminal):** converts, ensures OTLP, publishes all **10**:
-
-```bash
-cd /root/workshop && source ~/.bashrc
-./scripts/migrate_datadog_dashboards_to_serverless.sh
-```
-
-**Or** if you already ran step **2**, only publish:
-
-```bash
-cd /root/workshop && source ~/.bashrc
-./scripts/start_workshop_otel.sh    # optional but helps Lens charts populate
-sleep 25
-python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
-```
-
-Open **Elastic Serverless → Dashboards** and filter or scroll for **`(Datadog dashboard import draft)`** in the title.
-
-## 3) Monitor → alert drafts
+**Monitor → rule JSON only:**
 
 ```bash
 mkdir -p build/elastic-alerts
@@ -123,18 +117,27 @@ for f in assets/datadog/monitor-*.json; do
   base="$(basename "$f" .json)"
   python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"
 done
-ls -1 build/elastic-alerts/*-elastic.json | wc -l   # expect 4
 ```
 
-## 4) Cursor + Agent Skills (recommended)
+**Publish only** (after drafts exist):
 
-- Read **`agent-skills/workshop-datadog-dashboards-to-elastic/SKILL.md`** and **`agent-skills/workshop-datadog-to-elastic-alerts/SKILL.md`**.
-- In **Cursor**, batch through dashboards: for each pair (Datadog JSON → `*-elastic-draft.json`), ask the model for metric / log query mapping into **ES|QL** or **PromQL-native** views.
-- For alerts, use **`kibana-alerting-rules`** patterns to shape threshold vs query rules and connectors.
+```bash
+cd /root/workshop && source ~/.bashrc
+./scripts/start_workshop_otel.sh && sleep 25
+python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
+python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
+```
 
-## 5) Refine in Kibana
+---
 
-Use the **Elastic Serverless** tab: **Dashboards** / **Lens** for visualizations, **Rules** for alerting. Replace placeholders with queries that run on **your** data.
+## Path B — Cursor on your laptop
+
+Clone **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** and paste **`export`** lines from the Instruqt Terminal (**`grep`** like Lab 1) into Cursor’s terminal.
+
+- **Easiest:** run the full **`./scripts/migrate_datadog_dashboards_to_serverless.sh`** on the **Instruqt VM** (it uses OTLP on that host). On the laptop, only use Cursor + skills to **refine** dashboards/rules after they exist in Kibana.
+- **From the laptop:** run the **converter** `*.py` steps + **`publish_grafana_drafts_kibana.py`** / **`publish_datadog_alert_drafts_kibana.py`** against **`KIBANA_URL`**. Ensure **`./scripts/start_workshop_otel.sh`** has run on the **VM** first so Lens has data.
+
+**Optional refinement:** **`agent-skills/workshop-datadog-dashboards-to-elastic/SKILL.md`**, **`workshop-datadog-to-elastic-alerts/SKILL.md`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**.
 
 ## Done
 
