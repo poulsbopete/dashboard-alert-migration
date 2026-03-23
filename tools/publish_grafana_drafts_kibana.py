@@ -15,6 +15,7 @@ PromQL in drafts is **not** executed.
 **`WORKSHOP_ESQL_TIME_FIELD`** (default **`@timestamp`**).
 **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** — optional ES|QL column for HTTP status bars (e.g. **`http.response.status_code`**). If unset, HTTP panels use **request volume by `service.name`** (avoids **Unknown column [attributes.http.…]** on some Serverless mappings).
 **`WORKSHOP_ESQL_HTTP_ROUTE_COLUMN`** — optional (default **`http.route`**) for route breakdown panels on **metrics-***.
+**`WORKSHOP_ESQL_BUCKET_COUNT`** — time buckets for line/area charts (default **168**, clamped **24–512**); higher = denser series.
 
 Requires (after `source ~/.bashrc` on es3-api):
   KIBANA_URL
@@ -289,25 +290,26 @@ def _esql_volume_probe_queries() -> list[str]:
     """
     override = (os.environ.get("WORKSHOP_ESQL_FROM") or "").strip()
     tf = _esql_time_bucket_field()
+    qb = _esql_bucket_expr(tf)
     if override:
         return [
             f"FROM {override} "
-            f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)"
+            f"| STATS c = COUNT(*) BY bucket = {qb}"
         ]
     # Try narrow workshop streams after wildcards so empty/new projects still validate once any logs exist.
     return [
         f"FROM logs-* "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
         f"FROM metrics-* "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
         f"FROM logs-workshop-default,metrics-workshop-default "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
         f"FROM logs-workshop-default,metrics-workshop-default,traces-workshop-default "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
         f"FROM logs-*,metrics-* "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
         f"FROM logs-*,metrics-*,traces-* "
-        f"| STATS c = COUNT(*) BY bucket = BUCKET({tf}, 75, ?_tstart, ?_tend)",
+        f"| STATS c = COUNT(*) BY bucket = {qb}",
     ]
 
 
@@ -339,7 +341,13 @@ def _truncate_lens_title(panel_title: str, promql: str, *, max_len: int = 118) -
 def _classify_grafana_panel(promql: str, panel_title: str) -> str:
     """Coarse bucket from PromQL + title so each dashboard gets panel-appropriate ES|QL (workshop data)."""
     s = f"{promql} {panel_title}".lower()
-    if re.search(r"go_gc|gc_duration|memstats|goroutines?|go_mem|process_cpu|runtime\.mem", s):
+    # Prometheus CPU saturation (process_cpu_seconds_total, node_exporter, etc.) → OTEL system.cpu.utilization
+    if re.search(
+        r"process_cpu_seconds|node_cpu|container_cpu|cpu_usage|cpu\.usage|cpu_saturation",
+        s,
+    ):
+        return "cpu"
+    if re.search(r"go_gc|gc_duration|memstats|goroutines?|go_mem|runtime\.mem", s):
         return "go_runtime"
     if re.search(r"histogram_quantile|_bucket\b|quantile|p9[05]|p99|latency|duration_second", s):
         return "latency"
@@ -353,8 +361,6 @@ def _classify_grafana_panel(promql: str, panel_title: str) -> str:
         return "http"
     if re.search(r"\berror\b|exception|failed|failures|5[0-9]{2}\b", s) and "http" not in s[:80]:
         return "errors"
-    if re.search(r"node_cpu|container_cpu|cpu_usage|cpu\.usage", s):
-        return "cpu"
     if re.search(r"memory|mem_usage|heap|working_set|ram\b", s):
         return "memory"
     if re.search(r"disk|filesystem|pvc_|volume_|iops|io_", s):
@@ -410,9 +416,36 @@ def _panel_esql_spec(
     ptitle = str(pan.get("title") or "")
     cat = _classify_grafana_panel(pq, ptitle)
     lt = _truncate_lens_title(ptitle, pq)
-    q_b = f"BUCKET({tf}, 75, ?_tstart, ?_tend)"
+    q_b = _esql_bucket_expr(tf)
+    svc = _esql_ident(_esql_service_name_column())
 
     def vol_line(layer: str) -> dict[str, Any]:
+        if cap["metrics"]:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer=layer,
+                query=(
+                    f"FROM metrics-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=lt,
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                "logs-*",
+                tf,
+                layer=layer,
+                query=(
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=lt,
+            )
         return _spec_xy(
             fc,
             tf,
@@ -437,12 +470,12 @@ def _panel_esql_spec(
                     layer="line",
                     query=(
                         f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) "
-                        f"BY bucket = {q_b}"
+                        f"BY bucket = {q_b}, svc = {svc}"
                     ),
                     x="bucket",
                     ys=[("m", None)],
-                    breakdown=None,
-                    lens_title=f"{lt} (CPU utilization — OTLP fleet gauge)",
+                    breakdown="svc",
+                    lens_title=f"{lt} (CPU utilization by service — OTEL)",
                 )
             return _spec_xy(
                 "metrics-*",
@@ -450,12 +483,12 @@ def _panel_esql_spec(
                 layer="line",
                 query=(
                     f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
-                    f"BY bucket = {q_b}"
+                    f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("c", None)],
-                breakdown=None,
-                lens_title=f"{lt} (HTTP request count — workshop proxy for Go/runtime)",
+                breakdown="svc",
+                lens_title=f"{lt} (HTTP requests by service — Go/runtime proxy)",
             )
         if cap["logs"]:
             return _spec_xy(
@@ -463,7 +496,7 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("c", None)],
@@ -480,12 +513,12 @@ def _panel_esql_spec(
                 layer="line",
                 query=(
                     f'FROM traces-* | WHERE processor.event == "transaction" '
-                    f"| STATS m = AVG(transaction.duration.us) BY bucket = {q_b}"
+                    f"| STATS m = AVG(transaction.duration.us) BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("m", None)],
-                breakdown=None,
-                lens_title=f"{lt} (avg txn duration µs)",
+                breakdown="svc",
+                lens_title=f"{lt} (avg txn duration by service — µs)",
             )
         if cap["metrics"]:
             return _spec_xy(
@@ -494,19 +527,18 @@ def _panel_esql_spec(
                 layer="line",
                 query=(
                     f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
-                    f"BY bucket = {q_b}"
+                    f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("m", None)],
-                breakdown=None,
-                lens_title=f"{lt} (avg HTTP duration — latency proxy)",
+                breakdown="svc",
+                lens_title=f"{lt} (avg HTTP duration by service)",
             )
 
     if cat == "http":
         # mOTLP metric mappings vary: attributes.http.response.status_code often does not exist as a column.
         # Default: SUM(http.server.request.count) BY service — matches workshop OTLP; optional status column via env.
         status_src = _esql_http_status_column()
-        svc = _esql_ident(_esql_service_name_column())
         if cap["metrics"]:
             if status_src:
                 st = _esql_ident(status_src)
@@ -659,12 +691,13 @@ def _panel_esql_spec(
             tf,
             layer="line",
             query=(
-                f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) BY bucket = {q_b}"
+                f"FROM metrics-* | STATS m = AVG(`system.cpu.utilization`) "
+                f"BY bucket = {q_b}, svc = {svc}"
             ),
             x="bucket",
             ys=[("m", None)],
-            breakdown=None,
-            lens_title=f"{lt} (CPU utilization — OTLP)",
+            breakdown="svc",
+            lens_title=f"{lt} (CPU by service — OTEL / Prom proxy)",
         )
 
     if cat == "memory" and cap["metrics"]:
@@ -673,12 +706,13 @@ def _panel_esql_spec(
             tf,
             layer="area",
             query=(
-                f"FROM metrics-* | STATS m = AVG(`system.memory.utilization`) BY bucket = {q_b}"
+                f"FROM metrics-* | STATS m = AVG(`system.memory.utilization`) "
+                f"BY bucket = {q_b}, svc = {svc}"
             ),
             x="bucket",
             ys=[("m", None)],
-            breakdown=None,
-            lens_title=f"{lt} (memory utilization — OTLP)",
+            breakdown="svc",
+            lens_title=f"{lt} (memory by service — OTEL)",
         )
 
     if cat == "storage" and cap["metrics"]:
@@ -703,7 +737,7 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("c", None)],
@@ -733,12 +767,12 @@ def _panel_esql_spec(
                 layer="line",
                 query=(
                     f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
-                    f"BY bucket = {q_b}"
+                    f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
                 ys=[("c", None)],
-                breakdown=None,
-                lens_title=f"{lt} (HTTP request volume — scrape proxy)",
+                breakdown="svc",
+                lens_title=f"{lt} (HTTP requests by service — scrape/up proxy)",
             )
 
     if cat == "network" and cap["metrics"]:
@@ -748,12 +782,12 @@ def _panel_esql_spec(
             layer="area",
             query=(
                 f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
-                f"BY bucket = {q_b}"
+                f"BY bucket = {q_b}, svc = {svc}"
             ),
             x="bucket",
             ys=[("c", None)],
-            breakdown=None,
-            lens_title=f"{lt} (HTTP request volume — traffic proxy)",
+            breakdown="svc",
+            lens_title=f"{lt} (HTTP requests by service — traffic proxy)",
         )
 
     # generic: vary chart type / breakdown so padded panels on one dashboard still differ
@@ -779,26 +813,40 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    "FROM logs-* | STATS c = COUNT(*) BY path = service.name | SORT c DESC | LIMIT 10"
+                    f"FROM logs-* | STATS c = COUNT(*) BY path = {svc} | SORT c DESC | LIMIT 10"
                 ),
                 x="path",
                 ys=[("c", None)],
                 breakdown=None,
                 lens_title=f"{lt} (top services)",
             )
-    if cap["logs"] and panel_index % 3 == 2:
-        return _spec_xy(
-            "logs-*",
-            tf,
-            layer="line",
-            query=(
-                f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = service.name"
-            ),
-            x="bucket",
-            ys=[("c", None)],
-            breakdown="svc",
-            lens_title=f"{lt} (by service)",
-        )
+    if panel_index % 3 == 2:
+        if cap["metrics"]:
+            return _spec_xy(
+                "metrics-*",
+                tf,
+                layer="line",
+                query=(
+                    f"FROM metrics-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (metric docs by service)",
+            )
+        if cap["logs"]:
+            return _spec_xy(
+                "logs-*",
+                tf,
+                layer="line",
+                query=(
+                    f"FROM logs-* | STATS c = COUNT(*) BY bucket = {q_b}, svc = {svc}"
+                ),
+                x="bucket",
+                ys=[("c", None)],
+                breakdown="svc",
+                lens_title=f"{lt} (logs by service)",
+            )
     if cap["traces"] and not cap["logs"] and panel_index % 5 == 4:
         return _spec_xy(
             "traces-*",

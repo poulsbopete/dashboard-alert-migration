@@ -18,6 +18,7 @@ Env:
   WORKSHOP_ALLOY_OTLP_HTTP — default http://127.0.0.1:4318
   WORKSHOP_EMIT_INTERVAL_SEC — base sleep between trace ticks per worker (default 8)
   WORKSHOP_ERROR_EMIT_PROB — probability [0,1] to emit one operation error per tick (default 0.18)
+  WORKSHOP_METRIC_EXPORT_INTERVAL_MS — OTLP metric reader export interval (default 8000, clamp 3000–60000)
 """
 from __future__ import annotations
 
@@ -145,9 +146,11 @@ def _run_worker(spec: dict[str, str]) -> int:
         v = 0.38 + 0.28 * math.sin(phase * 0.85) + rng.uniform(-0.05, 0.05)
         yield Observation(max(0.18, min(0.93, v)))
 
+    export_ms = int((os.environ.get("WORKSHOP_METRIC_EXPORT_INTERVAL_MS") or "8000").strip() or "8000")
+    export_ms = max(3_000, min(export_ms, 60_000))
     reader = PeriodicExportingMetricReader(
         OTLPMetricExporter(endpoint=f"{base}/v1/metrics"),
-        export_interval_millis=12_000,
+        export_interval_millis=export_ms,
     )
     metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
     meter = metrics.get_meter(__name__, version)
