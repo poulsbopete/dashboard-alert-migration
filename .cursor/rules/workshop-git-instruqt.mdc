@@ -1,0 +1,15 @@
+---
+description: After changing this Instruqt workshop repo, push to Git and Instruqt
+alwaysApply: true
+---
+
+# Workshop publishing
+
+When you finish edits to **track content**, **`track_scripts/`**, **`assignment.md`**, **`scripts/`**, **`tools/`**, or anything learners pull on **`es3-api`**:
+
+1. **Commit** to `git` (`main`) and **`git push origin HEAD`** (or the user’s working branch).
+2. Run **`instruqt track validate`** then **`instruqt track push`** from the repo root.
+
+Or run **`./scripts/push_git_and_instruqt.sh`** after committing (it does not create commits).
+
+Learners refresh sandboxes with **`./scripts/sync_workshop_from_git.sh`**; Instruqt still needs **`instruqt track push`** for bundled/challenge assets tied to the track definition.

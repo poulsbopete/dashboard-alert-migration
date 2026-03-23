@@ -351,5 +351,6 @@ find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o 
 [[ -f "$TRACK_ROOT/scripts/send_datadog_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/send_datadog_otel.sh"
 [[ -f "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh" ]] && chmod +x "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh"
 [[ -f "$TRACK_ROOT/scripts/sync_workshop_from_git.sh" ]] && chmod +x "$TRACK_ROOT/scripts/sync_workshop_from_git.sh"
+[[ -f "$TRACK_ROOT/scripts/push_git_and_instruqt.sh" ]] && chmod +x "$TRACK_ROOT/scripts/push_git_and_instruqt.sh"
 
 echo "Track bootstrap complete."

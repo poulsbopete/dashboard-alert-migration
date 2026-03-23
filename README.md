@@ -111,7 +111,16 @@ python3 tools/datadog_to_elastic_alert.py assets/datadog/monitor-high-5xx-rate.j
 
 ## Publishing
 
+After **git commit**, push **both** GitHub and Instruqt (maintainers):
+
 ```bash
+./scripts/push_git_and_instruqt.sh
+```
+
+Or manually:
+
+```bash
+git push origin HEAD
 instruqt track validate
 instruqt track push
 ```
