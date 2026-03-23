@@ -141,7 +141,7 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`) |
 | `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (**12** timeseries widgets each; regenerate with **`scripts/generate_datadog_dashboards.py`**) |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
-| `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
+| `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** Grafana → drafts + OTLP + **`publish_grafana_drafts_kibana.py`** |
 | `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** dashboards + monitors → drafts + OTLP + publish Dashboards + **Rules** (`publish_datadog_alert_drafts_kibana.py`) |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
