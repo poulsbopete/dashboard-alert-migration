@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { FallingPattern } from "@/components/ui/falling-pattern";
 import { cn } from "@/lib/utils";
 
@@ -7,9 +7,21 @@ export type Slide = {
   title: string;
   subtitle?: string;
   bullets?: string[];
+  /** Instruqt (or other) lab — opens in a new browser tab */
+  workshopUrl?: string;
+  workshopLinkLabel?: string;
 };
 
+const INSTRUQT_INVITE = "https://play.instruqt.com/elastic/invite/fmt96ftdm41w";
+
 const SLIDES: Slide[] = [
+  {
+    title: "Start the Instruqt workshop",
+    subtitle:
+      "Open the Elastic sandbox in a new window. Leave these slides open to follow along with the labs.",
+    workshopUrl: INSTRUQT_INVITE,
+    workshopLinkLabel: "Open Instruqt invite",
+  },
   {
     title: "Grafana & Datadog → Elastic Observability Serverless",
     subtitle: "Migration workshop deck",
@@ -119,6 +131,25 @@ export function SlideDeck() {
             </h1>
             {slide.subtitle ? (
               <p className="mt-4 max-w-2xl text-lg text-zinc-200/95">{slide.subtitle}</p>
+            ) : null}
+            {slide.workshopUrl ? (
+              <div className="mt-8 flex flex-col items-center gap-2">
+                <a
+                  href={slide.workshopUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    "inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3.5",
+                    "bg-[var(--primary)] font-mono text-sm font-semibold text-white shadow-lg",
+                    "ring-1 ring-white/20 transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+                  )}
+                  aria-label={`${slide.workshopLinkLabel ?? "Open workshop"} (opens in new tab)`}
+                >
+                  <ExternalLink className="size-4 shrink-0 opacity-90" aria-hidden />
+                  {slide.workshopLinkLabel ?? "Open workshop"}
+                </a>
+                <span className="font-mono text-xs text-zinc-500">Opens in a new tab</span>
+              </div>
             ) : null}
             {slide.bullets?.length ? (
               <ul className="mt-10 max-w-2xl space-y-3 text-left text-base text-zinc-100 sm:text-lg">
