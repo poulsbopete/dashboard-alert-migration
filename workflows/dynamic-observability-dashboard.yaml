@@ -1,19 +1,37 @@
-# Elastic Observability workflow (MCP-compatible).
-# Run with: list_workflows / run_workflow (custom_dir = repo workflows/) in user-serverless-o11y,
-# or follow the steps manually / run tools/generate_dynamic_o11y_dashboard.py on the workshop VM.
+# Elastic Observability workflow — idempotent, safe to run every hour.
 #
-# Agents: execute steps in order; substitute ${…} from prior step outputs where noted.
+# Materialization: the workshop script uses a stable Kibana dashboard id (GET → PUT replace, else POST).
+#   ./scripts/generate_dynamic_o11y_dashboard.sh --skip-if-no-data
+#
+# Hourly on the lab VM (example — adjust paths):
+#   0 * * * * . /root/.bashrc && cd /root/workshop && ./scripts/generate_dynamic_o11y_dashboard.sh --skip-if-no-data
+#
+# MCP: list_workflows / run_workflow with custom_dir = this repo’s workflows/ (user-serverless-o11y).
+# Agents: substitute ${discover.output} into get_data_summary; pass dashboard_id into any shell step you add.
 
 name: dynamic-observability-dashboard
 description: >
-  Profile live OTLP-backed logs, metrics, and traces in the Serverless project, summarize what
-  exists, then materialize a Kibana dashboard whose ES|QL panels match that data (workshop lab).
-version: "1"
+  Discover OTLP data, validate ES|QL, then refresh a single Kibana dashboard by stable id (idempotent).
+  Pair with scripts/generate_dynamic_o11y_dashboard.sh on a schedule (e.g. hourly cron); --skip-if-no-data
+  avoids failing cron when ingest is briefly empty.
+version: "2"
 variables:
+  dashboard_id:
+    description: >
+      Kibana Dashboards API id used for GET/PUT idempotency (default in script workshop-dynamic-otlp-overview).
+    type: string
+    default: "workshop-dynamic-otlp-overview"
+    required: false
   time_range_from:
-    description: Discovery window start (ES expression, e.g. now-24h).
+    description: Discovery window start (ES expression).
     type: string
     default: "now-24h"
+    required: false
+  hourly_cron_example:
+    description: >
+      Example crontab line — paste in crontab -e on the workshop host after OTLP env is in ~/.bashrc.
+    type: string
+    default: '0 * * * * . "$HOME/.bashrc" && cd /root/workshop && ./scripts/generate_dynamic_o11y_dashboard.sh --skip-if-no-data'
     required: false
 steps:
   - id: discover
@@ -24,12 +42,19 @@ steps:
     on_error: stop
 
   - id: summarize
-    name: Turn discovery into recommendations (optional context for titles)
+    name: Summarize discovery (context for humans / agents)
     tool: get_data_summary
     parameters:
       discovery_result: "${discover.output}"
       format: text
     on_error: continue
+
+  - id: fetch_existing_dashboard
+    name: Optional — see if stable-id dashboard already exists (PUT path next run)
+    tool: kibana_get_dashboard
+    parameters:
+      id: "${dashboard_id}"
+    on_error: skip
 
   - id: validate_metrics
     name: ES|QL smoke test — metrics stream
@@ -45,6 +70,6 @@ steps:
       query: "FROM logs-* | LIMIT 5"
     on_error: skip
 
-# After the steps above: materialize dashboards with the workshop tool (Kibana + ES credentials):
-#   python3 tools/generate_dynamic_o11y_dashboard.py
-# Optional: MCP kibana_create_dashboard with panels from get_data_summary (format=json) for custom layouts.
+# After MCP steps: run the idempotent publisher (uses KIBANA_URL, ES_URL, ES_API_KEY from ~/.bashrc):
+#   ./scripts/generate_dynamic_o11y_dashboard.sh --dashboard-id "${dashboard_id}" --skip-if-no-data
+# Or rely on defaults: same stable id and WORKSHOP_DYNAMIC_DASHBOARD_ID if you override.
