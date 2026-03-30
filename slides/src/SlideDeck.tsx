@@ -89,7 +89,7 @@ export function SlideDeck() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden">
-      <FallingPattern className="fixed inset-0 h-screen [mask-image:radial-gradient(ellipse_at_center,transparent_20%,var(--background)_75%)]" />
+      <FallingPattern className="fixed inset-0 h-screen [mask-image:radial-gradient(ellipse_at_center,transparent_42%,white_78%)]" />
 
       <div className="relative z-10 flex min-h-screen flex-col">
         <header className="flex items-center justify-between border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-sm">
@@ -101,23 +101,36 @@ export function SlideDeck() {
           </span>
         </header>
 
-        <main className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
-          <h1 className="max-w-4xl font-mono text-3xl font-extrabold tracking-tight text-white drop-shadow-lg sm:text-5xl md:text-6xl">
-            {slide.title}
-          </h1>
-          {slide.subtitle ? (
-            <p className="mt-4 max-w-2xl text-lg text-white/80">{slide.subtitle}</p>
-          ) : null}
-          {slide.bullets?.length ? (
-            <ul className="mt-10 max-w-2xl space-y-3 text-left text-base text-white/90 sm:text-lg">
-              {slide.bullets.map((b) => (
-                <li key={b} className="flex gap-3">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary)]" />
-                  <span>{b}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+        <main className="flex flex-1 flex-col items-center justify-center px-4 py-10 text-center sm:px-6">
+          <div
+            className={cn(
+              "max-w-4xl rounded-2xl px-6 py-8 md:px-10 md:py-12",
+              "border border-white/15 bg-zinc-950/85 shadow-2xl backdrop-blur-md",
+              "ring-1 ring-black/40",
+            )}
+          >
+            <h1
+              className={cn(
+                "max-w-4xl font-mono text-3xl font-extrabold tracking-tight sm:text-5xl md:text-6xl",
+                "text-zinc-50 [text-shadow:0_2px_24px_rgba(0,0,0,0.85)]",
+              )}
+            >
+              {slide.title}
+            </h1>
+            {slide.subtitle ? (
+              <p className="mt-4 max-w-2xl text-lg text-zinc-200/95">{slide.subtitle}</p>
+            ) : null}
+            {slide.bullets?.length ? (
+              <ul className="mt-10 max-w-2xl space-y-3 text-left text-base text-zinc-100 sm:text-lg">
+                {slide.bullets.map((b) => (
+                  <li key={b} className="flex gap-3 leading-snug">
+                    <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--primary)]" />
+                    <span className="[text-shadow:0_1px_8px_rgba(0,0,0,0.85)]">{b}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         </main>
 
         <footer className="flex items-center justify-center gap-4 border-t border-white/10 bg-black/30 px-4 py-4 backdrop-blur-md">

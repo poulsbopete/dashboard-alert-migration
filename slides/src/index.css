@@ -13,9 +13,14 @@
   --primary: oklch(0.72 0.16 250);
 }
 
-html,
+html {
+  background-color: var(--background);
+  color-scheme: dark light;
+}
+
 body,
 #root {
   height: 100%;
   margin: 0;
+  background-color: var(--background);
 }
