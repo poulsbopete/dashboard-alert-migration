@@ -3,10 +3,19 @@ import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { FallingPattern } from "@/components/ui/falling-pattern";
 import { cn } from "@/lib/utils";
 
+export type StatCard = {
+  /** Big figure (e.g. 4–10×, 30, 2) */
+  figure: string;
+  title: string;
+  caption?: string;
+};
+
 export type Slide = {
   title: string;
   subtitle?: string;
   bullets?: string[];
+  /** Elastic-by-the-numbers style grid */
+  statCards?: StatCard[];
   /** Instruqt (or other) lab — opens in a new browser tab */
   workshopUrl?: string;
   workshopLinkLabel?: string;
@@ -28,6 +37,45 @@ const SLIDES: Slide[] = [
     bullets: [
       "OTLP → managed mOTLP · logs-*, metrics-*, traces-*",
       "Two labs: 20 Grafana + 10 Datadog dashboards",
+    ],
+  },
+  {
+    title: "Elastic by the numbers",
+    subtitle:
+      "Illustrative migration efficiency — for executive and practitioner decks. Your timelines depend on panel mix, ES|QL tuning, and change windows.",
+    statCards: [
+      {
+        figure: "4–10×",
+        title: "Less hands-on dashboard time",
+        caption:
+          "Typical planning range we see when bulk conversion + Dashboards API publish replace hand-rebuilding every chart for each source board.",
+      },
+      {
+        figure: "30",
+        title: "Dashboards in this workshop",
+        caption: "20 Grafana + 10 Datadog exports — same two-stage path you can repeat at customer scale.",
+      },
+      {
+        figure: "2",
+        title: "Pipeline stages",
+        caption: "Convert JSON → draft (*-elastic-draft.json), then publish Lens + optional alert rules to Kibana APIs.",
+      },
+      {
+        figure: "Hours",
+        title: "Bulk publish window (often)",
+        caption:
+          "What once stretched across analyst-days per wave can compress to a scripted run, smoke tests, and review — then re-run after tuning WORKSHOP_*.",
+      },
+      {
+        figure: "1",
+        title: "OTLP spine",
+        caption: "One managed ingest story for logs, metrics, and traces — fewer parallel integrations during cutover.",
+      },
+      {
+        figure: "4",
+        title: "Monitor drafts (Lab 2)",
+        caption: "Sample Datadog monitor JSON → Kibana rule drafts — same API-first story as dashboards for alert cutover.",
+      },
     ],
   },
   {
@@ -117,9 +165,10 @@ export function SlideDeck() {
         <main className="flex flex-1 flex-col items-center justify-center px-4 py-10 text-center sm:px-6">
           <div
             className={cn(
-              "max-w-4xl rounded-2xl px-6 py-8 md:px-10 md:py-12",
+              "w-full rounded-2xl px-6 py-8 md:px-10 md:py-12",
               "border border-white/15 bg-zinc-950/85 shadow-2xl backdrop-blur-md",
               "ring-1 ring-black/40",
+              slide.statCards?.length ? "max-w-6xl" : "max-w-4xl",
             )}
           >
             <h1
@@ -132,6 +181,34 @@ export function SlideDeck() {
             </h1>
             {slide.subtitle ? (
               <p className="mt-4 max-w-2xl text-lg text-zinc-200/95">{slide.subtitle}</p>
+            ) : null}
+            {slide.statCards?.length ? (
+              <div className="mt-10 grid w-full gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {slide.statCards.map((s) => (
+                  <div
+                    key={s.title}
+                    className={cn(
+                      "flex flex-col rounded-xl border border-[var(--primary)]/25 bg-gradient-to-br from-zinc-900/90 to-zinc-950/90",
+                      "px-5 py-5 text-left shadow-lg ring-1 ring-white/5",
+                    )}
+                  >
+                    <p
+                      className={cn(
+                        "font-mono text-4xl font-extrabold tracking-tight text-[var(--primary)] md:text-5xl",
+                        "[text-shadow:0_0_40px_color-mix(in_oklab,var(--primary)_35%,transparent)]",
+                      )}
+                    >
+                      {s.figure}
+                    </p>
+                    <p className="mt-3 font-mono text-sm font-semibold uppercase tracking-wide text-zinc-200">
+                      {s.title}
+                    </p>
+                    {s.caption ? (
+                      <p className="mt-2 text-sm leading-snug text-zinc-400">{s.caption}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             ) : null}
             {slide.workshopUrl ? (
               <div className="mt-8 flex flex-col items-center gap-2">
