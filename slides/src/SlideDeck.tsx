@@ -101,7 +101,8 @@ export function SlideDeck() {
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden">
-      <FallingPattern className="fixed inset-0 h-screen [mask-image:radial-gradient(ellipse_at_center,transparent_42%,white_78%)]" />
+      {/* Full pattern (no CSS mask — masks often drop the whole layer cross-browser). Legibility: content card below. */}
+      <FallingPattern className="fixed inset-0 z-0 h-screen" />
 
       <div className="relative z-10 flex min-h-screen flex-col">
         <header className="flex items-center justify-between border-b border-white/10 bg-black/20 px-4 py-3 backdrop-blur-sm">
