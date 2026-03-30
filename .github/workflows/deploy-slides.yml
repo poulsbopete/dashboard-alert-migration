@@ -2,12 +2,11 @@
 # Repo settings → Pages → Build and deployment → Source: GitHub Actions.
 name: Deploy slides to GitHub Pages
 
+# Run on all pushes to main so Pages deploys after enabling “GitHub Actions” as the source,
+# even when recent commits only touched docs/tools (path-only triggers often skip those).
 on:
   push:
     branches: [main]
-    paths:
-      - "slides/**"
-      - ".github/workflows/deploy-slides.yml"
   workflow_dispatch:
 
 permissions:
