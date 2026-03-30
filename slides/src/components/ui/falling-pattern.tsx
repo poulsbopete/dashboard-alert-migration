@@ -110,12 +110,7 @@ export function FallingPattern({
 
   return (
     <div className={cn("relative h-full w-full p-1", className)}>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="size-full"
-      >
+      <div className="size-full">
         <motion.div
           className="relative z-0 size-full"
           style={{
@@ -139,9 +134,9 @@ export function FallingPattern({
           initial="initial"
           animate="animate"
         />
-      </motion.div>
+      </div>
       <div
-        className="absolute inset-0 z-[1] dark:brightness-[0.35]"
+        className="absolute inset-0 z-[1]"
         style={{
           backdropFilter: `blur(${blurIntensity})`,
           backgroundImage: `radial-gradient(circle at 50% 50%, transparent 0, transparent 2px, ${backgroundColor} 2px)`,
