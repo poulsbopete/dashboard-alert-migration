@@ -1,0 +1,50 @@
+# Elastic Observability workflow (MCP-compatible).
+# Run with: list_workflows / run_workflow (custom_dir = repo workflows/) in user-serverless-o11y,
+# or follow the steps manually / run tools/generate_dynamic_o11y_dashboard.py on the workshop VM.
+#
+# Agents: execute steps in order; substitute ${…} from prior step outputs where noted.
+
+name: dynamic-observability-dashboard
+description: >
+  Profile live OTLP-backed logs, metrics, and traces in the Serverless project, summarize what
+  exists, then materialize a Kibana dashboard whose ES|QL panels match that data (workshop lab).
+version: "1"
+variables:
+  time_range_from:
+    description: Discovery window start (ES expression, e.g. now-24h).
+    type: string
+    default: "now-24h"
+    required: false
+steps:
+  - id: discover
+    name: Discover APM services, streams, and freshness
+    tool: discover_o11y_data
+    parameters:
+      time_range_from: "${time_range_from}"
+    on_error: stop
+
+  - id: summarize
+    name: Turn discovery into recommendations (optional context for titles)
+    tool: get_data_summary
+    parameters:
+      discovery_result: "${discover.output}"
+      format: text
+    on_error: continue
+
+  - id: validate_metrics
+    name: ES|QL smoke test — metrics stream
+    tool: esql_query
+    parameters:
+      query: "FROM metrics-* | LIMIT 5"
+    on_error: skip
+
+  - id: validate_logs
+    name: ES|QL smoke test — logs stream
+    tool: esql_query
+    parameters:
+      query: "FROM logs-* | LIMIT 5"
+    on_error: skip
+
+# After the steps above: materialize dashboards with the workshop tool (Kibana + ES credentials):
+#   python3 tools/generate_dynamic_o11y_dashboard.py
+# Optional: MCP kibana_create_dashboard with panels from get_data_summary (format=json) for custom layouts.
