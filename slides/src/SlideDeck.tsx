@@ -116,10 +116,14 @@ const SLIDES: Slide[] = [
     ],
   },
   {
-    title: "Ops checklist",
+    title: "Before you go — quick checklist",
+    subtitle:
+      "Use this on the Instruqt sandbox (or your laptop with the same env vars). Maintainer deploy notes live in the GitHub README, not on this slide.",
     bullets: [
-      "sync_workshop_from_git.sh · check_workshop_otel_pipeline.sh",
-      "GitHub Pages: Actions deploy this slides/ app to /repo/",
+      "Telemetry: In Discover or Observability, confirm recent data in logs-* and metrics-* (OTLP → Alloy → mOTLP is the default path in this lab).",
+      "Dashboards: In Kibana, open Dashboards — look for titles ending in \"(Grafana import draft)\" or \"(Datadog dashboard import draft)\"; edit a Lens panel to see the ES|QL.",
+      "Alerts (Lab 2): Rules land as drafts — review and tune in Stack Management → Rules before you’d enable them in a real cutover.",
+      "Repeat at scale: Same two-stage idea — convert source JSON → publish with the workshop scripts or your CI — applies to the next wave of boards and monitors.",
     ],
   },
 ];
