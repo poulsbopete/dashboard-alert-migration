@@ -157,6 +157,7 @@ Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains 
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
 | `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
+| `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (submodule or standalone clone); optional **`--reinstall`** venv |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (validate + upload, `--native-promql`) |
 | `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
@@ -188,7 +189,7 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 
 - Learners need access to an **Observability Serverless** project (Elastic Cloud).
 - The bundled workshop repo must include **`mig-to-kbn/`**; **`install_workshop_mig_to_kbn.sh`** needs outbound **HTTPS** ( **`uv`** / Python / PyPI).
-- Outbound **HTTPS** from the sandbox (for `git clone` fallback of the workshop repo if the bundle is not on disk — the fallback clone must still contain **`mig-to-kbn/`** or bootstrap will fail).
+- Outbound **HTTPS** from the sandbox (for `git clone` fallback of the workshop repo if the bundle is not on disk). If **`mig-to-kbn/`** is missing, bootstrap warns and Path A migrate scripts fail until you add it and reinstall (see **Maintainers: updating mig-to-kbn** below).
 - **Grafana Alloy → mOTLP:** **`elastic/es3-api-v2`** (or **`bin/es3-api.py`**) may put a managed OTLP base URL in **`/tmp/project_results.json`**. **Each play’s host differs.** Setup also **derives** mOTLP from **`ES_URL`** (`.es.`→`.ingest.`) or **`KIBANA_URL`** (`.kb.`→`.ingest.`). Learners run **`./scripts/start_workshop_otel.sh`** if Alloy did not start. Legacy bulk seed requires **`WORKSHOP_ALLOW_BULK_SEED=1`**.
 
 ### Instruqt secrets
@@ -206,6 +207,38 @@ python3 tools/grafana_to_elastic.py assets/grafana/01-overview.json --out-dir /t
 python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/01-service-overview.json --out-dir /tmp/d
 python3 tools/datadog_to_elastic_alert.py assets/datadog/monitor-high-5xx-rate.json
 ```
+
+## Maintainers: updating mig-to-kbn
+
+When **elastic/mig-to-kbn** changes, refresh the copy this workshop uses, bump the recorded revision if you use a submodule, reinstall the venv where **`grafana-migrate`** / **`datadog-migrate`** run, then republish the track.
+
+**Recommended (git submodule)** — tracks a specific upstream commit in your repo (good for reproducible demos):
+
+```bash
+# One-time (from workshop repo root):
+git submodule add git@github.com:elastic/mig-to-kbn.git mig-to-kbn
+# Optional: edit .gitmodules to add   branch = main   under [submodule "mig-to-kbn"]
+git commit -m "Add mig-to-kbn submodule"
+```
+
+**Pull the latest upstream code:**
+
+```bash
+./scripts/update_mig_to_kbn.sh
+```
+
+If you use a submodule, commit the new pointer: **`git add mig-to-kbn && git commit -m 'Bump mig-to-kbn'`**.
+
+**Standalone clone** (same script): keep **`mig-to-kbn/`** as a normal clone; **`.gitignore`** still ignores it for public GitHub unless you **`git add -f mig-to-kbn`**. Run **`update_mig_to_kbn.sh`** the same way.
+
+**Refresh the Python install** after source changes (compile step uses **`uvx kb-dashboard-cli`**):
+
+- **Laptop / CI:** `./scripts/update_mig_to_kbn.sh --reinstall` (writes to **`MIG_TO_KBN_VENV`**, default **`/opt/mig-to-kbn-venv`** — use a user-writable path on macOS, e.g. **`MIG_TO_KBN_VENV=$PWD/.venv-mig ./scripts/install_workshop_mig_to_kbn.sh`**).
+- **Instruqt VM** (usually **root**): after **`./scripts/sync_workshop_from_git.sh`** (submodules update automatically) or **`./scripts/update_mig_to_kbn.sh`**, run **`bash scripts/install_workshop_mig_to_kbn.sh`** so **`/opt/mig-to-kbn-venv`** matches the new sources.
+
+**Ship the update:** **`./scripts/push_git_and_instruqt.sh`** (or commit + **`instruqt track push`**) so sandboxes get the new workshop commit; learners on an old VM run **`sync_workshop_from_git.sh`** then reinstall if **`mig-to-kbn`** changed.
+
+**Env overrides:** **`MIG_TO_KBN_REF`** (default **`main`**), **`MIG_TO_KBN_REMOTE`** (default **`origin`**), **`MIG_TO_KBN_DIR`**.
 
 ## Publishing
 
