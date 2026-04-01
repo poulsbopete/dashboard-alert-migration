@@ -110,6 +110,20 @@ export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
 
 The sandbox **already runs Alloy + OTLP**. If charts look empty, on the VM run **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
 
+**Optional — synthetic metrics aligned to migrated YAML (feedback / demos):** upstream **mig-to-kbn** includes **`mig-to-kbn/scripts/setup_serverless_data.py`**. It can read **`DASHBOARD_YAML_DIR`** (your **`build/mig-grafana/yaml/`**), extract metric names from the generated YAML, and bulk-ingest **Prometheus-style** synthetic series into Elasticsearch so native **PromQL** panels have material to query. It expects **`ELASTICSEARCH_ENDPOINT`** and **`KEY`** (API key), not **`ES_URL`** / **`ES_API_KEY`**. Example on the VM after **`source ~/.bashrc`** and a successful migrate:
+
+```bash
+cd /root/workshop
+export ELASTICSEARCH_ENDPOINT="${ES_URL%/}"
+export KEY="${ES_API_KEY}"
+export DASHBOARD_YAML_DIR="${PWD}/build/mig-grafana/yaml"
+export DATA_HOURS=6   # shorter run; default upstream is longer
+# If preflight lists metrics the generator does not yet emit: export SKIP_PREFLIGHT=1  # use sparingly
+python3 mig-to-kbn/scripts/setup_serverless_data.py
+```
+
+Upstream defaults target **`metrics-prometheus-default`** (see script header). Your migrated dashboards may use **`metrics-*`** data views; adjust expectations or extend the script if index names diverge. See **`mig-to-kbn/docs/command-contract.md`** and **`mig-to-kbn/AGENTS.md`**.
+
 Optional: **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** **`kibana-dashboards`**, **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**. Do not paste API keys into the AI chat.
 
 ## Done

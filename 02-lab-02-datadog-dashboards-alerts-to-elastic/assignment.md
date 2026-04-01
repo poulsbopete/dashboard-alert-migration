@@ -91,6 +91,8 @@ Then **Dashboards** (migrated titles) and **Observability → Rules** in the Ela
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
+**Optional — synthetic metrics from migrated Datadog YAML:** **`mig-to-kbn/scripts/setup_datadog_serverless_data.py`** discovers metrics from compiled dashboard YAML. Set **`DASHBOARD_YAML_DIR`** to **`/root/workshop/build/mig-datadog/yaml`** (Path B: **`$PWD/build/mig-datadog/yaml`**), plus **`ELASTICSEARCH_ENDPOINT`**, **`KEY`**, and optional **`DATA_HOURS`**, **`INTERVAL_SEC`**. See the script header and **`mig-to-kbn/docs/command-contract.md`**.
+
 ## Path B — Cursor on your laptop
 
 1. Same **Lab 1 Path B** setup: workshop repo with **`mig-to-kbn/`**, **`uv`**, Python **≥ 3.11**, **`install_workshop_mig_to_kbn.sh`** (or equivalent venv).
