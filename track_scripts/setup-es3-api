@@ -206,8 +206,10 @@ if [[ -z "$TRACK_ROOT" ]]; then
   _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
   _ref="${WORKSHOP_GIT_REF:-main}"
   rm -rf /opt/instruqt-workshop-track
-  if ! git clone --depth 1 --branch "$_ref" --recurse-submodules --shallow-submodules "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
-    git clone --depth 1 --recurse-submodules --shallow-submodules "$_url" /opt/instruqt-workshop-track
+  # Do not use --recurse-submodules here: if mig-to-kbn is unreachable, the whole clone fails (set -e) and the track
+  # never starts. Parent-only clone, then populate mig-to-kbn in the block below (submodule init or separate clone).
+  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
+    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
   fi
   if _track_root_ok "/opt/instruqt-workshop-track"; then
     TRACK_ROOT="$(cd /opt/instruqt-workshop-track && pwd)"
@@ -263,11 +265,13 @@ fi
 WORKSHOP_MIG_TO_KBN_READY=0
 if [ -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" ]; then
   echo "Installing mig-to-kbn (obs-migrate) into /opt/mig-to-kbn-venv..."
-  MIG_TO_KBN_VENV=/opt/mig-to-kbn-venv bash "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" || {
-    echo "ERROR: install_workshop_mig_to_kbn.sh failed (need network for uv / Python download)." >&2
-    exit 1
-  }
-  WORKSHOP_MIG_TO_KBN_READY=1
+  if MIG_TO_KBN_VENV=/opt/mig-to-kbn-venv bash "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh"; then
+    WORKSHOP_MIG_TO_KBN_READY=1
+  else
+    echo "WARN: install_workshop_mig_to_kbn.sh failed (uv / PyPI / network). Track will start; rerun on VM:" >&2
+    echo "      bash $TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" >&2
+    WORKSHOP_MIG_TO_KBN_READY=0
+  fi
 else
   echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until mig-to-kbn is on disk." >&2
   echo "      Fix: push a workshop commit that includes the mig-to-kbn submodule (see .gitmodules), or set Instruqt host env" >&2
