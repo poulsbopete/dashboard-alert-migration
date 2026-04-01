@@ -85,11 +85,12 @@ Pick **Path A** or **Path B** (or both).
 cd /root/workshop
 source ~/.bashrc
 ./scripts/migrate_datadog_dashboards_to_serverless.sh
+# Optional strict validation: WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
 Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
 
-**Live ES|QL validation:** **`datadog-migrate`** with **`--upload`** and **`--es-url`** **auto-enables** validation against your cluster (same idea as Lab 1). **No / thin data** in **`metrics-*`** / **`logs-***` → queries fail or empty → some panels become **placeholders**; check **`build/mig-datadog/migration_report.json`** and re-run migrate after OTLP has landed, or use **`setup_datadog_serverless_data.py`** (optional note below).
+**Kibana-only upload (default):** same as Lab 1 — Path A omits **`--es-url`** / **`--validate`**. Use **`WORKSHOP_MIG_ES_VALIDATE=1`** for strict pre-upload ES|QL checks.
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
@@ -116,9 +117,10 @@ export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
 "$MIG_TO_KBN_VENV/bin/datadog-migrate" \
   --source files --input-dir build/mig-datadog-stage --output-dir build/mig-datadog \
   --field-profile otel --data-view 'metrics-*' --logs-index 'logs-*' \
-  --es-url "$ES_URL" --es-api-key "$ES_API_KEY" --validate --upload \
+  --upload \
   --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" \
   --ensure-data-views --fetch-monitors
+# Optional strict validation: add --es-url "$ES_URL" --es-api-key "$ES_API_KEY" before --upload (same as WORKSHOP_MIG_ES_VALIDATE=1).
 for f in assets/datadog/monitor-*.json; do
   base="$(basename "$f" .json)"
   python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"

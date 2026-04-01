@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Lab 2 (Instruqt): OTLP (optional) → datadog-migrate (live ES|QL validate when --upload + --es-url) → Kibana; monitors → legacy publisher.
+# Lab 2 (Instruqt): OTLP (optional) → datadog-migrate → Kibana; monitors → legacy publisher.
+# Default Kibana-only upload (no --es-url / --validate). WORKSHOP_MIG_ES_VALIDATE=1 enables --es-url + --validate.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -68,7 +69,13 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   sleep "$WAIT_OTLP"
 fi
 
-echo "==> [2/5] datadog-migrate (OTEL field profile, validate, compile, upload) + monitor IR extract..."
+ES_VALIDATE_ARGS=()
+if [ "${WORKSHOP_MIG_ES_VALIDATE:-0}" = "1" ]; then
+  ES_VALIDATE_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
+  echo "==> [2/5] datadog-migrate (… + live ES|QL validation: WORKSHOP_MIG_ES_VALIDATE=1) + monitor IR extract..."
+else
+  echo "==> [2/5] datadog-migrate (Kibana-only upload; WORKSHOP_MIG_ES_VALIDATE=1 for pre-upload ES|QL) + monitor IR extract..."
+fi
 "${DD_MIGRATE}" \
   --source files \
   --input-dir "${STAGE}" \
@@ -76,9 +83,7 @@ echo "==> [2/5] datadog-migrate (OTEL field profile, validate, compile, upload) 
   --field-profile otel \
   --data-view "metrics-*" \
   --logs-index "logs-*" \
-  --es-url "${ES_URL}" \
-  --es-api-key "${ES_API_KEY}" \
-  --validate \
+  "${ES_VALIDATE_ARGS[@]}" \
   --upload \
   --kibana-url "${KIBANA_URL}" \
   --kibana-api-key "${KIBANA_KEY}" \

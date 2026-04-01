@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Path A (Instruqt): OTLP (optional) → Grafana JSON → mig-to-kbn (grafana-migrate) → live ES|QL validate → upload (--native-promql).
-# Note: --upload + --es-url auto-enables validation in grafana-migrate; queries run against the cluster before upload.
-#       With little/no data in metrics-*/logs-*, panels may become placeholders — wait for OTLP (see WAIT_OTLP below).
+# Path A (Instruqt): OTLP (optional) → Grafana JSON → mig-to-kbn (grafana-migrate) → upload (--native-promql).
+# Default: Kibana-only upload (--kibana-url + --kibana-api-key, no --es-url / --validate) so empty clusters do not
+#          fail live ES|QL pre-upload validation (Subham / team guidance). Set WORKSHOP_MIG_ES_VALIDATE=1 to pass
+#          --es-url, --es-api-key, and --validate (auto-enabled by mig-to-kbn when --es-url is set with --upload).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -57,7 +58,13 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   sleep "$WAIT_OTLP"
 fi
 
-echo "==> [2/3] grafana-migrate (files → YAML → compile → validate → upload, native PromQL for Serverless)..."
+ES_VALIDATE_ARGS=()
+if [ "${WORKSHOP_MIG_ES_VALIDATE:-0}" = "1" ]; then
+  ES_VALIDATE_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
+  echo "==> [2/3] grafana-migrate (… + live ES|QL validation: WORKSHOP_MIG_ES_VALIDATE=1)..."
+else
+  echo "==> [2/3] grafana-migrate (Kibana-only upload; no --es-url — set WORKSHOP_MIG_ES_VALIDATE=1 for pre-upload ES|QL checks)..."
+fi
 "${GRAFANA_MIGRATE}" \
   --source files \
   --input-dir "${ROOT}/assets/grafana" \
@@ -65,9 +72,7 @@ echo "==> [2/3] grafana-migrate (files → YAML → compile → validate → upl
   --native-promql \
   --data-view "metrics-*" \
   --logs-index "logs-*" \
-  --es-url "${ES_URL}" \
-  --es-api-key "${ES_API_KEY}" \
-  --validate \
+  "${ES_VALIDATE_ARGS[@]}" \
   --upload \
   --kibana-url "${KIBANA_URL}" \
   --kibana-api-key "${KIBANA_KEY}" \

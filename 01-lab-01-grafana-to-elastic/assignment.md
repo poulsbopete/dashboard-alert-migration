@@ -85,13 +85,14 @@ Pick **Path A** or **Path B** (or both).
 cd /root/workshop
 source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
+# Pre-upload live ES|QL validation against ES (optional): WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
 Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
 
-**Live ES|QL validation (why some charts look empty):** **`grafana-migrate`** is run with **`--es-url`** and **`--upload`**. In **mig-to-kbn**, that **auto-enables** validation: each translated **ES|QL** query is executed against your **Serverless** cluster **before** compile/upload. If **`metrics-*`** / **`logs-***` have **no matching data yet** (or the query errors), validation **fails or returns empty**; those panels are **replaced with upload-safe placeholders** or marked for manual review so the dashboard can still upload. This is **expected** if you migrate before OTLP has caught up. Use **`build/mig-grafana/migration_report.json`** and the CLI line *“Validated N queries: X passed … Y failed …”* to see the split. **Mitigation:** ensure Alloy + emitters are up, **wait** for ingest (Path A waits before migrate; you can **re-run** the migrate script after data lands), **`setup_serverless_data.py`** (optional, below), or **`WORKSHOP_FORCE_OTEL_RESTART=1`** then migrate again.
+**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** uses **`--upload`** with **Kibana URL + API key only** (no **`--es-url`** / **`--validate`**), matching team guidance: upload full charts first, then let telemetry land. Set **`WORKSHOP_MIG_ES_VALIDATE=1`** on the same command to add **`--es-url`**, **`--es-api-key`**, and live query validation (**auto-enabled** by **mig-to-kbn** when **`--upload`** + **`--es-url`** are both set); thin data can still yield **placeholder** panels — see **`build/mig-grafana/migration_report.json`**.
 
-*Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min. *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
+*Charts empty after upload?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min, or optional **`setup_serverless_data.py`** (below). *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
 ## Path B — Cursor on your laptop
 
@@ -106,7 +107,18 @@ export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
 "$MIG_TO_KBN_VENV/bin/grafana-migrate" \
   --source files --input-dir assets/grafana --output-dir build/mig-grafana \
   --native-promql --data-view 'metrics-*' --logs-index 'logs-*' \
-  --es-url "$ES_URL" --es-api-key "$ES_API_KEY" --validate --upload \
+  --upload \
+  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
+```
+
+Same as Path A default (no **`--es-url`** / **`--validate`**). To mirror **`WORKSHOP_MIG_ES_VALIDATE=1`**, append **`--es-url "$ES_URL" --es-api-key "$ES_API_KEY"`** (validation auto-enables when both **`--upload`** and **`--es-url`** are set):
+
+```bash
+"$MIG_TO_KBN_VENV/bin/grafana-migrate" \
+  --source files --input-dir assets/grafana --output-dir build/mig-grafana \
+  --native-promql --data-view 'metrics-*' --logs-index 'logs-*' \
+  --es-url "$ES_URL" --es-api-key "$ES_API_KEY" \
+  --upload \
   --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
 ```
 

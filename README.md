@@ -27,8 +27,8 @@ source ~/.bashrc
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`) uploads to **Dashboards** (titles match Grafana exports). Artifacts: **`build/mig-grafana/`**. |
-| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** uploads dashboards; **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules** (imports disabled until you edit). Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
+| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds ES pre-check). Artifacts: **`build/mig-grafana/`**. |
+| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
 
 **Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
 
@@ -157,8 +157,8 @@ Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains 
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
 | `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
 | `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (vendored tree, submodule, or standalone clone); optional **`--reinstall`** venv |
-| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (validate + upload, `--native-promql`) |
-| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
+| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (`--native-promql`, **`--upload`**; optional **`WORKSHOP_MIG_ES_VALIDATE=1`** for **`--es-url`** + validation) |
+| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** (optional **`WORKSHOP_MIG_ES_VALIDATE=1`**) + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |
 | `tools/otel_workshop_fleet.py` | **Six** OTLP worker subprocesses (distinct **service.name** + **host.name**) + **`system.*`**-style utilization metrics → Alloy; plus **`datadog_otel_to_elastic.py`** (**shopist-checkout** on **`workshop-node-07`**) for **Applications / Infrastructure / Hosts** variety |
@@ -177,7 +177,7 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 ## Discover vs Observability UIs (OTLP default)
 
 - **Default path:** **OpenTelemetry** (Python SDK → Alloy → **mOTLP**) populates **logs-***, **metrics-***, **traces-*** data the same way customer OTLP would. **mig-to-kbn** validate/upload and the legacy **`publish_grafana_drafts_kibana.py`** both target **`logs-*`** / **`metrics-*`** / **`traces-*`** patterns aligned with that data.
-- **mig-to-kbn + `--upload` + `--es-url`:** **grafana-migrate** / **datadog-migrate** **auto-enable** live **ES|QL** validation against Elasticsearch before upload. With **little or no data**, queries **fail or return empty**, and panels may become **placeholders** while dashboards still upload—see lab **`assignment.md`** and **`build/mig-grafana/migration_report.json`** (or **`build/mig-datadog/...`**). Re-run migrate after OTLP (or optional **`setup_*_serverless_data.py`**) has populated indices.
+- **Path A migrate scripts (default):** **Kibana-only upload** — **`--upload`** with **Kibana URL + API key** only (no **`--es-url`** / **`--validate`**), so panels are not pre-checked with live ES|QL on an empty cluster. Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to pass **`--es-url`** + **`--es-api-key`**; **mig-to-kbn** then **auto-enables** validation when **`--upload`** + **`--es-url`** are both set (thin data → possible **placeholders** — see **`migration_report.json`**).
 - **“Nothing in metrics-*” in Discover:** the **Observability → Discover** search bar often ships a **narrow** pattern (e.g. `metrics-*.otel-*`, `metrics-apm*`) and **does not include** the broad wildcard **`metrics-*`**. Edit the pattern and append **`,metrics-*`** (or switch to **Stack Management → Data views** and create **`metrics-*`** with **`@timestamp`**). In **ES|QL**, run **`FROM metrics-* | LIMIT 5`** to confirm documents exist regardless of that default.
 - **Histogram looks empty but the table has rows:** set the time picker to **Last 15 minutes** / **Last 24 hours** and ensure the **end** time includes **now**; the chart buckets may stop earlier than your newest `@timestamp`, so the table shows hits while the graph looks blank.
 - **Sparse multi-day metric charts (Alloy self-metrics + fresh OTLP):** the fleet only writes **from startup onward**; for a filled **Last 30 days** view in Discover, run **`python3 tools/seed_workshop_telemetry.py --metrics-time-series --days 30`** (bulk to **`metrics-workshop-default`**; same **`service.name`** values as **`otel_workshop_fleet.py`**). Tune **`--metric-time-step-minutes`** / **`--metric-series-cap`** if needed.
