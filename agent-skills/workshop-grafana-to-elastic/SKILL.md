@@ -28,7 +28,7 @@ cd /root/workshop && source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-migrate`** with **`--validate --upload --ensure-data-views`** (see Lab 1 **`assignment.md`**). Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**.
+Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-migrate`** with **`--validate --upload --ensure-data-views`** (see Lab 1 **`assignment.md`**). With **`--upload`** + **`--es-url`**, **mig-to-kbn** **auto-enables** live **ES|QL** validation: thin data → failed/empty queries → **placeholder panels**; re-run after OTLP or see **`migration_report.json`**. Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**.
 
 ## Path B — Laptop + Cursor (same flow as Lab 1 assignment)
 

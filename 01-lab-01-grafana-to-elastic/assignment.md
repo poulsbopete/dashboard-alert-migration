@@ -89,6 +89,8 @@ source ~/.bashrc
 
 Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
 
+**Live ES|QL validation (why some charts look empty):** **`grafana-migrate`** is run with **`--es-url`** and **`--upload`**. In **mig-to-kbn**, that **auto-enables** validation: each translated **ES|QL** query is executed against your **Serverless** cluster **before** compile/upload. If **`metrics-*`** / **`logs-***` have **no matching data yet** (or the query errors), validation **fails or returns empty**; those panels are **replaced with upload-safe placeholders** or marked for manual review so the dashboard can still upload. This is **expected** if you migrate before OTLP has caught up. Use **`build/mig-grafana/migration_report.json`** and the CLI line *“Validated N queries: X passed … Y failed …”* to see the split. **Mitigation:** ensure Alloy + emitters are up, **wait** for ingest (Path A waits before migrate; you can **re-run** the migrate script after data lands), **`setup_serverless_data.py`** (optional, below), or **`WORKSHOP_FORCE_OTEL_RESTART=1`** then migrate again.
+
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min. *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
 ## Path B — Cursor on your laptop

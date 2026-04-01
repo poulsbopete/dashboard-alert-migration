@@ -89,6 +89,8 @@ source ~/.bashrc
 
 Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
 
+**Live ES|QL validation:** **`datadog-migrate`** with **`--upload`** and **`--es-url`** **auto-enables** validation against your cluster (same idea as Lab 1). **No / thin data** in **`metrics-*`** / **`logs-***` → queries fail or empty → some panels become **placeholders**; check **`build/mig-datadog/migration_report.json`** and re-run migrate after OTLP has landed, or use **`setup_datadog_serverless_data.py`** (optional note below).
+
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
 **Optional — synthetic metrics from migrated Datadog YAML:** **`mig-to-kbn/scripts/setup_datadog_serverless_data.py`** discovers metrics from compiled dashboard YAML. Set **`DASHBOARD_YAML_DIR`** to **`/root/workshop/build/mig-datadog/yaml`** (Path B: **`$PWD/build/mig-datadog/yaml`**), plus **`ELASTICSEARCH_ENDPOINT`**, **`KEY`**, and optional **`DATA_HOURS`**, **`INTERVAL_SEC`**. See the script header and **`mig-to-kbn/docs/command-contract.md`**.

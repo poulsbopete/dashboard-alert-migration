@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lab 2 (Instruqt): OTLP (optional) → Datadog dashboards via datadog-migrate; monitors → legacy Kibana rule drafts + publisher (hybrid).
+# Lab 2 (Instruqt): OTLP (optional) → datadog-migrate (live ES|QL validate when --upload + --es-url) → Kibana; monitors → legacy publisher.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -54,7 +54,7 @@ elif [ "${WORKSHOP_FORCE_OTEL_RESTART:-0}" != "1" ] \
   && curl -sf --max-time 3 "http://127.0.0.1:12345/metrics" >/dev/null 2>&1 \
   && pgrep -f '[o]tel_workshop_fleet.py' >/dev/null 2>&1; then
   echo "==> [1/5] OTLP already running — skipping restart."
-  WAIT_OTLP=12
+  WAIT_OTLP=45
 else
   echo "==> [1/5] OpenTelemetry (Alloy → mOTLP) so Lens panels have data..."
   if ! "${ROOT}/scripts/start_workshop_otel.sh"; then

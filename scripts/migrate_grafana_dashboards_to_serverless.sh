@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Path A (Instruqt): OTLP (optional) → Grafana JSON → mig-to-kbn (grafana-migrate) → validate → upload to Kibana Serverless (--native-promql).
+# Path A (Instruqt): OTLP (optional) → Grafana JSON → mig-to-kbn (grafana-migrate) → live ES|QL validate → upload (--native-promql).
+# Note: --upload + --es-url auto-enables validation in grafana-migrate; queries run against the cluster before upload.
+#       With little/no data in metrics-*/logs-*, panels may become placeholders — wait for OTLP (see WAIT_OTLP below).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -40,7 +42,7 @@ elif [ "${WORKSHOP_FORCE_OTEL_RESTART:-0}" != "1" ] \
   && pgrep -f '[o]tel_workshop_fleet.py' >/dev/null 2>&1; then
   echo "==> [1/3] OTLP already running (Alloy + fleet). Skipping restart — same situation as Path B after bootstrap."
   echo "    To force a full restart: WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
-  WAIT_OTLP=12
+  WAIT_OTLP=45
 else
   echo "==> [1/3] OpenTelemetry pipeline (Alloy → Elastic mOTLP + OTLP SDK emitters)..."
   if ! "${ROOT}/scripts/start_workshop_otel.sh"; then
