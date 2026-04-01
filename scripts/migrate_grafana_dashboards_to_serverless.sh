@@ -71,6 +71,7 @@ fi
   --output-dir "${OUT}" \
   --native-promql \
   --data-view "metrics-*" \
+  --esql-index "metrics-*" \
   --logs-index "logs-*" \
   "${ES_VALIDATE_ARGS[@]}" \
   --upload \

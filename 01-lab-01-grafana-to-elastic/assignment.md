@@ -90,7 +90,7 @@ source ~/.bashrc
 
 Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
 
-**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** uses **`--upload`** with **Kibana URL + API key only** (no **`--es-url`** / **`--validate`**), matching team guidance: upload full charts first, then let telemetry land. Set **`WORKSHOP_MIG_ES_VALIDATE=1`** on the same command to add **`--es-url`**, **`--es-api-key`**, and live query validation (**auto-enabled** by **mig-to-kbn** when **`--upload`** + **`--es-url`** are both set); thin data can still yield **placeholder** panels — see **`build/mig-grafana/migration_report.json`**.
+**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** uses **`--upload`** with **Kibana URL + API key only** — **omit** **`--es-url`** and **`--validate`**. In **mig-to-kbn**, **pre-upload ES|QL query validation runs only when Elasticsearch is in the loop** (passing **`--es-url`** with **`--upload`** auto-enables validation). **`--esql-index`** is set to **`metrics-*`** alongside **`--data-view`** (same pattern as upstream **`grafana-migrate`** smoke tests). Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add **`--es-url`**, **`--es-api-key`**, and **`--validate`**.
 
 *Charts empty after upload?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min, or optional **`setup_serverless_data.py`** (below). *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
@@ -106,17 +106,17 @@ export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
 # after install_workshop_mig_to_kbn.sh or local venv:
 "$MIG_TO_KBN_VENV/bin/grafana-migrate" \
   --source files --input-dir assets/grafana --output-dir build/mig-grafana \
-  --native-promql --data-view 'metrics-*' --logs-index 'logs-*' \
+  --native-promql --data-view 'metrics-*' --esql-index 'metrics-*' --logs-index 'logs-*' \
   --upload \
   --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
 ```
 
-Same as Path A default (no **`--es-url`** / **`--validate`**). To mirror **`WORKSHOP_MIG_ES_VALIDATE=1`**, append **`--es-url "$ES_URL" --es-api-key "$ES_API_KEY"`** (validation auto-enables when both **`--upload`** and **`--es-url`** are set):
+Same as Path A default (no **`--es-url`** / **`--validate`**). To mirror **`WORKSHOP_MIG_ES_VALIDATE=1`**, add **`--es-url`** + **`--es-api-key`** before **`--upload`** (validation auto-enables with **`--upload`** + **`--es-url`**):
 
 ```bash
 "$MIG_TO_KBN_VENV/bin/grafana-migrate" \
   --source files --input-dir assets/grafana --output-dir build/mig-grafana \
-  --native-promql --data-view 'metrics-*' --logs-index 'logs-*' \
+  --native-promql --data-view 'metrics-*' --esql-index 'metrics-*' --logs-index 'logs-*' \
   --es-url "$ES_URL" --es-api-key "$ES_API_KEY" \
   --upload \
   --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views

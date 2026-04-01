@@ -90,7 +90,7 @@ source ~/.bashrc
 
 Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
 
-**Kibana-only upload (default):** same as Lab 1 — Path A omits **`--es-url`** / **`--validate`**. Use **`WORKSHOP_MIG_ES_VALIDATE=1`** for strict pre-upload ES|QL checks.
+**Kibana-only upload (default):** same as Lab 1 — **`datadog-migrate`** with **`--upload`** + **Kibana URL / API key** only; **no** **`--es-url`** or **`--validate`** (those are what turn on pre-upload query validation against Elasticsearch). Workshop script also passes **`--logs-index`**, **`--ensure-data-views`**, **`--fetch-monitors`**. **`WORKSHOP_MIG_ES_VALIDATE=1`** re-enables ES + validation.
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 

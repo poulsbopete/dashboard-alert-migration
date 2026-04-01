@@ -27,7 +27,7 @@ source ~/.bashrc
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds ES pre-check). Artifacts: **`build/mig-grafana/`**. |
+| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation). Artifacts: **`build/mig-grafana/`**. |
 | **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
 
 **Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
