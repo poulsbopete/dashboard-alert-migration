@@ -8,12 +8,7 @@ cd "$ROOT"
 
 MIG_VENV="${MIG_TO_KBN_VENV:-/opt/mig-to-kbn-venv}"
 GRAFANA_MIGRATE="${MIG_VENV}/bin/grafana-migrate"
-
-if [ ! -x "${GRAFANA_MIGRATE}" ]; then
-  echo "ERROR: ${GRAFANA_MIGRATE} not found. On the workshop VM, track setup should run scripts/install_workshop_mig_to_kbn.sh" >&2
-  echo "       (requires mig-to-kbn/ from https://github.com/elastic/mig-to-kbn )." >&2
-  exit 1
-fi
+bash "${ROOT}/scripts/ensure_mig_to_kbn_install.sh" grafana-migrate
 
 if [ -z "${KIBANA_URL:-}" ]; then
   echo "ERROR: KIBANA_URL is not set. Run: source ~/.bashrc" >&2

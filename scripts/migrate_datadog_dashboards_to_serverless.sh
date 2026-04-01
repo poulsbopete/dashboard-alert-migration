@@ -8,16 +8,12 @@ cd "$ROOT"
 
 MIG_VENV="${MIG_TO_KBN_VENV:-/opt/mig-to-kbn-venv}"
 DD_MIGRATE="${MIG_VENV}/bin/datadog-migrate"
+bash "${ROOT}/scripts/ensure_mig_to_kbn_install.sh" datadog-migrate
 
 if [ -x /opt/workshop-venv/bin/python3 ]; then
   PY="${WORKSHOP_PYTHON:-/opt/workshop-venv/bin/python3}"
 else
   PY="${WORKSHOP_PYTHON:-python3}"
-fi
-
-if [ ! -x "${DD_MIGRATE}" ]; then
-  echo "ERROR: ${DD_MIGRATE} not found. Run scripts/install_workshop_mig_to_kbn.sh (needs mig-to-kbn/)." >&2
-  exit 1
 fi
 
 if [ -z "${KIBANA_URL:-}" ]; then
