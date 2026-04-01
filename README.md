@@ -218,16 +218,14 @@ When **elastic/mig-to-kbn** changes, refresh the vendored tree, commit, reinstal
 git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"
 ```
 
-**Standalone clone** (no separate remote in **`mig-to-kbn/.git`**): **`update_mig_to_kbn.sh`** fetches **`origin/main`** into the vendored directory when **`mig-to-kbn`** is a normal clone with remotes configured.
-
 **Refresh the Python install** after source changes (compile step uses **`uvx kb-dashboard-cli`**):
 
 - **Laptop / CI:** `./scripts/update_mig_to_kbn.sh --reinstall` (writes to **`MIG_TO_KBN_VENV`**, default **`/opt/mig-to-kbn-venv`** — use a user-writable path on macOS, e.g. **`MIG_TO_KBN_VENV=$PWD/.venv-mig ./scripts/install_workshop_mig_to_kbn.sh`**).
-- **Instruqt VM** (usually **root**): after **`./scripts/sync_workshop_from_git.sh`** (submodules update automatically) or **`./scripts/update_mig_to_kbn.sh`**, run **`bash scripts/install_workshop_mig_to_kbn.sh`** so **`/opt/mig-to-kbn-venv`** matches the new sources.
+- **Instruqt VM** (usually **root**): after **`./scripts/sync_workshop_from_git.sh`** or pulling a new workshop commit, run **`bash scripts/install_workshop_mig_to_kbn.sh`** so **`/opt/mig-to-kbn-venv`** matches the vendored sources.
 
 **Ship the update:** **`./scripts/push_git_and_instruqt.sh`** (or commit + **`instruqt track push`**) so sandboxes get the new workshop commit; learners on an old VM run **`sync_workshop_from_git.sh`** then reinstall if **`mig-to-kbn`** changed.
 
-**Env overrides:** **`MIG_TO_KBN_REF`** (default **`main`**), **`MIG_TO_KBN_REMOTE`** (default **`origin`**), **`MIG_TO_KBN_DIR`**.
+**Env overrides (update script):** **`MIG_TO_KBN_REF`** (default **`main`**), **`MIG_TO_KBN_REMOTE`** (default **`origin`**), **`MIG_TO_KBN_DIR`**.
 
 ## Publishing
 
