@@ -1,0 +1,3 @@
+[submodule "mig-to-kbn"]
+	path = mig-to-kbn
+	url = https://github.com/elastic/mig-to-kbn.git

@@ -206,8 +206,8 @@ if [[ -z "$TRACK_ROOT" ]]; then
   _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
   _ref="${WORKSHOP_GIT_REF:-main}"
   rm -rf /opt/instruqt-workshop-track
-  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
-    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+  if ! git clone --depth 1 --branch "$_ref" --recurse-submodules --shallow-submodules "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
+    git clone --depth 1 --recurse-submodules --shallow-submodules "$_url" /opt/instruqt-workshop-track
   fi
   if _track_root_ok "/opt/instruqt-workshop-track"; then
     TRACK_ROOT="$(cd /opt/instruqt-workshop-track && pwd)"
@@ -230,6 +230,36 @@ python3 -m venv /opt/workshop-venv
 /opt/workshop-venv/bin/pip install --upgrade pip
 /opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
 
+# mig-to-kbn: shallow clones and some track bundles omit the nested repo; Path A needs pyproject.toml on disk.
+if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ]; then
+  _mig_url="${WORKSHOP_MIG_TO_KBN_GIT_URL:-}"
+  if [ -z "$_mig_url" ] && [ -f "$TRACK_ROOT/.gitmodules" ]; then
+    _mig_url="$(git config -f "$TRACK_ROOT/.gitmodules" --get submodule.mig-to-kbn.url 2>/dev/null || true)"
+  fi
+  if [ -d "$TRACK_ROOT/.git" ]; then
+    echo "mig-to-kbn missing: trying git submodule update --init..."
+    git -C "$TRACK_ROOT" submodule update --init --depth 1 mig-to-kbn 2>/dev/null \
+      || git -C "$TRACK_ROOT" submodule update --init mig-to-kbn 2>/dev/null \
+      || true
+  fi
+  if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -n "$_mig_url" ]; then
+    echo "mig-to-kbn missing: git clone (depth 1) into workshop tree..."
+    rm -rf "$TRACK_ROOT/mig-to-kbn"
+    _mig_ref="${WORKSHOP_MIG_TO_KBN_GIT_REF:-}"
+    if [ -n "$_mig_ref" ]; then
+      git clone --depth 1 --branch "$_mig_ref" "$_mig_url" "$TRACK_ROOT/mig-to-kbn" \
+        || git clone --depth 1 "$_mig_url" "$TRACK_ROOT/mig-to-kbn" \
+        || true
+    else
+      git clone --depth 1 "$_mig_url" "$TRACK_ROOT/mig-to-kbn" || true
+    fi
+    if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -n "${WORKSHOP_MIG_TO_KBN_GIT_URL:-}" ]; then
+      echo "ERROR: WORKSHOP_MIG_TO_KBN_GIT_URL is set but mig-to-kbn clone failed (check auth / URL)." >&2
+      exit 1
+    fi
+  fi
+fi
+
 WORKSHOP_MIG_TO_KBN_READY=0
 if [ -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" ]; then
   echo "Installing mig-to-kbn (obs-migrate) into /opt/mig-to-kbn-venv..."
@@ -239,8 +269,9 @@ if [ -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/i
   }
   WORKSHOP_MIG_TO_KBN_READY=1
 else
-  echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until you clone" >&2
-  echo "      https://github.com/elastic/mig-to-kbn into mig-to-kbn/ (private repo; gh auth) and re-run install_workshop_mig_to_kbn.sh." >&2
+  echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until mig-to-kbn is on disk." >&2
+  echo "      Fix: push a workshop commit that includes the mig-to-kbn submodule (see .gitmodules), or set Instruqt host env" >&2
+  echo "      WORKSHOP_MIG_TO_KBN_GIT_URL (optional WORKSHOP_MIG_TO_KBN_GIT_REF) to a cloneable URL, then re-run track setup." >&2
 fi
 
 ALLOY_VER="${ALLOY_VERSION:-v1.8.3}"
