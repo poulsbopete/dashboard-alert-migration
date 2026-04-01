@@ -37,11 +37,16 @@ notes:
 
     **Live OTLP:** **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) — same pipeline as Lab 1.
 
-    ***
+    **Next slide:** mini-game while Lab 2 environments load.
+- type: text
+  contents: |
+    ## While you wait — **O11Y Survivors**
 
-    **While you wait:** [Vampire Clone](https://poulsbopete.github.io/Vampire-Clone/) (keyboard: arrows + space).
+    [Open full screen](https://poulsbopete.github.io/Vampire-Clone/) if the embed is cramped. **Controls:** arrows or WASD, space, click to start.
 
-    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" title="Vampire Clone" width="100%" height="440" style="border:0;border-radius:8px;max-width:100%;background:#0d0d0d;" allow="fullscreen" loading="lazy"></iframe>
+    <div style="width:100%;max-width:100%;height:min(82vh,920px);min-height:520px;margin:0 auto;">
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" title="O11Y Survivors (Vampire Clone)" width="100%" height="100%" style="border:0;border-radius:10px;background:#0a0a0a;display:block;" allow="fullscreen" loading="lazy"></iframe>
+    </div>
 tabs:
 - id: fsizfoyfjtag
   title: Terminal
