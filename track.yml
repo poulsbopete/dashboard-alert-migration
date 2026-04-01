@@ -11,12 +11,13 @@ description: |
   A **two-lab** spike sized like a real program: **20** Grafana dashboards and **10** Datadog-style **dashboard** JSON
   files, plus **4** Datadog **monitor** samples—**30+** dashboard-class artifacts before you even count alert drafts.
 
-  **Lab 1** batch-converts Grafana exports (`tools/grafana_to_elastic.py`); learners use **Cursor** and
-  [Elastic Agent Skills](https://github.com/elastic/agent-skills) (**`kibana-dashboards`**) to refine and publish in **Kibana**.
+  **Lab 1** runs **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** (file mode, **`--native-promql`**
+  for Serverless) per [Grafana source docs](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md); learners use **Cursor** and
+  [Elastic Agent Skills](https://github.com/elastic/agent-skills) (**`kibana-dashboards`**) to refine in **Kibana**.
 
-  **Lab 2** uses `tools/datadog_dashboard_to_elastic.py` for dashboards and `tools/datadog_to_elastic_alert.py` for monitors,
-  with the same **AI + skills** pattern for **rules** and **dashboards** on **Observability Serverless**, plus
-  **Datadog-style OTLP** samples into Elastic’s managed collector.
+  **Lab 2** uses **`datadog-migrate`** ([Datadog source docs](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md)) for dashboards;
+  workshop **rules** still use `tools/datadog_to_elastic_alert.py` + **`publish_datadog_alert_drafts_kibana.py`**. Architecture overview:
+  [mig-to-kbn `docs/architecture.md`](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md). Same **OTLP** path into Elastic’s managed collector.
 
   The sandbox is a single **elastic/es3-api-v2** host: it **creates** an Observability Serverless project at track start,
   proxies **Kibana** on port **8080**, and includes the workshop repo (Python venv + **assets/**) for the CLIs.

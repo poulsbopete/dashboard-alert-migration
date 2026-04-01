@@ -162,6 +162,7 @@ CANDIDATE="$(cd "$SCRIPT_DIR/.." && pwd)"
 # from an older image or bundle (same requirements.txt + assets, missing migration tooling).
 _track_root_ok() {
   [[ -n "$1" && -f "$1/tools/requirements.txt" && -d "$1/assets/grafana" && -d "$1/assets/datadog" \
+    && -f "$1/scripts/install_workshop_mig_to_kbn.sh" \
     && -f "$1/scripts/migrate_grafana_dashboards_to_serverless.sh" \
     && -f "$1/tools/publish_grafana_drafts_kibana.py" ]]
 }
@@ -229,6 +230,19 @@ python3 -m venv /opt/workshop-venv
 /opt/workshop-venv/bin/pip install --upgrade pip
 /opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
 
+WORKSHOP_MIG_TO_KBN_READY=0
+if [ -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" ]; then
+  echo "Installing mig-to-kbn (obs-migrate) into /opt/mig-to-kbn-venv..."
+  MIG_TO_KBN_VENV=/opt/mig-to-kbn-venv bash "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" || {
+    echo "ERROR: install_workshop_mig_to_kbn.sh failed (need network for uv / Python download)." >&2
+    exit 1
+  }
+  WORKSHOP_MIG_TO_KBN_READY=1
+else
+  echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until you clone" >&2
+  echo "      https://github.com/elastic/mig-to-kbn into mig-to-kbn/ (private repo; gh auth) and re-run install_workshop_mig_to_kbn.sh." >&2
+fi
+
 ALLOY_VER="${ALLOY_VERSION:-v1.8.3}"
 if [ ! -x /usr/local/bin/alloy ]; then
   echo "Installing Grafana Alloy ${ALLOY_VER}..."
@@ -249,7 +263,8 @@ if [ ! -x /usr/local/bin/alloy ]; then
   rm -rf "$ADIR" /tmp/alloy-linux-amd64.zip
 fi
 
-mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards /root/workshop/build/elastic-alerts
+mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards \
+  /root/workshop/build/elastic-alerts /root/workshop/build/mig-grafana /root/workshop/build/mig-datadog
 
 # Lab 2 check expects 4 monitor-*-elastic.json under build/elastic-alerts; generate at track bootstrap so Check passes
 # even if learners only convert dashboards (matches migrate_datadog step 2).
@@ -325,7 +340,12 @@ fi
 
 {
   echo "WORKSHOP_ROOT=$TRACK_ROOT"
-  echo "export PATH=/opt/workshop-venv/bin:\$PATH"
+  if [ "$WORKSHOP_MIG_TO_KBN_READY" = "1" ]; then
+    echo "export MIG_TO_KBN_VENV=/opt/mig-to-kbn-venv"
+    echo "export PATH=/opt/mig-to-kbn-venv/bin:/root/.local/bin:\$HOME/.local/bin:/opt/workshop-venv/bin:\$PATH"
+  else
+    echo "export PATH=/opt/workshop-venv/bin:\$PATH"
+  fi
   printf 'export KIBANA_URL=%q\n' "$KIBANA_URL"
   printf 'export ES_URL=%q\n' "$ES_URL"
   printf 'export ES_USERNAME=%q\n' "admin"
@@ -353,6 +373,7 @@ if [ -n "$WORKSHOP_OTLP_BASE" ]; then
 fi
 
 find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o -name 'solve-es3-api' -o -name 'cleanup-es3-api' \) -exec chmod +x {} \;
+[[ -f "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh" ]] && chmod +x "$TRACK_ROOT/scripts/install_workshop_mig_to_kbn.sh"
 [[ -f "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_grafana_dashboards_to_serverless.sh"
 [[ -f "$TRACK_ROOT/scripts/migrate_datadog_dashboards_to_serverless.sh" ]] && chmod +x "$TRACK_ROOT/scripts/migrate_datadog_dashboards_to_serverless.sh"
 [[ -f "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh" ]] && chmod +x "$TRACK_ROOT/scripts/seed_workshop_telemetry.sh"

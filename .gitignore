@@ -6,5 +6,7 @@ __pycache__/
 .elastic-credentials
 *.log
 build/
+# elastic/mig-to-kbn is private — clone into this path for Instruqt; use git add -f mig-to-kbn to vendor if needed.
+/mig-to-kbn/
 assets/grafana-imports/
 .DS_Store

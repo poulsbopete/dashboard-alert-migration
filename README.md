@@ -6,10 +6,18 @@
 → Kibana rules, **PromQL / metric-query** handoffs, and **OTLP** telemetry landing in Elastic’s **managed OTLP** so migrated
 views are validated on **live** Serverless data.
 
+**Primary migration engine:** **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (`grafana-migrate`, `datadog-migrate`).
+Read upstream [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md),
+[Grafana sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md), and
+[Datadog sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md). The working tree must include
+**`mig-to-kbn/`** (private clone). **`.gitignore`** lists **`/mig-to-kbn/`** so public forks omit it; before **`instruqt track push`**, clone into **`mig-to-kbn/`** on the build machine, or run **`git add -f mig-to-kbn`** to vendor. When **`mig-to-kbn/pyproject.toml`** is present, Instruqt bootstrap runs **`scripts/install_workshop_mig_to_kbn.sh`**, which installs **`uv`**
+and a **Python 3.12** venv at **`/opt/mig-to-kbn-venv`**; dashboard compile/upload invokes **`uvx kb-dashboard-cli`**, so **`uv`**
+stays on **`PATH`** via **`~/.bashrc`**. If **`mig-to-kbn/`** is missing, setup continues with a warning and Path A migrate scripts exit with an error until you install it.
+
 **Instruqt** track (**two labs**) for a **high-volume migration spike**: **20** **Grafana** dashboards and **10**
-**Datadog-style** dashboards (plus **4** monitor JSON files) → Elastic drafts on **Observability Serverless**, using
-**CLI batch converters**, **[Elastic Agent Skills](https://github.com/elastic/agent-skills)**, and **Cursor** / AI for
-query rewrite and Kibana API workflows.
+**Datadog-style** dashboards (plus **4** monitor JSON files) → Kibana on **Observability Serverless**, using
+**mig-to-kbn CLIs**, legacy **alert** publishers for workshop monitors, **[Elastic Agent Skills](https://github.com/elastic/agent-skills)**,
+and **Cursor** / AI for refinement.
 
 ## Quick start on the workshop VM (`es3-api`)
 
@@ -20,10 +28,10 @@ source ~/.bashrc
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → opens **Elastic Serverless** → Dashboards (titles end in `(Grafana import draft)`). |
-| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → Dashboards **`(Datadog dashboard import draft)`** + **Rules** (imports disabled until you edit). |
+| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`) uploads to **Dashboards** (titles match Grafana exports). Artifacts: **`build/mig-grafana/`**. |
+| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** uploads dashboards; **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules** (imports disabled until you edit). Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
 
-**Path B (laptop + Cursor):** clone the repo above, copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same `tools/*.py` steps locally. **Dashboards** only appear in Kibana after **`publish_grafana_drafts_kibana.py`** (included in the migrate scripts).
+**Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
 
 **Refresh the repo on an existing sandbox** (same VM, no new play):
 
@@ -49,9 +57,11 @@ The sandbox is **elastic/es3-api-v2**: **es3-api** provisions an **Observability
 
 ## Grafana and Datadog: how conversion to ES|QL works
 
-Migrations here are **two stages**. Learners should understand both: **(1)** how source queries are **captured** in draft JSON, and **(2)** how the **publisher** turns each panel into **Lens** panels whose **executable** language is **ES|QL** against **`logs-*` / `metrics-*` / `traces-*`**. Original **PromQL** and **Datadog `q`** strings are **not** run inside Elasticsearch; they are preserved in panel **descriptions** and in **`migration.*`** for traceability and for you to refine in Kibana or Cursor.
+**Labs 1–2 (Path A)** run **mig-to-kbn**: YAML + **`kb-dashboard-cli`** compile → Kibana upload, with **ES|QL validation** against **`ES_URL`** when **`--validate`** is set (see upstream docs). The section below documents the **legacy workshop Python pipeline** (`tools/grafana_to_elastic.py`, **`publish_grafana_drafts_kibana.py`**, etc.) for facilitators who still use or compare to `*-elastic-draft.json` flows.
 
-### Stage 1 — Converters (source JSON → `*-elastic-draft.json`)
+Migrations in that legacy path are **two stages**. Learners should understand both: **(1)** how source queries are **captured** in draft JSON, and **(2)** how the **publisher** turns each panel into **Lens** panels whose **executable** language is **ES|QL** against **`logs-*` / `metrics-*` / `traces-*`**. Original **PromQL** and **Datadog `q`** strings are **not** run inside Elasticsearch; they are preserved in panel **descriptions** and in **`migration.*`** for traceability and for you to refine in Kibana or Cursor.
+
+### Stage 1 — Converters (source JSON → `*-elastic-draft.json`) — legacy workshop tools
 
 | Script | What it reads | What it writes per panel |
 | --- | --- | --- |
@@ -128,7 +138,7 @@ This script **cannot** run against your Serverless project from CI without your 
 
 **`tools/publish_grafana_drafts_kibana.py`** publishes **both** Grafana- and Datadog-derived **`*-elastic-draft.json`** files via **`POST /api/dashboards?apiVersion=1`**, with a **saved-objects import** fallback. It reads **`migration.promql`** (Grafana) or **`migration.datadog_query`** (Datadog). Point **`--drafts-dir`** at **`build/elastic-dashboards`** or **`build/elastic-datadog-dashboards`**. **Datadog** imports default to **no** padded “Workshop insights” rows; set **`WORKSHOP_DD_PAD_LENS=1`** to match Grafana-style **`WORKSHOP_MIN_LENS_PANELS`**. Datadog disk-style queries map to **OTEL CPU / memory / HTTP** proxies (workshop fleet has no host disk I/O metrics). If Lens reports **Unknown column** on HTTP panels, set **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** or rely on the default **request volume by `service.name`**. **Line charts** use **multi-series** by **`service.name`** and **`WORKSHOP_ESQL_BUCKET_DURATION`**. See **[Grafana and Datadog: how conversion to ES|QL works](#grafana-and-datadog-how-conversion-to-esql-works)** above for the full pipeline.
 
-Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this publisher after OTLP is up. For deeper Lens work, use the **`kibana-dashboards`** skill. **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** covers CRUD, headers, spaces, and supported panels.
+Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains useful for **legacy** drafts and **Path B** experiments. For deeper Lens work, use the **`kibana-dashboards`** skill. **[`docs/dashboards-api-getting-started.md`](docs/dashboards-api-getting-started.md)** covers CRUD, headers, spaces, and supported panels.
 
 **Dynamic dashboard from live OTLP:** **`tools/generate_dynamic_o11y_dashboard.py`** (wrapper **`./scripts/generate_dynamic_o11y_dashboard.sh`**) runs **`POST /_query`** probes on **`logs-*` / `metrics-*`** (same family as **`publish_grafana_drafts_kibana.py`**), picks a working **`FROM`** clause, then **creates or replaces** one Kibana dashboard with **ES|QL Lens** panels. **Idempotent:** default stable id **`workshop-dynamic-otlp-overview`** (override with **`WORKSHOP_DYNAMIC_DASHBOARD_ID`** or **`--dashboard-id`**): **GET** → **PUT** when it exists, else **POST** (with **`id`** in the body when the stack allows). **`--skip-if-no-data`** exits **0** when no pattern matches (useful for **hourly cron**). Requires **`ES_URL`** + **`KIBANA_URL`** and **`ES_API_KEY`**. **`workflows/dynamic-observability-dashboard.yaml`** (v2) documents the MCP discovery sequence (`kibana_get_dashboard`, `esql_query`, …) and a sample hourly **crontab** line; materialize with the script after sourcing **`~/.bashrc`**.
 
@@ -138,15 +148,17 @@ Lab 1 **Path A** and **`migrate_datadog_dashboards_to_serverless.sh`** call this
 | --- | --- |
 | `track.yml` / `config.yml` | Instruqt metadata + VM **`elastic/es3-api-v2`** (`es3-api` host) |
 | `track_scripts/` | `setup-es3-api`: create Serverless project, nginx → Kibana :8080, venv + **Grafana Alloy** + OTLP SDK emitters → mOTLP (optional legacy bulk seed if **`WORKSHOP_ALLOW_BULK_SEED=1`**) |
-| `01-lab-01-grafana-to-elastic/` | Lab 1: **20** Grafana → `build/elastic-dashboards/*-elastic-draft.json` |
-| `02-lab-02-datadog-dashboards-alerts-to-elastic/` | Lab 2: **10** DD dashboards + **4** monitors → `build/elastic-datadog-dashboards/`, `build/elastic-alerts/` |
+| `mig-to-kbn/` | **elastic/mig-to-kbn** (obs-migrate); required for **`grafana-migrate`** / **`datadog-migrate`** |
+| `01-lab-01-grafana-to-elastic/` | Lab 1: **20** Grafana → **`build/mig-grafana/`** (YAML + `migration_report.json`) |
+| `02-lab-02-datadog-dashboards-alerts-to-elastic/` | Lab 2: **10** DD dashboards → **`build/mig-datadog/`**; **4** monitors → **`build/elastic-alerts/`** + Rules API |
 | `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`) |
 | `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (**12** timeseries widgets each; regenerate with **`scripts/generate_datadog_dashboards.py`**) |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
-| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** Grafana → drafts + OTLP + **`publish_grafana_drafts_kibana.py`** |
-| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** dashboards + monitors → drafts + OTLP + publish Dashboards + **Rules** (`publish_datadog_alert_drafts_kibana.py`) |
+| `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
+| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (validate + upload, `--native-promql`) |
+| `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |
 | `tools/otel_workshop_fleet.py` | **Six** OTLP worker subprocesses (distinct **service.name** + **host.name**) + **`system.*`**-style utilization metrics → Alloy; plus **`datadog_otel_to_elastic.py`** (**shopist-checkout** on **`workshop-node-07`**) for **Applications / Infrastructure / Hosts** variety |
@@ -164,7 +176,7 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 
 ## Discover vs Observability UIs (OTLP default)
 
-- **Default path:** **OpenTelemetry** (Python SDK → Alloy → **mOTLP**) populates **logs-***, **metrics-***, **traces-*** data the same way customer OTLP would. **`publish_grafana_drafts_kibana.py`** probes **`logs-*`** / **`metrics-*`** first so Lens works against OTLP-backed streams.
+- **Default path:** **OpenTelemetry** (Python SDK → Alloy → **mOTLP**) populates **logs-***, **metrics-***, **traces-*** data the same way customer OTLP would. **mig-to-kbn** validate/upload and the legacy **`publish_grafana_drafts_kibana.py`** both target **`logs-*`** / **`metrics-*`** / **`traces-*`** patterns aligned with that data.
 - **“Nothing in metrics-*” in Discover:** the **Observability → Discover** search bar often ships a **narrow** pattern (e.g. `metrics-*.otel-*`, `metrics-apm*`) and **does not include** the broad wildcard **`metrics-*`**. Edit the pattern and append **`,metrics-*`** (or switch to **Stack Management → Data views** and create **`metrics-*`** with **`@timestamp`**). In **ES|QL**, run **`FROM metrics-* | LIMIT 5`** to confirm documents exist regardless of that default.
 - **Histogram looks empty but the table has rows:** set the time picker to **Last 15 minutes** / **Last 24 hours** and ensure the **end** time includes **now**; the chart buckets may stop earlier than your newest `@timestamp`, so the table shows hits while the graph looks blank.
 - **Sparse multi-day metric charts (Alloy self-metrics + fresh OTLP):** the fleet only writes **from startup onward**; for a filled **Last 30 days** view in Discover, run **`python3 tools/seed_workshop_telemetry.py --metrics-time-series --days 30`** (bulk to **`metrics-workshop-default`**; same **`service.name`** values as **`otel_workshop_fleet.py`**). Tune **`--metric-time-step-minutes`** / **`--metric-series-cap`** if needed.
@@ -175,7 +187,8 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 ## Facilitator prerequisites
 
 - Learners need access to an **Observability Serverless** project (Elastic Cloud).
-- Outbound **HTTPS** from the sandbox (for `git clone` fallback of the workshop repo if the bundle is not on disk).
+- The bundled workshop repo must include **`mig-to-kbn/`**; **`install_workshop_mig_to_kbn.sh`** needs outbound **HTTPS** ( **`uv`** / Python / PyPI).
+- Outbound **HTTPS** from the sandbox (for `git clone` fallback of the workshop repo if the bundle is not on disk — the fallback clone must still contain **`mig-to-kbn/`** or bootstrap will fail).
 - **Grafana Alloy → mOTLP:** **`elastic/es3-api-v2`** (or **`bin/es3-api.py`**) may put a managed OTLP base URL in **`/tmp/project_results.json`**. **Each play’s host differs.** Setup also **derives** mOTLP from **`ES_URL`** (`.es.`→`.ingest.`) or **`KIBANA_URL`** (`.kb.`→`.ingest.`). Learners run **`./scripts/start_workshop_otel.sh`** if Alloy did not start. Legacy bulk seed requires **`WORKSHOP_ALLOW_BULK_SEED=1`**.
 
 ### Instruqt secrets

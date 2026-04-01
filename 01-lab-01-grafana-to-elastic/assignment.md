@@ -35,7 +35,7 @@ notes:
   contents: |
     ## This lab
 
-    **20** Grafana JSON → Elastic drafts → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: open clone, paste **`export`** from VM **`~/.bashrc`**, run converter + publish in integrated terminal — OTLP already running from bootstrap).
+    **20** Grafana JSON → **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: repo includes **`mig-to-kbn/`**, Python **3.11+**, **`uv`**, paste **`export`** from VM **`~/.bashrc`**, run the same CLI — OTLP already running from bootstrap).
 tabs:
 - id: lypopaehfkah
   title: Terminal
@@ -64,6 +64,8 @@ enhanced_loading: null
 
 # Lab 1 — Grafana → Elastic Serverless (**20 dashboards**)
 
+Migration uses **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (see [Grafana source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md) and [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md)): **`grafana-migrate`** with **`--native-promql`** for Observability Serverless.
+
 Pick **Path A** or **Path B** (or both).
 
 ## Path A — dashboard migration (Instruqt)
@@ -74,27 +76,31 @@ source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Open **Elastic Serverless → Dashboards** → titles **`(Grafana import draft)`**.
+Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min. *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
 ## Path B — Cursor on your laptop
 
-1. **Clone** **[github.com/poulsbopete/dashboard-alert-migration](https://github.com/poulsbopete/dashboard-alert-migration)** and open the folder in **Cursor**.
+1. **Clone** this workshop repo **with** **`mig-to-kbn/`** (private: `gh repo clone elastic/mig-to-kbn` → `mig-to-kbn` in repo root). Install **[uv](https://docs.astral.sh/uv/)**, Python **≥ 3.11**, then: **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv venv` + `uv pip install -e ./mig-to-kbn[all]`).
 2. On the **VM**, copy env: `cd /root/workshop && source ~/.bashrc` then
    `grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`
-3. In Cursor’s **integrated terminal**, paste those **`export`** lines, then:
+3. In Cursor’s **integrated terminal**, paste those **`export`** lines, then run the same pipeline as Path A (from repo root), for example:
 
 ```bash
-mkdir -p build/elastic-dashboards
-python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards
-python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-dashboards
+export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
+# after install_workshop_mig_to_kbn.sh or local venv:
+"$MIG_TO_KBN_VENV/bin/grafana-migrate" \
+  --source files --input-dir assets/grafana --output-dir build/mig-grafana \
+  --native-promql --data-view 'metrics-*' --logs-index 'logs-*' \
+  --es-url "$ES_URL" --es-api-key "$ES_API_KEY" --validate --upload \
+  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
 ```
 
-The sandbox **already runs Alloy + OTLP**; you do **not** need **`start_workshop_otel.sh`** on the VM before importing from Cursor. If charts look empty, troubleshoot on the VM with **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
+The sandbox **already runs Alloy + OTLP**. If charts look empty, on the VM run **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
 
 Optional: **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** **`kibana-dashboards`**, **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**. Do not paste API keys into the AI chat.
 
 ## Done
 
-**Check** when **`build/elastic-dashboards/`** has **20** `*-elastic-draft.json` (Path A: under **`/root/workshop/build/`**; Path B: your clone).
+**Check** when **`build/mig-grafana/yaml/`** has **20** `*.yaml` files and **`build/mig-grafana/migration_report.json`** exists (Path A: **`/root/workshop/build/`**; Path B: your clone).
