@@ -1,8 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 cd /root/workshop
-count="$(find build/elastic-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
-if [ "${count:-0}" -lt 20 ]; then
-  fail-message "Expected 20 Grafana-derived drafts (*-elastic-draft.json) in build/elastic-dashboards (found: ${count:-0}). Run: python3 tools/grafana_to_elastic.py assets/grafana/*.json --out-dir build/elastic-dashboards"
+
+# Primary: mig-to-kbn / grafana-migrate (Path A / Path B in assignment.md)
+mig_yaml="$(find build/mig-grafana/yaml -maxdepth 1 -type f -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
+mig_report="build/mig-grafana/migration_report.json"
+
+if [ -f "$mig_report" ] && [ "${mig_yaml:-0}" -ge 20 ]; then
+  echo "Lab 1 checks passed (mig-to-kbn: ${mig_yaml} YAML under build/mig-grafana/yaml/)."
+  exit 0
 fi
-echo "Lab 1 checks passed."
+
+# Legacy: tools/grafana_to_elastic.py → *-elastic-draft.json
+legacy="$(find build/elastic-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${legacy:-0}" -ge 20 ]; then
+  echo "Lab 1 checks passed (legacy drafts: ${legacy} under build/elastic-dashboards/)."
+  exit 0
+fi
+
+fail-message "Expected mig-to-kbn output: 20+ *.yaml in build/mig-grafana/yaml/ and build/mig-grafana/migration_report.json (YAML count: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo missing)). Or legacy: 20 *-elastic-draft.json in build/elastic-dashboards (found: ${legacy:-0}). Run Path A: ./scripts/migrate_grafana_dashboards_to_serverless.sh (see assignment)."
