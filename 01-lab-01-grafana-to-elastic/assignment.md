@@ -35,7 +35,13 @@ notes:
   contents: |
     ## This lab
 
-    **20** Grafana JSON → **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: repo includes **`mig-to-kbn/`**, Python **3.11+**, **`uv`**, paste **`export`** from VM **`~/.bashrc`**, run the same CLI — OTLP already running from bootstrap).
+    **20** Grafana JSON → **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: repo includes **`mig-to-kbn/`**, Python **3.11+**, **`uv`**, paste **`export`** from VM **`~/.bashrc`**,     run the same CLI — OTLP already running from bootstrap).
+
+    ***
+
+    **While you wait:** [Vampire Clone](https://poulsbopete.github.io/Vampire-Clone/) (keyboard: arrows + space).
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" title="Vampire Clone" width="100%" height="440" style="border:0;border-radius:8px;max-width:100%;background:#0d0d0d;" allow="fullscreen" loading="lazy"></iframe>
 tabs:
 - id: lypopaehfkah
   title: Terminal

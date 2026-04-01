@@ -36,6 +36,12 @@ notes:
     **10** Datadog dashboards (**`datadog-migrate`**) + **4** monitors (workshop rule publisher) → Kibana. Pick **Path A** or **Path B** (same **`mig-to-kbn`** + env pattern as Lab 1).
 
     **Live OTLP:** **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) — same pipeline as Lab 1.
+
+    ***
+
+    **While you wait:** [Vampire Clone](https://poulsbopete.github.io/Vampire-Clone/) (keyboard: arrows + space).
+
+    <iframe src="https://poulsbopete.github.io/Vampire-Clone/" title="Vampire Clone" width="100%" height="440" style="border:0;border-radius:8px;max-width:100%;background:#0d0d0d;" allow="fullscreen" loading="lazy"></iframe>
 tabs:
 - id: fsizfoyfjtag
   title: Terminal
