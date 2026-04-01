@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pull the latest elastic/mig-to-kbn into this workshop (developer laptop or CI).
-# Supports: git submodule, or a standalone git clone under mig-to-kbn/.
+# Supports: git submodule, vendored tree (no nested .git; re-clone + rsync), or standalone git clone under mig-to-kbn/.
 #
 # Usage (repo root):
 #   ./scripts/update_mig_to_kbn.sh              # update sources only
@@ -53,6 +53,23 @@ update_via_submodule() {
   return 0
 }
 
+# Vendored copy in git (no mig-to-kbn/.git): replace contents from upstream shallow clone.
+update_via_vendored_tree() {
+  if [ ! -f "${MIG}/pyproject.toml" ] || [ -e "${MIG}/.git" ]; then
+    return 1
+  fi
+  echo "==> mig-to-kbn: refresh vendored directory from https://github.com/elastic/mig-to-kbn (${REF})"
+  TDIR="$(mktemp -d)"
+  UP="${TDIR}/upstream"
+  if ! git clone --depth 1 --branch "$REF" "https://github.com/elastic/mig-to-kbn.git" "$UP" 2>/dev/null; then
+    git clone --depth 1 "https://github.com/elastic/mig-to-kbn.git" "$UP"
+    git -C "$UP" checkout "$REF" 2>/dev/null || true
+  fi
+  rsync -a --delete --exclude='.git' "${UP}/" "${MIG}/"
+  rm -rf "${TDIR}"
+  return 0
+}
+
 update_via_standalone_clone() {
   if [ ! -d "$MIG" ]; then
     echo "ERROR: ${MIG} not found." >&2
@@ -62,7 +79,7 @@ update_via_standalone_clone() {
     exit 1
   fi
   if [ ! -d "$MIG/.git" ]; then
-    echo "ERROR: ${MIG} is not a git clone (no .git). Remove it and clone again." >&2
+    echo "ERROR: ${MIG} is not a git clone (no .git). Use vendored mig-to-kbn/ or run this script to refresh a vendored tree." >&2
     exit 1
   fi
   echo "==> mig-to-kbn: pull ${REMOTE}/${REF} (standalone clone)"
@@ -77,16 +94,22 @@ update_via_standalone_clone() {
 
 if update_via_submodule; then
   :
+elif update_via_vendored_tree; then
+  :
 else
   update_via_standalone_clone
 fi
 
-echo "==> mig-to-kbn now at: $(_git_in_mig log -1 --oneline)"
+if [ -d "${MIG}/.git" ]; then
+  echo "==> mig-to-kbn now at: $(_git_in_mig log -1 --oneline)"
+else
+  echo "==> mig-to-kbn vendored tree updated (commit mig-to-kbn/ in the parent repo)."
+fi
 
 if [ "$REINSTALL" = "1" ]; then
   echo "==> Reinstalling Python venv (install_workshop_mig_to_kbn.sh)..."
   bash "${ROOT}/scripts/install_workshop_mig_to_kbn.sh"
 fi
 
-echo "OK: Next on maintainer laptop: commit submodule pointer if you use submodule, then ./scripts/push_git_and_instruqt.sh"
+echo "OK: Next: git add mig-to-kbn && git commit, then ./scripts/push_git_and_instruqt.sh"
 echo "     On Instruqt VM after sync: source ~/.bashrc && sudo bash scripts/install_workshop_mig_to_kbn.sh   # if you have mig-to-kbn in the tree"

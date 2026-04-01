@@ -1,0 +1,99 @@
+"""End-to-end adapter import parity tests."""
+
+import subprocess
+import sys
+import unittest
+
+
+class TestGrafanaImportParity(unittest.TestCase):
+    def test_extract_canonical(self):
+        from observability_migration.adapters.source.grafana.extract import extract_dashboards_from_files
+        self.assertTrue(callable(extract_dashboards_from_files))
+
+    def test_translate_canonical(self):
+        from observability_migration.adapters.source.grafana.translate import TranslationContext
+        self.assertTrue(TranslationContext is not None)
+
+    def test_alerts_canonical(self):
+        from observability_migration.adapters.source.grafana.alerts import extract_alerts_from_dashboard
+        self.assertTrue(callable(extract_alerts_from_dashboard))
+
+    def test_panels_canonical(self):
+        from observability_migration.adapters.source.grafana.panels import translate_panel
+        self.assertTrue(callable(translate_panel))
+
+    def test_promql_canonical(self):
+        from observability_migration.adapters.source.grafana.promql import preprocess_grafana_macros
+        self.assertTrue(callable(preprocess_grafana_macros))
+
+
+class TestDatadogImportParity(unittest.TestCase):
+    def test_normalize_canonical(self):
+        from observability_migration.adapters.source.datadog.normalize import normalize_dashboard
+        self.assertTrue(callable(normalize_dashboard))
+
+    def test_translate_canonical(self):
+        from observability_migration.adapters.source.datadog.translate import translate_widget
+        self.assertTrue(callable(translate_widget))
+
+    def test_metric_parser_canonical(self):
+        from observability_migration.adapters.source.datadog.query_parser import parse_metric_query
+        self.assertTrue(callable(parse_metric_query))
+
+    def test_models_canonical(self):
+        from observability_migration.adapters.source.datadog.models import NormalizedWidget
+        self.assertTrue(NormalizedWidget is not None)
+
+    def test_field_map_canonical(self):
+        from observability_migration.adapters.source.datadog.field_map import OTEL_PROFILE
+        self.assertTrue(OTEL_PROFILE is not None)
+
+
+class TestTargetImportParity(unittest.TestCase):
+    def test_compile_via_shared_path(self):
+        from observability_migration.targets.kibana.compile import compile_yaml
+        self.assertTrue(callable(compile_yaml))
+
+    def test_comparators_via_shared_path(self):
+        from observability_migration.core.verification.comparators import ComparisonResult
+        self.assertTrue(ComparisonResult is not None)
+
+    def test_report_canonical(self):
+        from observability_migration.core.reporting.report import MigrationResult
+        self.assertTrue(MigrationResult is not None)
+
+    def test_visual_ir_canonical(self):
+        from observability_migration.core.assets.visual import VisualIR
+        self.assertTrue(VisualIR is not None)
+
+    def test_query_ir_canonical(self):
+        from observability_migration.core.assets.query import QueryIR
+        self.assertTrue(QueryIR is not None)
+
+    def test_operational_ir_canonical(self):
+        from observability_migration.core.assets.operational import OperationalIR
+        self.assertTrue(OperationalIR is not None)
+
+
+class TestModuleEntrypoints(unittest.TestCase):
+    def test_grafana_cli_module_help_executes_main(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "observability_migration.adapters.source.grafana.cli", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Grafana", proc.stdout)
+
+    def test_datadog_cli_module_help_executes_main(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "observability_migration.adapters.source.datadog.cli", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Datadog", proc.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

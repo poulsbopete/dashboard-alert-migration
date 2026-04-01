@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obs-migrate"
+version = "0.1.0"
+description = "Source-agnostic observability migration platform (Grafana, Datadog → Kibana)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "grafana-client>=5.0.0",
+  "lark>=1.2.2",
+  "pydantic>=2.11.0",
+  "promql-parser>=0.7.0",
+  "pyyaml>=6.0",
+  "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+grafana = [
+  "grafana-client>=5.0.0",
+  "promql-parser>=0.7.0",
+]
+datadog = ["datadog-api-client"]
+dev = ["hypothesis>=6.130.0"]
+all = [
+  "obs-migrate[grafana]",
+  "obs-migrate[datadog]",
+  "obs-migrate[dev]",
+]
+
+[project.scripts]
+obs-migrate = "observability_migration.app.cli:main"
+grafana-migrate = "observability_migration.adapters.source.grafana.cli:main"
+grafana-generate-corpus = "observability_migration.adapters.source.grafana.corpus:main"
+grafana-validate-uploaded = "observability_migration.adapters.source.grafana.smoke:main"
+datadog-migrate = "observability_migration.adapters.source.datadog.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["observability_migration*"]
+
+# ---------- Linting (ruff) ----------
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "F",     # pyflakes
+  "I",     # isort
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "SIM",   # flake8-simplify
+  "RUF",   # ruff-specific
+]
+ignore = [
+  "E501",   # line length handled by formatter
+  "B010",   # do not call setattr with constant attr
+  "B905",   # zip strict= not needed for parallel iteration with unequal lengths
+  "SIM108", # ternary operator (readability choice)
+  "RUF001", # ambiguous unicode in string literals (unit symbols like °, µ, –)
+  "RUF005", # collection literal concatenation (readability choice)
+  "RUF012", # mutable class variable annotations
+  "UP042",  # StrEnum only in 3.11+, keep str,Enum for clarity
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["observability_migration"]
+
+# ---------- Type checking (mypy) ----------
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["build/", "dist/", ".venv/"]
+
+# ---------- Testing (pytest) ----------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-x -q"

@@ -93,7 +93,7 @@ Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exp
 
 ## Path B — Cursor on your laptop
 
-1. **Clone** this workshop repo **with** **`mig-to-kbn/`** (private: `gh repo clone elastic/mig-to-kbn` → `mig-to-kbn` in repo root). Install **[uv](https://docs.astral.sh/uv/)**, Python **≥ 3.11**, then: **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv venv` + `uv pip install -e ./mig-to-kbn[all]`).
+1. **Clone** this workshop repo (**`mig-to-kbn/`** is included in git). Install **[uv](https://docs.astral.sh/uv/)**, Python **≥ 3.11**, then: **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv venv` + `uv pip install -e ./mig-to-kbn[all]`).
 2. On the **VM**, copy env: `cd /root/workshop && source ~/.bashrc` then
    `grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc`
 3. In Cursor’s **integrated terminal**, paste those **`export`** lines, then run the same pipeline as Path A (from repo root), for example:

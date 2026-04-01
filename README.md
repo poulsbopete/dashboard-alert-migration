@@ -9,7 +9,7 @@ views are validated on **live** Serverless data.
 **Primary migration engine:** **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (`grafana-migrate`, `datadog-migrate`).
 Read upstream [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md),
 [Grafana sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md), and
-[Datadog sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md). This repo tracks **`mig-to-kbn/`** as a **git submodule** (see **`.gitmodules`**). After **`git clone`**, run **`git submodule update --init --recursive`** (or clone with **`--recurse-submodules`**). Track setup on **`es3-api`** initializes or shallow-clones **`mig-to-kbn`** when **`pyproject.toml`** is missing. If your environment cannot reach the default submodule URL, set host env **`WORKSHOP_MIG_TO_KBN_GIT_URL`** (and optional **`WORKSHOP_MIG_TO_KBN_GIT_REF`**) on the Instruqt template. When **`mig-to-kbn/pyproject.toml`** is present, bootstrap runs **`scripts/install_workshop_mig_to_kbn.sh`**, which installs **`uv`**
+[Datadog sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md). This repo **vendors** **`mig-to-kbn/`** in git (same tree as [elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)), so Instruqt sandboxes and **`git clone`** get **`pyproject.toml`** without submodules. Refresh vendored sources with **`./scripts/update_mig_to_kbn.sh`** and commit. Forks that strip **`mig-to-kbn/`** can set host env **`WORKSHOP_MIG_TO_KBN_GIT_URL`** (optional **`WORKSHOP_MIG_TO_KBN_GIT_REF`**) on **`es3-api`**. When **`mig-to-kbn/pyproject.toml`** is present, bootstrap runs **`scripts/install_workshop_mig_to_kbn.sh`**, which installs **`uv`**
 and a **Python 3.12** venv at **`/opt/mig-to-kbn-venv`**; dashboard compile/upload invokes **`uvx kb-dashboard-cli`**, so **`uv`**
 stays on **`PATH`** via **`~/.bashrc`**. If **`mig-to-kbn/`** is missing, setup continues with a warning and Path A migrate scripts exit with an error until you install it.
 
@@ -156,7 +156,7 @@ Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains 
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
 | `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
-| `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (submodule or standalone clone); optional **`--reinstall`** venv |
+| `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (vendored tree, submodule, or standalone clone); optional **`--reinstall`** venv |
 | `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (validate + upload, `--native-promql`) |
 | `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
@@ -187,8 +187,8 @@ Loading / wait slides are defined in each **`assignment.md`** frontmatter (`note
 ## Facilitator prerequisites
 
 - Learners need access to an **Observability Serverless** project (Elastic Cloud).
-- The workshop tree must end up with **`mig-to-kbn/pyproject.toml`** (submodule in git, expanded bundle, or clone during setup). **`install_workshop_mig_to_kbn.sh`** needs outbound **HTTPS** (**`uv`** / Python / PyPI).
-- Outbound **HTTPS** from the sandbox (for **`git clone`** of the workshop repo and possibly **`mig-to-kbn`**). If **`mig-to-kbn/`** is still missing after setup, see **`WORKSHOP_MIG_TO_KBN_GIT_URL`** above or **Maintainers: updating mig-to-kbn** below.
+- The workshop tree should include vendored **`mig-to-kbn/pyproject.toml`**; **`install_workshop_mig_to_kbn.sh`** needs outbound **HTTPS** (**`uv`** / Python / PyPI).
+- Outbound **HTTPS** from the sandbox (for **`git clone`** fallback of the workshop repo if the bundle is not on disk). Stripped forks can use **`WORKSHOP_MIG_TO_KBN_GIT_URL`**; see **Maintainers: updating mig-to-kbn** below.
 - **Grafana Alloy → mOTLP:** **`elastic/es3-api-v2`** (or **`bin/es3-api.py`**) may put a managed OTLP base URL in **`/tmp/project_results.json`**. **Each play’s host differs.** Setup also **derives** mOTLP from **`ES_URL`** (`.es.`→`.ingest.`) or **`KIBANA_URL`** (`.kb.`→`.ingest.`). Learners run **`./scripts/start_workshop_otel.sh`** if Alloy did not start. Legacy bulk seed requires **`WORKSHOP_ALLOW_BULK_SEED=1`**.
 
 ### Instruqt secrets
@@ -209,26 +209,16 @@ python3 tools/datadog_to_elastic_alert.py assets/datadog/monitor-high-5xx-rate.j
 
 ## Maintainers: updating mig-to-kbn
 
-When **elastic/mig-to-kbn** changes, refresh the copy this workshop uses, bump the recorded revision if you use a submodule, reinstall the venv where **`grafana-migrate`** / **`datadog-migrate`** run, then republish the track.
+When **elastic/mig-to-kbn** changes, refresh the vendored tree, commit, reinstall the venv where **`grafana-migrate`** / **`datadog-migrate`** run, then republish the track.
 
-**Recommended (git submodule)** — tracks a specific upstream commit in your repo (good for reproducible demos):
-
-```bash
-# One-time (from workshop repo root):
-git submodule add git@github.com:elastic/mig-to-kbn.git mig-to-kbn
-# Optional: edit .gitmodules to add   branch = main   under [submodule "mig-to-kbn"]
-git commit -m "Add mig-to-kbn submodule"
-```
-
-**Pull the latest upstream code:**
+**Pull the latest upstream code into `mig-to-kbn/`:**
 
 ```bash
 ./scripts/update_mig_to_kbn.sh
+git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"
 ```
 
-If you use a submodule, commit the new pointer: **`git add mig-to-kbn && git commit -m 'Bump mig-to-kbn'`**.
-
-**Standalone clone** (same **`update_mig_to_kbn.sh`**): keep **`mig-to-kbn/`** as a normal git clone instead of a submodule if you prefer; ensure it is present on disk before **`instruqt track push`** (e.g. vendor with **`git add -f mig-to-kbn`** on a fork that cannot use submodules).
+**Standalone clone** (no separate remote in **`mig-to-kbn/.git`**): **`update_mig_to_kbn.sh`** fetches **`origin/main`** into the vendored directory when **`mig-to-kbn`** is a normal clone with remotes configured.
 
 **Refresh the Python install** after source changes (compile step uses **`uvx kb-dashboard-cli`**):
 

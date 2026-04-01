@@ -23,7 +23,7 @@ if [ ! -f "${ROOT}/mig-to-kbn/pyproject.toml" ]; then
   echo "ERROR: ${BIN} not found and mig-to-kbn is missing at ${ROOT}/mig-to-kbn." >&2
   echo "       Clone https://github.com/elastic/mig-to-kbn into mig-to-kbn/, then run:" >&2
   echo "         bash ${ROOT}/scripts/install_workshop_mig_to_kbn.sh" >&2
-  echo "       Or bundle mig-to-kbn in the Instruqt track (submodule + package, or git add -f)." >&2
+  echo "       Upstream workshop vendors mig-to-kbn in git; sync from main or set WORKSHOP_MIG_TO_KBN_GIT_URL on the host." >&2
   exit 1
 fi
 
