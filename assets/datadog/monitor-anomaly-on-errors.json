@@ -1,4 +1,5 @@
 {
+  "id": 91002,
   "name": "[Workshop] Anomaly detection on error volume",
   "type": "anomaly alert",
   "query": "avg(last_4h):anomalies(avg:trace.http.request.errors{service:sample-api}.as_count() , 'basic', 3, direction='both', alert_window='last_15m', interval=60, count_default_zero='true') >= 1",

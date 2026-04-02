@@ -1,4 +1,5 @@
 {
+  "id": 91004,
   "name": "[Workshop] Synthetic HTTP check (sample endpoint)",
   "type": "service check",
   "query": "\"http.can_connect\".over(\"url:https://api.workshop.example/v1/invoke\").last(2).count_by_status()",

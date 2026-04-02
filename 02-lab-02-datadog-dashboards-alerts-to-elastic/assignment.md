@@ -90,7 +90,11 @@ source ~/.bashrc
 
 Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
 
-**Kibana-only upload (default):** same as Lab 1 — **`datadog-migrate`** with **`--upload`** + **Kibana URL / API key** only; **no** **`--es-url`** or **`--validate`** (those are what turn on pre-upload query validation against Elasticsearch). Workshop script also passes **`--logs-index`**, **`--ensure-data-views`**, **`--fetch-monitors`**. **`WORKSHOP_MIG_ES_VALIDATE=1`** re-enables ES + validation.
+**Kibana-only upload (default):** same as Lab 1 — **`datadog-migrate`** with **`--upload`** + **Kibana URL / API key** only. The migrate script passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** / **`ES_API_KEY`** from **`~/.bashrc`** do **not** turn on live ES|QL validation (the CLI otherwise reads those env vars by default). **`WORKSHOP_MIG_ES_VALIDATE=1`** restores **`--es-url`**, **`--es-api-key`**, and **`--validate`**. Workshop also passes **`--logs-index`**, **`--ensure-data-views`**, **`--fetch-monitors`**.
+
+**Monitors under `monitors/`:** exports need **`id`** + **`type`** (API shape), or **`type`** + **`query`** (workshop samples); **`--fetch-monitors`** ingests them into **`monitor_migration_results.json`**.
+
+**If `latency_p95` fails at compile:** **`kb-dashboard-cli`** may reject some Lens XY shapes (formula vs aggregation). Other dashboards still upload; track **mig-to-kbn** / **kb-dashboard-cli** updates or re-run after **`./scripts/sync_workshop_from_git.sh`**.
 
 *Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 

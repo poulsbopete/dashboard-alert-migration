@@ -1,12 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 cd /root/workshop
-dc="$(find build/elastic-datadog-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+
+mig_yaml="$(find build/mig-datadog/yaml -maxdepth 1 -type f -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
+mig_report="build/mig-datadog/migration_report.json"
 ac="$(find build/elastic-alerts -maxdepth 1 -type f -name 'monitor-*-elastic.json' 2>/dev/null | wc -l | tr -d ' ')"
-if [ "${dc:-0}" -lt 10 ]; then
-  fail-message "Expected 10 Datadog dashboard drafts in build/elastic-datadog-dashboards (*-elastic-draft.json). Found: ${dc:-0}. Run: python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json --out-dir build/elastic-datadog-dashboards"
+
+if [ -f "$mig_report" ] && [ "${mig_yaml:-0}" -ge 10 ] && [ "${ac:-0}" -ge 4 ]; then
+  echo "Lab 2 checks passed (mig-to-kbn: ${mig_yaml} YAML, migration_report.json, ${ac} alert drafts)."
+  exit 0
 fi
-if [ "${ac:-0}" -lt 4 ]; then
-  fail-message "Expected 4 monitor-derived alert drafts (monitor-*-elastic.json) in build/elastic-alerts. Found: ${ac:-0}. From /root/workshop run ./scripts/migrate_datadog_dashboards_to_serverless.sh, or step 2 in the assignment (Step by step)."
+
+legacy="$(find build/elastic-datadog-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${legacy:-0}" -ge 10 ] && [ "${ac:-0}" -ge 4 ]; then
+  echo "Lab 2 checks passed (legacy drafts: ${legacy}, alert drafts: ${ac})."
+  exit 0
 fi
-echo "Lab 2 checks passed."
+
+fail-message "Expected mig-to-kbn: 10+ *.yaml in build/mig-datadog/yaml/, build/mig-datadog/migration_report.json, and 4 monitor-*-elastic.json in build/elastic-alerts/ (yaml: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo no), alerts: ${ac:-0}). Or legacy: 10 *-elastic-draft.json in build/elastic-datadog-dashboards. Run: ./scripts/migrate_datadog_dashboards_to_serverless.sh"

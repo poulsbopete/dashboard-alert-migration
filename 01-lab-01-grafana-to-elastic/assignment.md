@@ -90,7 +90,7 @@ source ~/.bashrc
 
 Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
 
-**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** uses **`--upload`** with **Kibana URL + API key only** — **omit** **`--es-url`** and **`--validate`**. In **mig-to-kbn**, **pre-upload ES|QL query validation runs only when Elasticsearch is in the loop** (passing **`--es-url`** with **`--upload`** auto-enables validation). **`--esql-index`** is set to **`metrics-*`** alongside **`--data-view`** (same pattern as upstream **`grafana-migrate`** smoke tests). Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add **`--es-url`**, **`--es-api-key`**, and **`--validate`**.
+**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** from **`~/.bashrc`** does not enable live validation (the **grafana-migrate** CLI otherwise defaults **`--es-url`** from that env var). **`--upload`** uses **Kibana** credentials only unless **`WORKSHOP_MIG_ES_VALIDATE=1`**. **`--esql-index`** is **`metrics-*`** with **`--data-view`**.
 
 *Charts empty after upload?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min, or optional **`setup_serverless_data.py`** (below). *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 

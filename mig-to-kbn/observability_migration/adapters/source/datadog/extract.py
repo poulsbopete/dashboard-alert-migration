@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import json
 import os
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -267,10 +268,16 @@ def extract_monitors_from_files(input_dir: str) -> list[dict[str, Any]]:
             elif "id" in raw and "type" in raw:
                 raw["_source_file"] = str(fpath)
                 monitors.append(raw)
+            elif "type" in raw and isinstance(raw.get("query"), str):
+                # Workshop-style exports: type + query (+ name) without API id — synthesize a stable numeric id.
+                raw = dict(raw)
+                raw.setdefault("id", zlib.adler32(fpath.stem.encode("utf-8")) % (10**9))
+                raw["_source_file"] = str(fpath)
+                monitors.append(raw)
             else:
                 print(
                     f"  WARN: skipping {fpath.name}: "
-                    "expected 'monitors' array or a monitor object with 'id' and 'type'"
+                    "expected 'monitors' array or a monitor object with 'id' and 'type', or 'type' and 'query'"
                 )
         else:
             print(f"  WARN: skipping {fpath.name}: unexpected structure")

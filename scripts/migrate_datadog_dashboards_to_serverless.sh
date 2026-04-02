@@ -69,12 +69,12 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   sleep "$WAIT_OTLP"
 fi
 
-ES_VALIDATE_ARGS=()
+ES_ES_ARGS=(--es-url "" --es-api-key "")
 if [ "${WORKSHOP_MIG_ES_VALIDATE:-0}" = "1" ]; then
-  ES_VALIDATE_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
+  ES_ES_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
   echo "==> [2/5] datadog-migrate (… + live ES|QL validation: WORKSHOP_MIG_ES_VALIDATE=1) + monitor IR extract..."
 else
-  echo "==> [2/5] datadog-migrate (Kibana-only upload; WORKSHOP_MIG_ES_VALIDATE=1 for pre-upload ES|QL) + monitor IR extract..."
+  echo "==> [2/5] datadog-migrate (Kibana-only upload; ES_URL in env ignored for validation — WORKSHOP_MIG_ES_VALIDATE=1 to enable) + monitor IR extract..."
 fi
 "${DD_MIGRATE}" \
   --source files \
@@ -83,7 +83,7 @@ fi
   --field-profile otel \
   --data-view "metrics-*" \
   --logs-index "logs-*" \
-  "${ES_VALIDATE_ARGS[@]}" \
+  "${ES_ES_ARGS[@]}" \
   --upload \
   --kibana-url "${KIBANA_URL}" \
   --kibana-api-key "${KIBANA_KEY}" \

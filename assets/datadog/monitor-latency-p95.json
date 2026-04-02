@@ -1,4 +1,5 @@
 {
+  "id": 91003,
   "name": "[Workshop] p95 latency regression",
   "type": "query alert",
   "query": "avg(last_10m):p95:trace.http.request.duration{service:sample-api} > 1.5",

@@ -58,12 +58,14 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   sleep "$WAIT_OTLP"
 fi
 
-ES_VALIDATE_ARGS=()
+# mig-to-kbn defaults --es-url from ES_URL in the environment (~/.bashrc). Empty strings on the CLI override that
+# so Kibana-only upload does not auto-enable live ES|QL validation (see datadog/grafana cli.py).
+ES_ES_ARGS=(--es-url "" --es-api-key "")
 if [ "${WORKSHOP_MIG_ES_VALIDATE:-0}" = "1" ]; then
-  ES_VALIDATE_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
+  ES_ES_ARGS=(--es-url "${ES_URL}" --es-api-key "${ES_API_KEY}" --validate)
   echo "==> [2/3] grafana-migrate (… + live ES|QL validation: WORKSHOP_MIG_ES_VALIDATE=1)..."
 else
-  echo "==> [2/3] grafana-migrate (Kibana-only upload; no --es-url — set WORKSHOP_MIG_ES_VALIDATE=1 for pre-upload ES|QL checks)..."
+  echo "==> [2/3] grafana-migrate (Kibana-only upload; ES_URL in env ignored for validation — WORKSHOP_MIG_ES_VALIDATE=1 to enable)..."
 fi
 "${GRAFANA_MIGRATE}" \
   --source files \
@@ -73,7 +75,7 @@ fi
   --data-view "metrics-*" \
   --esql-index "metrics-*" \
   --logs-index "logs-*" \
-  "${ES_VALIDATE_ARGS[@]}" \
+  "${ES_ES_ARGS[@]}" \
   --upload \
   --kibana-url "${KIBANA_URL}" \
   --kibana-api-key "${KIBANA_KEY}" \
