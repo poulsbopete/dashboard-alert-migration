@@ -57,6 +57,10 @@ METRICS_PER_DOC = int(os.environ.get("METRICS_PER_DOC", "100000"))
 DASHBOARD_YAML_DIR = os.environ.get("DASHBOARD_YAML_DIR", "datadog_migration_output/integrations/yaml")
 RECREATE_DATA_STREAMS = os.environ.get("RECREATE_DATA_STREAMS", "").strip() == "1"
 FIELD_PROFILE = os.environ.get("FIELD_PROFILE", "otel")
+MONITOR_EXAMPLE_ARTIFACT = os.environ.get(
+    "MONITOR_EXAMPLE_ARTIFACT",
+    "examples/alerting/monitors/datadog_monitors.json",
+)
 
 COUNTER_HINTS = {
     "_total", "_count", "_sum", "bytes_sent", "bytes_rcvd",
@@ -590,7 +594,7 @@ def _flush_batches(batches: list[bytes]) -> int:
 # Log data generation
 # ---------------------------------------------------------------------------
 
-def setup_logs_template(dimension_fields: set[str]):
+def setup_logs_template(dimension_fields: set[str], log_measure_fields: dict[str, str]):
     """Ensure the logs index has proper field mappings for log queries."""
     props: dict[str, Any] = {
         "@timestamp": {"type": "date"},
@@ -606,6 +610,8 @@ def setup_logs_template(dimension_fields: set[str]):
         "data_stream.dataset": {"type": "constant_keyword", "value": "generic"},
         "data_stream.namespace": {"type": "constant_keyword", "value": "default"},
     }
+    for field_name in sorted(log_measure_fields):
+        props[field_name] = {"type": "double"}
     for dim in sorted(dimension_fields):
         if dim.startswith("data_stream.") or dim in props:
             continue
@@ -626,7 +632,7 @@ def setup_logs_template(dimension_fields: set[str]):
     print(f"  Log template: {result.get('acknowledged', result)}")
 
 
-def generate_logs(dimension_fields: set[str]) -> int:
+def generate_logs(dimension_fields: set[str], log_measure_fields: dict[str, str]) -> int:
     total_points = int(min(DATA_HOURS * 60, 1000))
     now = datetime.datetime.now(datetime.timezone.utc)
     start = now - datetime.timedelta(hours=DATA_HOURS)
@@ -673,6 +679,10 @@ def generate_logs(dimension_fields: set[str]) -> int:
         }
         for dim, vals in dim_values.items():
             doc.setdefault(dim, vals[i % len(vals)])
+        for field_name in sorted(log_measure_fields):
+            base = 150 if "duration" in field_name.lower() or "latency" in field_name.lower() else (hash(field_name) % 300 + 25)
+            amplitude = max(base * 0.4, 10)
+            doc[field_name] = round(gauge_val(base, amplitude, ts.hour + ts.minute / 60.0), 4)
 
         action = json.dumps({"create": {"_index": LOGS_INDEX_NAME}})
         payload = json.dumps(doc)
@@ -706,6 +716,7 @@ def main():
     print(f"Data hours: {DATA_HOURS}, interval: {INTERVAL_SEC}s")
 
     metrics = extract_metrics_from_yaml(DASHBOARD_YAML_DIR)
+    log_measure_fields: dict[str, str] = {}
     if not metrics:
         print("\nNo metrics found in compiled YAML. Run the migration first:")
         print("  python -m observability_migration.adapters.source.datadog.cli --source files --input-dir infra/datadog/dashboards/integrations --output-dir datadog_migration_output/integrations --field-profile otel --compile")
@@ -718,42 +729,61 @@ def main():
 
     dimensions = extract_dimensions_from_yaml(DASHBOARD_YAML_DIR)
 
+    monitor_artifacts: list[Path] = []
     monitor_artifact = discover_monitor_artifact(DASHBOARD_YAML_DIR)
     if monitor_artifact is not None:
+        monitor_artifacts.append(monitor_artifact)
+    example_monitor_artifact = Path(MONITOR_EXAMPLE_ARTIFACT)
+    if example_monitor_artifact.exists():
+        monitor_artifacts.append(example_monitor_artifact)
+
+    if monitor_artifacts:
         field_map = load_profile(FIELD_PROFILE)
-        monitor_metrics, monitor_dimensions = load_monitor_seed_requirements(
-            monitor_artifact,
-            field_map,
-        )
-        for metric_name, metric_type in monitor_metrics.items():
-            if metric_name not in metrics:
-                metrics[metric_name] = metric_type
-            elif metrics[metric_name] == "gauge" and metric_type == "counter":
-                metrics[metric_name] = "counter"
-        dimensions |= monitor_dimensions
-        print(
-            f"\nLoaded monitor seed requirements from {monitor_artifact}: "
-            f"{len(monitor_metrics)} metrics, {len(monitor_dimensions)} dimensions"
-        )
+        for artifact in monitor_artifacts:
+            requirements = load_monitor_seed_requirements(
+                artifact,
+                field_map,
+            )
+            for metric_name, metric_type in requirements.metric_fields.items():
+                if metric_name not in metrics:
+                    metrics[metric_name] = metric_type
+                elif metrics[metric_name] == "gauge" and metric_type == "counter":
+                    metrics[metric_name] = "counter"
+            for field_name, metric_type in requirements.log_measure_fields.items():
+                if field_name not in log_measure_fields:
+                    log_measure_fields[field_name] = metric_type
+                elif log_measure_fields[field_name] == "gauge" and metric_type == "counter":
+                    log_measure_fields[field_name] = "counter"
+            dimensions |= requirements.dimensions
+            print(
+                f"\nLoaded monitor seed requirements from {artifact}: "
+                f"{len(requirements.metric_fields)} metric fields, "
+                f"{len(requirements.log_measure_fields)} log measure fields, "
+                f"{len(requirements.dimensions)} dimensions"
+            )
 
     known_fields = {"@timestamp", "host.name", "service.name",
                     "k8s.namespace.name", "k8s.pod.name", "k8s.node.name",
-                    "container.name", "container.id"} | set(metrics.keys())
+                    "container.name", "container.id"} | set(metrics.keys()) | set(log_measure_fields.keys())
     dimensions -= known_fields
     print(f"\nExtracted {len(dimensions)} dimension fields from queries")
     for d in sorted(dimensions)[:15]:
         print(f"  {d}")
     if len(dimensions) > 15:
         print(f"  ... and {len(dimensions) - 15} more")
+    if log_measure_fields:
+        print(f"\nLog measure fields: {len(log_measure_fields)}")
+        for field_name in sorted(log_measure_fields):
+            print(f"  {field_name} ({log_measure_fields[field_name]})")
 
     if RECREATE_DATA_STREAMS:
         _delete_data_stream(LOGS_INDEX_NAME)
         _delete_data_stream(INDEX_NAME)
 
     setup_index_template(metrics, dimensions)
-    setup_logs_template(dimensions)
+    setup_logs_template(dimensions, log_measure_fields)
     metric_errors = generate_and_ingest(metrics, dimensions)
-    log_errors = generate_logs(dimensions)
+    log_errors = generate_logs(dimensions, log_measure_fields)
 
     if metric_errors or log_errors:
         print(

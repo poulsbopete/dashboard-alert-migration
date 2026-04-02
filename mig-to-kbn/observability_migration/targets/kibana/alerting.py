@@ -302,6 +302,163 @@ def disable_rule(
         return False
 
 
+def collect_emitted_rule_payloads(*comparison_reports: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect emitted Kibana rule payloads from comparison report documents."""
+    collected: list[dict[str, Any]] = []
+    for report in comparison_reports:
+        if not isinstance(report, dict):
+            continue
+        for source_type in ("alerts", "monitors"):
+            rows = report.get(source_type)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                target = row.get("target")
+                if not isinstance(target, dict) or not target.get("payload_emitted"):
+                    continue
+                payload = target.get("rule_payload")
+                if not isinstance(payload, dict) or not payload:
+                    continue
+                collected.append(
+                    {
+                        "source_type": source_type,
+                        "alert_id": str(row.get("alert_id", "") or ""),
+                        "name": str(row.get("name", "") or payload.get("name", "") or "unnamed"),
+                        "kind": str(row.get("kind", "") or ""),
+                        "payload": payload,
+                    }
+                )
+    return collected
+
+
+def cleanup_rules(
+    kibana_url: str,
+    rule_ids: list[str],
+    *,
+    api_key: str = "",
+    space_id: str = "",
+    timeout: int = 15,
+    delete_rule_fn: Any | None = None,
+) -> dict[str, Any]:
+    """Delete a batch of rules and summarize boolean delete results."""
+    deleter = delete_rule_fn or delete_rule
+    deleted_count = 0
+    failed_rule_ids: list[str] = []
+    for rule_id in rule_ids:
+        ok = bool(
+            deleter(
+                kibana_url,
+                rule_id,
+                api_key=api_key,
+                space_id=space_id,
+                timeout=timeout,
+            )
+        )
+        if ok:
+            deleted_count += 1
+        else:
+            failed_rule_ids.append(rule_id)
+    return {
+        "deleted_count": deleted_count,
+        "failed_rule_ids": failed_rule_ids,
+    }
+
+
+def collect_migrated_rules(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return rules created by the migration workflow."""
+    migrated: list[dict[str, Any]] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        tags = rule.get("tags")
+        if not isinstance(tags, list):
+            tags = []
+        name = str(rule.get("name", "") or "")
+        if "obs-migration" in tags or name.startswith("[migrated]"):
+            migrated.append(rule)
+    return migrated
+
+
+def audit_migrated_rules(
+    kibana_url: str,
+    *,
+    api_key: str = "",
+    space_id: str = "",
+    timeout: int = 15,
+    per_page: int = 100,
+    max_pages: int = 20,
+    disable_enabled: bool = False,
+    list_rules_fn: Any | None = None,
+    disable_rule_fn: Any | None = None,
+) -> dict[str, Any]:
+    """List migrated rules and optionally disable the enabled subset."""
+    lister = list_rules_fn or list_rules
+    disabler = disable_rule_fn or disable_rule
+
+    all_rules: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        payload = lister(
+            kibana_url,
+            api_key=api_key,
+            space_id=space_id,
+            timeout=timeout,
+            per_page=per_page,
+            page=page,
+        )
+        if not isinstance(payload, dict):
+            break
+        page_rules = payload.get("data", [])
+        if not isinstance(page_rules, list) or not page_rules:
+            break
+        all_rules.extend(rule for rule in page_rules if isinstance(rule, dict))
+        total = int(payload.get("total", len(all_rules)) or len(all_rules))
+        if len(all_rules) >= total:
+            break
+
+    migrated_rules = collect_migrated_rules(all_rules)
+    enabled_migrated_rules = [rule for rule in migrated_rules if bool(rule.get("enabled"))]
+    disabled_migrated_rules = [rule for rule in migrated_rules if not bool(rule.get("enabled"))]
+
+    remediation = {
+        "requested": bool(disable_enabled),
+        "attempted_rule_ids": [],
+        "disabled_rule_ids": [],
+        "failed_rule_ids": [],
+    }
+    if disable_enabled:
+        for rule in enabled_migrated_rules:
+            rule_id = str(rule.get("id", "") or "")
+            if not rule_id:
+                continue
+            remediation["attempted_rule_ids"].append(rule_id)
+            ok = bool(
+                disabler(
+                    kibana_url,
+                    rule_id,
+                    api_key=api_key,
+                    space_id=space_id,
+                    timeout=timeout,
+                )
+            )
+            if ok:
+                remediation["disabled_rule_ids"].append(rule_id)
+            else:
+                remediation["failed_rule_ids"].append(rule_id)
+
+    return {
+        "total_rules_seen": len(all_rules),
+        "migrated_rules_seen": len(migrated_rules),
+        "migrated_rule_ids": [str(rule.get("id", "") or "") for rule in migrated_rules],
+        "enabled_migrated_rule_ids": [str(rule.get("id", "") or "") for rule in enabled_migrated_rules],
+        "disabled_migrated_rule_ids": [str(rule.get("id", "") or "") for rule in disabled_migrated_rules],
+        "enabled_migrated_rules": enabled_migrated_rules,
+        "disabled_migrated_rules": disabled_migrated_rules,
+        "remediation": remediation,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dry-run validation
 # ---------------------------------------------------------------------------
@@ -347,6 +504,10 @@ def validate_rule_payload(
 
 
 __all__ = [
+    "audit_migrated_rules",
+    "cleanup_rules",
+    "collect_emitted_rule_payloads",
+    "collect_migrated_rules",
     "create_connector",
     "create_rule",
     "delete_rule",

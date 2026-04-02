@@ -1,113 +1,65 @@
-# Alert Migration Examples
+# Alert Support Reporting
 
-This directory documents the current correctness-first alert migration boundary.
+This directory holds curated Grafana and Datadog alert/monitor example suites.
+The generated support standings derived from real tool output are written under
+`examples/alerting/generated/` as local artifacts and are intentionally ignored
+by git.
 
-## Supported Auto-Create
+## Source Of Truth
 
-### Grafana Unified Prometheus
+Do not hand-maintain the support matrix in this README.
 
-Source alert expression:
+Regenerate the current standings with:
 
-```text
-100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+```bash
+.venv/bin/python scripts/generate_alert_support_report.py
 ```
 
-Threshold step:
+Verify that every emitted alert payload uploads to Kibana disabled by default:
 
-```text
-> 80 for 5m
+```bash
+set -a && source serverless_creds.env && set +a
+.venv/bin/python scripts/verify_alert_rule_uploads.py
 ```
 
-Expected migration behavior:
+Audit existing migrated Kibana rules and optionally disable the enabled subset:
 
-- Extract as `grafana_unified`
-- Keep `automation_tier = draft_requires_review`
-- Create a Kibana `.es-query` rule
-- Preserve the source query through native `PROMQL ...`
-- Apply the original threshold in the target query
-
-### Datadog Metric / Query Alert
-
-Source monitor query:
-
-```text
-avg(last_5m):avg:system.cpu.user{env:production} by {host} > 90
+```bash
+set -a && source serverless_creds.env && set +a
+.venv/bin/python scripts/audit_migrated_rules.py
+# .venv/bin/python scripts/audit_migrated_rules.py --disable-enabled
 ```
 
-Expected migration behavior:
+Notes:
+- Audit-only mode exits non-zero when any migrated rules are still enabled.
+- `--disable-enabled` exits non-zero only if one or more disable attempts fail.
 
-- Extract as `datadog_metric`
-- Translate to a Kibana `.es-query` rule only when the active field profile maps `system.cpu.user` and `host` to real target fields
-- Preserve the threshold by filtering the translated ES|QL on `value > 90`
+Generated outputs land in the ignored local artifact directory:
 
-### Datadog Log Monitor
+- `examples/alerting/generated/alert_support_standings.md`
+- `examples/alerting/generated/alert_support_standings.json`
+- `examples/alerting/generated/grafana/alert_comparison_results.json`
+- `examples/alerting/generated/datadog/monitor_migration_results.json`
+- `examples/alerting/generated/datadog/monitor_comparison_results.json`
 
-Source monitor query:
+## Example Suites
 
-```text
-logs("status:error").index("main").rollup("count").last("5m") > 100
-```
+- Grafana file-based examples: `examples/alerting/grafana`
+- Datadog monitor examples: `examples/alerting/monitors/datadog_monitors.json`
+- The Datadog dashboard placeholder used for file-mode reporting is synthesized
+  by `scripts/generate_alert_support_report.py`; it is not a tracked source file.
+- Direct Datadog file-mode monitor runs expect monitor JSON under
+  `<input-dir>/monitors/` and at least one dashboard JSON in the same tree,
+  because the current CLI loads dashboards before monitor extraction.
 
-Expected migration behavior:
+## Purpose
 
-- Extract as `datadog_log`
-- Translate to a Kibana `.es-query` rule only when the mapped log fields exist in the target schema
-- Keep the result in `draft_requires_review` because Datadog log search semantics and Kibana log filtering still require human review
+The generated standings document should answer:
 
-## Extracted But Manual
+- Which alert families are currently `automated`
+- Which are only `draft_requires_review`
+- Which are `manual_required`
+- Which concrete example queries prove each current boundary
 
-### Grafana Legacy Panel Alert
-
-Source shape:
-
-```text
-panel.alert.conditions = [...]
-```
-
-Expected migration behavior:
-
-- Extract as `grafana_legacy`
-- Emit migration artifacts and review notes
-- Do not auto-create a Kibana rule unless a real translated query is attached
-
-### Grafana Unified Loki / LogQL
-
-Source alert expression:
-
-```text
-count_over_time({job=~".+"} |= "error" [5m])
-```
-
-Expected migration behavior:
-
-- Extract as `grafana_unified`
-- Record alert metadata and threshold details
-- Do not auto-create a Kibana rule yet
-
-### Datadog Metric Monitor
-
-Source monitor query:
-
-```text
-sum(last_15m):sum:pipelines.component_errors_total{...} by {component_type,component_id,host,worker_uuid} > 0
-```
-
-Expected migration behavior:
-
-- Extract as `datadog_metric`
-- Record monitor query, thresholds, and notification metadata
-- Do not auto-create a Kibana rule when the translated metric/tag fields are missing from the target schema
-
-### Datadog Log Monitor With Unsupported Shape
-
-Source monitor query:
-
-```text
-logs("status:error").index("main").rollup("count").last("5m") > 100
-```
-
-Expected migration behavior:
-
-- Extract as `datadog_log`
-- Record monitor query and thresholds
-- Do not auto-create a Kibana rule unless the log query shape and target schema are both verified as safe
+When the pipeline improves, regenerate the report and the document will show the
+new standing automatically.

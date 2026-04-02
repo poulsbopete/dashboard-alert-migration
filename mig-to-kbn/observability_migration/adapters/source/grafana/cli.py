@@ -37,7 +37,13 @@ from observability_migration.targets.kibana.serverless import (
 )
 from observability_migration.targets.kibana.smoke import run_smoke_report
 
-from .alerts import build_alert_migration_tasks, build_alert_summary, extract_alerts_from_dashboard
+from .alerts import (
+    build_alert_comparison_results,
+    build_alert_migration_results,
+    build_alert_migration_tasks,
+    build_alert_summary,
+    extract_alerts_from_dashboard,
+)
 from .annotations import build_annotations_summary, translate_annotations
 from .assistant import apply_review_explanations
 from .esql_validate import (
@@ -720,34 +726,49 @@ def main():
 
     if getattr(args, "fetch_alerts", False):
         print("\n  Extracting alerts...")
-        from observability_migration.adapters.source.grafana.extract import extract_all_alerting_resources
+        from observability_migration.adapters.source.grafana.extract import (
+            extract_all_alerting_resources,
+            extract_all_alerting_resources_from_files,
+        )
         from observability_migration.core.assets.alerting import (
             build_alerting_ir_from_grafana,
             build_alerting_ir_from_grafana_unified,
         )
         from observability_migration.core.mapping import map_alerts_batch
+        from observability_migration.targets.kibana.alerting import (
+            run_alerting_preflight,
+            validate_rule_payload,
+        )
 
         grafana_token = getattr(args, "grafana_token", "") or os.getenv("GRAFANA_TOKEN", "")
         all_alert_irs = []
+        raw_alert_inputs: list[dict[str, Any]] = []
 
         for result in results:
             legacy_tasks = getattr(result, "alert_migration_tasks", []) or []
             for task in legacy_tasks:
                 ir = build_alerting_ir_from_grafana(task)
                 all_alert_irs.append(ir)
+                raw_alert_inputs.append(dict(task))
 
+        unified: dict[str, Any] = {}
         if args.source == "api":
             unified = extract_all_alerting_resources(
                 GRAFANA_URL, user=GRAFANA_USER, password=GRAFANA_PASS, token=grafana_token,
             )
-            unified_rules = unified.get("alert_rules", [])
-            datasource_map = unified.get("datasources", {}) if isinstance(unified.get("datasources"), dict) else {}
-            unified_irs = []
-            for rule in unified_rules:
-                ir = build_alerting_ir_from_grafana_unified(rule, datasource_map=datasource_map)
-                unified_irs.append(ir)
-            all_alert_irs.extend(unified_irs)
+        else:
+            unified = extract_all_alerting_resources_from_files(args.input_dir)
 
+        unified_rules = unified.get("alert_rules", []) if isinstance(unified.get("alert_rules"), list) else []
+        datasource_map = unified.get("datasources", {}) if isinstance(unified.get("datasources"), dict) else {}
+        unified_irs = []
+        for rule in unified_rules:
+            ir = build_alerting_ir_from_grafana_unified(rule, datasource_map=datasource_map)
+            unified_irs.append(ir)
+            raw_alert_inputs.append(dict(rule))
+        all_alert_irs.extend(unified_irs)
+
+        if unified_rules or unified.get("contact_points") or unified.get("notification_policies") or unified.get("mute_timings") or unified.get("templates") or unified.get("datasources"):
             raw_dir = base_dir / "raw_alerts"
             raw_dir.mkdir(parents=True, exist_ok=True)
             import json as _alert_json
@@ -768,6 +789,28 @@ def main():
             all_alert_irs,
             data_view=getattr(args, "data_view", "metrics-*"),
         )
+        payload_validation_by_alert_id: dict[str, Any] = {}
+        if getattr(args, "kibana_url", ""):
+            payload_preflight = run_alerting_preflight(
+                args.kibana_url,
+                api_key=getattr(args, "kibana_api_key", "") or "",
+                space_id=getattr(args, "space_id", "") or "",
+            )
+            for item in mapping_batch.get("results", []):
+                payload = item.get("mapping", {}).get("rule_payload", {})
+                if not payload:
+                    continue
+                payload_validation_by_alert_id[str(item.get("alert_id", "") or "")] = validate_rule_payload(
+                    payload.get("rule_type_id", ""),
+                    payload.get("params", {}),
+                    payload_preflight,
+                )
+        alert_comparison = build_alert_comparison_results(
+            raw_alert_inputs,
+            all_alert_irs,
+            mapping_batch,
+            payload_validation_by_alert_id=payload_validation_by_alert_id,
+        )
 
         by_tier = mapping_batch["summary"]["by_automation_tier"]
         by_kind = {}
@@ -778,18 +821,20 @@ def main():
         import json as _alert_json2
         with alert_results_path.open("w") as fh:
             _alert_json2.dump(
-                {
-                    "total": total_alerts,
-                    "legacy_alerts": total_legacy,
-                    "unified_alerts": total_unified,
-                    "by_automation_tier": by_tier,
-                    "by_kind": by_kind,
-                    "alerts": [ir.to_dict() for ir in all_alert_irs],
-                },
+                build_alert_migration_results(
+                    all_alert_irs,
+                    total_alerts=total_alerts,
+                    total_legacy=total_legacy,
+                    total_unified=total_unified,
+                ),
                 fh,
                 indent=2,
             )
         print(f"    Alert migration results: {alert_results_path}")
+        alert_comparison_path = base_dir / "alert_comparison_results.json"
+        with alert_comparison_path.open("w") as fh:
+            _alert_json2.dump(alert_comparison, fh, indent=2)
+        print(f"    Alert comparison results: {alert_comparison_path}")
         print(f"    Total: {total_alerts} (legacy={total_legacy}, unified={total_unified})")
         print(f"    By tier: {by_tier}")
 

@@ -45,6 +45,7 @@ htmlcov/
 migration_output*/
 datadog_migration_output*/
 audit_output/
+examples/alerting/generated/
 
 # Validation run artifacts
 validation/local_otlp_sample_run/
@@ -53,4 +54,5 @@ validation/migration_fresh_run/
 # Credentials
 serverless_creds.env
 datadog_creds.env
+grafana_creds.env
 *.creds.env

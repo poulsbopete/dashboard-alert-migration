@@ -7,8 +7,11 @@ operational envelope without faking a universal condition AST.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone as dt_timezone
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .status import AssetStatus
 
@@ -49,7 +52,11 @@ class AlertingIR:
     source_extension: dict[str, Any] = field(default_factory=dict)
 
     automation_tier: str = ""  # "automated", "draft_requires_review", "manual_required"
-    target_rule_type: str = ""  # e.g. "es-query", "index-threshold", "custom-threshold"
+    target_rule_type: str = ""  # emitted rule type, e.g. "es-query", "index-threshold"
+    selected_target_rule_type: str = ""  # candidate rule type before emission checks
+    payload_emitted: bool = False
+    payload_status: str = ""  # emitted, blocked_manual_review, blocked_no_source_faithful_query, ...
+    payload_status_reason: str = ""
     target_rule_payload: dict[str, Any] = field(default_factory=dict)
     target_connector_refs: list[str] = field(default_factory=list)
     schedule_interval: str = ""  # e.g. "1m", "5m"
@@ -84,6 +91,8 @@ def build_alerting_ir_from_grafana(alert_task: dict[str, Any]) -> AlertingIR:
             "exec_error_state": alert_task.get("exec_error_state", ""),
             "pending_for": alert_task.get("pending_for", ""),
             "conditions": alert_task.get("conditions", []),
+            "source_queries": list(alert_task.get("source_queries", []) or []),
+            "datasource_map": dict(alert_task.get("datasource_map", {}) or {}),
         },
     )
 
@@ -91,10 +100,27 @@ def build_alerting_ir_from_grafana(alert_task: dict[str, Any]) -> AlertingIR:
 def _parse_datadog_query_time_window(query: str) -> str:
     if not query:
         return ""
-    m = _REL_LAST_RE.search(query)
+    query_text = str(query or "").strip()
+    change_match = re.search(
+        r"^(?:change|pct_change)\(\s*(?:avg|sum|min|max)\(\s*(last_\d+\s*[smhdw])\s*\)\s*,\s*((?:last_)?\d+\s*[smhdw](?:_ago)?)\s*\)",
+        query_text,
+        re.IGNORECASE,
+    )
+    if change_match:
+        total_seconds = (
+            _datadog_span_to_seconds(change_match.group(1))
+            + _datadog_span_to_seconds(change_match.group(2))
+        )
+        return _datadog_seconds_to_window(total_seconds)
+    m = _REL_LAST_RE.search(query_text)
     if not m:
         return ""
-    return (m.group(1) or m.group(2) or "").replace(" ", "")
+    base_window = (m.group(1) or m.group(2) or "").replace(" ", "")
+    shift_seconds = _datadog_formula_shift_seconds(query_text)
+    if shift_seconds <= 0:
+        return base_window
+    total_seconds = _datadog_span_to_seconds(base_window) + shift_seconds
+    return _datadog_seconds_to_window(total_seconds)
 
 
 def _datadog_kind(monitor_type: str) -> str:
@@ -111,6 +137,194 @@ def _datadog_kind(monitor_type: str) -> str:
         return "datadog_monitor"
     safe = re.sub(r"[^a-z0-9]+", "_", t).strip("_")
     return f"datadog_{safe}"
+
+
+def _datadog_span_to_seconds(raw: str) -> int:
+    match = re.fullmatch(
+        r"(?:last_)?(?P<amount>\d+)\s*(?P<unit>[smhdw])(?:_ago)?",
+        str(raw or "").strip(),
+        re.IGNORECASE,
+    )
+    if not match:
+        return 0
+    amount = int(match.group("amount"))
+    unit = str(match.group("unit") or "").lower()
+    unit_seconds = {
+        "s": 1,
+        "m": 60,
+        "h": 3600,
+        "d": 86400,
+        "w": 604800,
+    }
+    return amount * unit_seconds.get(unit, 0)
+
+
+def _datadog_formula_shift_seconds(query: str) -> int:
+    query_text = str(query or "")
+    shift_seconds = 0
+    for token, seconds in {
+        "hour_before(": 3600,
+        "day_before(": 86400,
+        "week_before(": 7 * 86400,
+        "month_before(": 28 * 86400,
+    }.items():
+        if token in query_text.lower():
+            shift_seconds = max(shift_seconds, seconds)
+    for match in re.finditer(
+        r"timeshift\([^,]+,\s*(-?\d+(?:\.\d+)?)\s*\)",
+        query_text,
+        re.IGNORECASE,
+    ):
+        try:
+            shift_seconds = max(shift_seconds, int(abs(float(match.group(1)))))
+        except (TypeError, ValueError):
+            continue
+    search_from = 0
+    lowered = query_text.lower()
+    marker = "calendar_shift("
+    while True:
+        start = lowered.find(marker, search_from)
+        if start < 0:
+            break
+        end = _find_matching_call_paren(query_text, start + len(marker) - 1)
+        if end < 0:
+            break
+        args = _split_balanced_args(query_text[start + len(marker):end])
+        if len(args) == 3:
+            shift_seconds = max(
+                shift_seconds,
+                _datadog_calendar_shift_seconds(args[1], args[2]),
+            )
+        search_from = end + 1
+    return shift_seconds
+
+
+def _find_matching_call_paren(text: str, open_paren_index: int) -> int:
+    depth = 0
+    brace_depth = 0
+    in_quote = False
+    quote_char = ""
+    for idx in range(open_paren_index, len(text)):
+        ch = text[idx]
+        if ch in ('"', "'") and not in_quote:
+            in_quote = True
+            quote_char = ch
+            continue
+        if in_quote and ch == quote_char:
+            in_quote = False
+            continue
+        if in_quote:
+            continue
+        if ch == "{":
+            brace_depth += 1
+            continue
+        if ch == "}":
+            brace_depth = max(brace_depth - 1, 0)
+            continue
+        if ch == "(":
+            depth += 1
+            continue
+        if ch == ")" and brace_depth == 0:
+            depth -= 1
+            if depth == 0:
+                return idx
+    return -1
+
+
+def _split_balanced_args(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    paren_depth = 0
+    brace_depth = 0
+    in_quote = False
+    quote_char = ""
+    for ch in text:
+        if ch in ('"', "'") and not in_quote:
+            in_quote = True
+            quote_char = ch
+            current.append(ch)
+            continue
+        if in_quote and ch == quote_char:
+            in_quote = False
+            current.append(ch)
+            continue
+        if in_quote:
+            current.append(ch)
+            continue
+        if ch == "(":
+            paren_depth += 1
+            current.append(ch)
+            continue
+        if ch == ")":
+            paren_depth = max(paren_depth - 1, 0)
+            current.append(ch)
+            continue
+        if ch == "{":
+            brace_depth += 1
+            current.append(ch)
+            continue
+        if ch == "}":
+            brace_depth = max(brace_depth - 1, 0)
+            current.append(ch)
+            continue
+        if ch == "," and paren_depth == 0 and brace_depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(ch)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
+
+def _datadog_calendar_shift_seconds(raw_shift: str, raw_timezone: str) -> int:
+    timezone_name = str(raw_timezone or "").strip().strip("'\"")
+    if not _datadog_calendar_shift_timezone_is_exact(timezone_name):
+        return 0
+    shift = str(raw_shift or "").strip().strip("'\"")
+    match = re.fullmatch(r"-(?P<amount>\d+)(?P<unit>d|w|mo)", shift, re.IGNORECASE)
+    if not match:
+        return 0
+    amount = int(match.group("amount"))
+    unit = str(match.group("unit") or "").lower()
+    if unit == "d":
+        return amount * 86400
+    if unit == "w":
+        return amount * 7 * 86400
+    if unit == "mo":
+        return amount * 32 * 86400
+    return 0
+
+
+@lru_cache(maxsize=None)
+def _datadog_calendar_shift_timezone_is_exact(timezone_name: str) -> bool:
+    normalized = str(timezone_name or "").strip()
+    if not normalized:
+        return False
+    if normalized.upper() == "UTC":
+        return True
+    try:
+        tzinfo = ZoneInfo(normalized)
+    except ZoneInfoNotFoundError:
+        return False
+
+    current_year = datetime.now(dt_timezone.utc).year
+    offsets = {
+        datetime(year, month, 15, 12, 0, tzinfo=dt_timezone.utc).astimezone(tzinfo).utcoffset()
+        for year in range(current_year - 1, current_year + 11)
+        for month in range(1, 13)
+    }
+    return len(offsets) == 1
+
+
+def _datadog_seconds_to_window(total_seconds: int) -> str:
+    if total_seconds <= 0:
+        return ""
+    if total_seconds % 3600 == 0:
+        return f"{total_seconds // 3600}h"
+    if total_seconds % 60 == 0:
+        return f"{total_seconds // 60}m"
+    return f"{total_seconds}s"
 
 
 def _datadog_automation_tier(monitor_type: str) -> str:

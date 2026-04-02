@@ -45,7 +45,7 @@ Datadog-specific field/filter handling.
 | Validation / smoke | First-class `--validate --es-url` and post-upload `--smoke` |
 | Verification packets | First-class semantic gates and packets, with live metric source execution where configured |
 | Manifest / rollout | First-class `migration_manifest.json` and `rollout_plan.json` |
-| Monitors | First-class extraction; safe auto-create only for a narrow field-cap-validated subset |
+| Monitors | First-class extraction; emits and validates Kibana rule payloads for a narrow field-cap-validated subset |
 
 ### Live Extraction Scope
 
@@ -57,7 +57,7 @@ The current API path:
 - can also pull monitor objects from the Datadog Monitors API when `--fetch-monitors` is used
 - requires the optional `datadog-api-client` dependency (`.venv/bin/pip install -e ".[datadog]"`)
 - supports `--env-file` and optional `--dashboard-ids` on the dedicated CLI
-- in unified mode, still uses the Datadog CLI's default credential loading (`DD_API_KEY`, `DD_APP_KEY`, optional `DD_SITE`, or a default `datadog_creds.env` file in the working directory), even though unified does not expose `--env-file` directly
+- in unified mode, also exposes `--env-file`, but still does not expose the dedicated Datadog `--dashboard-ids` selector
 - uses the dashboard list returned by the Datadog API when no dashboard ID list is supplied
 
 Widgets, formulas, and event-marker details are normalized from the dashboard
@@ -293,7 +293,8 @@ Use that doc for:
 - `--validate`: validate emitted ES|QL against Elasticsearch, apply shared safe fixes when possible, and downgrade broken widgets to placeholders before compile/upload.
 - `--env-file`: loads Datadog API credentials for API extraction and for live metric source execution during verification.
 - `--source api --dashboard-ids ...`: pull dashboard objects directly from Datadog with explicit dashboard scoping on the dedicated CLI.
-- unified `--input-mode api`: pull dashboards through the same API path, but rely on the Datadog CLI's default credential loading (`DD_*` env vars or `datadog_creds.env`) instead of exposing dedicated `--env-file` / `--dashboard-ids` flags.
+- `--fetch-monitors`: extract monitor objects and write `monitor_migration_results.json`, `monitor_comparison_results.json`, and `monitor_verification_results.json`. In file mode, keep the monitor JSON under `<input-dir>/monitors/` and include at least one dashboard JSON in the same tree because the CLI loads dashboards before monitor extraction.
+- unified `--input-mode api`: pull dashboards through the same API path and forward `--env-file`, but explicit dashboard scoping via `--dashboard-ids` remains a dedicated-CLI feature.
 - `obs-migrate extensions --source datadog`: print the shared extension catalog, including current field-profile surfaces and the planned plugin contract.
 - `examples/cue/datadog-field-profile.cue`: optional CUE authoring example for composing profiles before exporting back to YAML.
 - `--compile`: compile generated YAML to NDJSON through the shared Kibana target runtime.
@@ -338,9 +339,9 @@ Preflight is already executable and reported, but it is not yet exposed through 
 - The Datadog migrate flow now supports first-class preflight, validate, compile, upload, smoke validation, migration manifest and rollout outputs, and verification packets.
 - Live target `_field_caps` and emitted-query validation are integrated, but the safe-fix validation helper still reuses shared logic that currently lives in the Grafana-side module layout.
 - Verification can now execute simple Datadog metric queries live for measured source-vs-target comparison, but logs and multi-query metric widgets still fall back to target/runtime evidence.
-- Datadog monitors are first-class extraction inputs, but auto-created Kibana rules are intentionally limited to monitor shapes we can parse faithfully and verify against the configured field profile plus live target `_field_caps`.
+- Datadog monitors are first-class extraction inputs, but the main Datadog migration command currently stops at emitted/validated Kibana rule payloads for monitor shapes we can parse faithfully and verify against the configured field profile plus live target `_field_caps`.
 - Broader Datadog product surfaces such as drilldowns, APM, RUM, network, security, and CI are still not first-class migration inputs.
-- Unified `obs-migrate migrate --input-mode api` still uses the Datadog CLI's default credential loading (`DD_*` env vars or `datadog_creds.env`), but it does not expose the dedicated Datadog `--env-file` or `--dashboard-ids` flags.
+- Unified `obs-migrate migrate --input-mode api` forwards `--env-file`, but it still does not expose the dedicated Datadog `--dashboard-ids` flag.
 
 ## Adapter Location
 

@@ -343,10 +343,120 @@ def extract_all_alerting_resources(grafana_url, user="", password="", token=""):
     }
 
 
+def _load_json_file_if_present(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"  WARN: Could not parse {path}: {exc}")
+        return None
+
+
+def _normalize_file_datasources(raw: Any) -> dict[str, dict[str, str]]:
+    datasources: dict[str, dict[str, str]] = {}
+    items: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        items = [item for item in raw if isinstance(item, dict)]
+    elif isinstance(raw, dict):
+        if isinstance(raw.get("datasources"), list):
+            items = [item for item in raw["datasources"] if isinstance(item, dict)]
+        else:
+            for uid, meta in raw.items():
+                if isinstance(meta, dict):
+                    items.append({"uid": uid, **meta})
+    for item in items:
+        uid = str(item.get("uid", "") or "")
+        if not uid:
+            continue
+        datasources[uid] = {
+            "uid": uid,
+            "type": str(item.get("type", "") or ""),
+            "name": str(item.get("name", "") or ""),
+        }
+    return datasources
+
+
+def _normalize_file_alert_rules(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    if isinstance(raw, dict) and isinstance(raw.get("alert_rules"), list):
+        return [item for item in raw["alert_rules"] if isinstance(item, dict)]
+    return []
+
+
+def _normalize_file_list(raw: Any, key: str) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    if isinstance(raw, dict) and isinstance(raw.get(key), list):
+        return [item for item in raw[key] if isinstance(item, dict)]
+    return []
+
+
+def _normalize_file_dict(raw: Any, key: str) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        if isinstance(raw.get(key), dict):
+            return dict(raw.get(key) or {})
+        return dict(raw)
+    return {}
+
+
+def extract_all_alerting_resources_from_files(directory: str) -> dict[str, Any]:
+    """Load unified alerting provisioning resources from local JSON files."""
+    root = Path(directory)
+    alerts_dir = root / "alerts"
+    search_dirs = [alerts_dir, root]
+
+    def _first_present(names: list[str]) -> Any:
+        for base in search_dirs:
+            for name in names:
+                raw = _load_json_file_if_present(base / name)
+                if raw is not None:
+                    return raw
+        return None
+
+    alert_rules_raw = _first_present([
+        "grafana_alert_rules.json",
+        "alert_rules.json",
+        "unified_alert_rules.json",
+    ])
+    contact_points_raw = _first_present([
+        "grafana_contact_points.json",
+        "contact_points.json",
+    ])
+    notification_policies_raw = _first_present([
+        "grafana_notification_policies.json",
+        "notification_policies.json",
+        "policies.json",
+    ])
+    mute_timings_raw = _first_present([
+        "grafana_mute_timings.json",
+        "mute_timings.json",
+    ])
+    templates_raw = _first_present([
+        "grafana_templates.json",
+        "templates.json",
+    ])
+    datasources_raw = _first_present([
+        "grafana_datasources.json",
+        "datasources.json",
+    ])
+
+    return {
+        "alert_rules": _normalize_file_alert_rules(alert_rules_raw),
+        "contact_points": _normalize_file_list(contact_points_raw, "contact_points"),
+        "notification_policies": _normalize_file_dict(notification_policies_raw, "notification_policies"),
+        "mute_timings": _normalize_file_list(mute_timings_raw, "mute_timings"),
+        "templates": _normalize_file_list(templates_raw, "templates"),
+        "datasources": _normalize_file_datasources(datasources_raw),
+    }
+
+
 __all__ = [
     "_cleanup_markdown_text_panel_content",
     "_normalize_text_panel_content",
     "extract_all_alerting_resources",
+    "extract_all_alerting_resources_from_files",
     "extract_datasources",
     "extract_dashboards_from_files",
     "extract_dashboards_from_grafana",

@@ -15,6 +15,147 @@ def _maybe_to_dict(value: Any) -> Any:
     return value
 
 
+def _append_unique(items: list[str], value: str) -> None:
+    if value and value not in items:
+        items.append(value)
+
+
+def build_monitor_migration_results(monitor_irs: list[Any]) -> dict[str, Any]:
+    """Build the raw monitor migration results artifact."""
+    by_tier: dict[str, int] = {}
+    by_kind: dict[str, int] = {}
+    by_target_rule_type: dict[str, int] = {}
+    by_selected_target_rule_type: dict[str, int] = {}
+
+    for ir in monitor_irs:
+        tier = str(getattr(ir, "automation_tier", "") or "")
+        if tier:
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+
+        kind = str(getattr(ir, "kind", "") or "")
+        if kind:
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+
+        target_rule_type = str(getattr(ir, "target_rule_type", "") or "")
+        if target_rule_type:
+            by_target_rule_type[target_rule_type] = by_target_rule_type.get(target_rule_type, 0) + 1
+
+        selected_target_rule_type = str(getattr(ir, "selected_target_rule_type", "") or "")
+        if selected_target_rule_type:
+            by_selected_target_rule_type[selected_target_rule_type] = (
+                by_selected_target_rule_type.get(selected_target_rule_type, 0) + 1
+            )
+
+    return {
+        "total": len(monitor_irs),
+        "by_automation_tier": by_tier,
+        "by_target_rule_type": by_target_rule_type,
+        "by_selected_target_rule_type": by_selected_target_rule_type,
+        "by_kind": by_kind,
+        "monitors": [ir.to_dict() for ir in monitor_irs],
+    }
+
+
+def build_monitor_comparison_results(
+    raw_monitors: list[dict[str, Any]],
+    monitor_irs: list[Any],
+    mapping_batch: dict[str, Any],
+    *,
+    payload_validation_by_alert_id: dict[str, Any] | None = None,
+    verification_by_alert_id: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a review-friendly source-vs-target artifact for Datadog monitors."""
+    mapping_results = mapping_batch.get("results", []) if isinstance(mapping_batch, dict) else []
+    summary = mapping_batch.get("summary", {}) if isinstance(mapping_batch, dict) else {}
+    payload_validation_lookup = payload_validation_by_alert_id or {}
+    verification_lookup = verification_by_alert_id or {}
+
+    monitors: list[dict[str, Any]] = []
+    for idx, ir in enumerate(monitor_irs):
+        raw = raw_monitors[idx] if idx < len(raw_monitors) and isinstance(raw_monitors[idx], dict) else {}
+        mapping_entry = mapping_results[idx]["mapping"] if idx < len(mapping_results) else {}
+        target_payload = mapping_entry.get("rule_payload", {}) if isinstance(mapping_entry, dict) else {}
+        validation_errors = list(mapping_entry.get("validation_errors", []) or []) if isinstance(mapping_entry, dict) else []
+        automation_tier = mapping_entry.get("automation_tier", "") if isinstance(mapping_entry, dict) else ""
+        blocked_reasons: list[str] = []
+
+        if not getattr(ir, "translated_query", "") or automation_tier == "manual_required":
+            for warning in getattr(ir, "warnings", []) or []:
+                _append_unique(blocked_reasons, str(warning))
+        for error in validation_errors:
+            _append_unique(blocked_reasons, str(error))
+
+        source_options = raw.get("options")
+        if not isinstance(source_options, dict):
+            source_options = (
+                getattr(ir, "source_extension", {}).get("options", {})
+                if isinstance(getattr(ir, "source_extension", {}), dict)
+                else {}
+            )
+        source_tags = raw.get("tags")
+        if not isinstance(source_tags, list):
+            source_tags = list(getattr(ir, "metadata", {}).get("tags", []) or [])
+
+        monitor_row = {
+            "alert_id": getattr(ir, "alert_id", ""),
+            "name": getattr(ir, "name", ""),
+            "kind": getattr(ir, "kind", ""),
+            "source": {
+                "type": raw.get("type", "") or getattr(ir, "metadata", {}).get("datadog_type", ""),
+                "query": raw.get("query", "") or getattr(ir, "source_extension", {}).get("query", ""),
+                "options": source_options,
+                "message": raw.get("message", "") or getattr(ir, "source_extension", {}).get("message", ""),
+                "tags": source_tags,
+            },
+            "translation": {
+                "query": getattr(ir, "translated_query", ""),
+                "provenance": getattr(ir, "translated_query_provenance", ""),
+                "warnings": list(getattr(ir, "warnings", []) or []),
+                "group_by": list(getattr(ir, "group_by", []) or []),
+            },
+            "target": {
+                "automation_tier": automation_tier,
+                "target_rule_type": mapping_entry.get("target_rule_type", "") if isinstance(mapping_entry, dict) else "",
+                "selected_target_rule_type": (
+                    mapping_entry.get("selected_target_rule_type", "") if isinstance(mapping_entry, dict) else ""
+                ),
+                "payload_emitted": (
+                    bool(mapping_entry.get("payload_emitted")) if isinstance(mapping_entry, dict) else bool(target_payload)
+                ),
+                "payload_status": mapping_entry.get("payload_status", "") if isinstance(mapping_entry, dict) else "",
+                "payload_status_reason": (
+                    mapping_entry.get("payload_status_reason", "") if isinstance(mapping_entry, dict) else ""
+                ),
+                "rule_payload": target_payload,
+                "valid": bool(mapping_entry.get("valid")) if isinstance(mapping_entry, dict) else False,
+                "validation_errors": validation_errors,
+                "payload_validation": payload_validation_lookup.get(str(getattr(ir, "alert_id", "") or ""), {}),
+            },
+            "semantic_losses": list(mapping_entry.get("losses", []) or []) if isinstance(mapping_entry, dict) else [],
+            "blocked_reasons": blocked_reasons,
+        }
+        verification_entry = verification_lookup.get(str(getattr(ir, "alert_id", "") or ""))
+        if verification_entry:
+            monitor_row["verification"] = verification_entry
+        monitors.append(monitor_row)
+
+    by_kind: dict[str, int] = {}
+    for ir in monitor_irs:
+        kind = str(getattr(ir, "kind", "") or "")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+
+    return {
+        "total": len(monitors),
+        "summary": {
+            "by_automation_tier": dict(summary.get("by_automation_tier", {}) or {}),
+            "by_target_rule_type": dict(summary.get("by_target_rule_type", {}) or {}),
+            "by_selected_target_rule_type": dict(summary.get("by_selected_target_rule_type", {}) or {}),
+            "by_kind": by_kind,
+        },
+        "monitors": monitors,
+    }
+
+
 def print_report(results: list[DashboardResult]) -> None:
     """Print a human-readable migration report to stdout."""
     total_widgets = 0

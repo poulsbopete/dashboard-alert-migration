@@ -26,16 +26,27 @@ DRAFT_REVIEW_KINDS = {"grafana_unified", "datadog_log"}
 MANUAL_ONLY_KINDS = {
     "datadog_composite",
     "datadog_service_check",
+    # Keep both historic short names and the current _datadog_kind() outputs.
     "datadog_event",
+    "datadog_event_alert",
     "datadog_rum",
+    "datadog_rum_alert",
     "datadog_apm",
+    "datadog_apm_alert",
     "datadog_synthetics",
+    "datadog_synthetics_alert",
     "datadog_ci",
+    "datadog_ci_alert",
     "datadog_slo",
+    "datadog_slo_alert",
     "datadog_audit",
+    "datadog_audit_alert",
     "datadog_cost",
+    "datadog_cost_alert",
     "datadog_network",
+    "datadog_network_alert",
     "datadog_watchdog",
+    "datadog_watchdog_alert",
     "datadog_forecast",
     "datadog_outlier",
     "datadog_anomaly_alert",
@@ -56,6 +67,8 @@ def classify_automation_tier(ir: AlertingIR) -> str:
         return "manual_required"
 
     if ir.kind == "grafana_unified":
+        if _grafana_unified_is_strict_exact_query_subset(ir):
+            return "automated"
         if _has_source_faithful_query(ir):
             return "draft_requires_review"
         return "manual_required"
@@ -63,11 +76,15 @@ def classify_automation_tier(ir: AlertingIR) -> str:
     if ir.kind == "datadog_metric":
         if not _has_source_faithful_query(ir):
             return "manual_required"
+        if ir.warnings:
+            return "manual_required"
         if _has_simple_threshold_condition(ir):
             return "automated"
         return "draft_requires_review"
 
     if ir.kind == "datadog_log":
+        if ir.warnings:
+            return "manual_required"
         if _has_source_faithful_query(ir):
             return "draft_requires_review"
         return "manual_required"
@@ -87,13 +104,10 @@ def _has_simple_threshold_condition(ir: AlertingIR) -> bool:
         if not conditions:
             alert_type = ext.get("alert_type", "")
             return alert_type == "legacy"
-        for cond in conditions:
-            if not isinstance(cond, dict):
-                return False
-            eval_type = str(cond.get("evaluator_type", "")).lower()
-            if eval_type not in ("gt", "lt", "within_range", "outside_range"):
-                return False
-        return True
+        if len(conditions) != 1:
+            return False
+        condition = conditions[0]
+        return isinstance(condition, dict) and bool(_legacy_condition_where_clause(condition))
 
     if ir.kind == "datadog_metric":
         query = ir.condition_summary or ""
@@ -102,6 +116,95 @@ def _has_simple_threshold_condition(ir: AlertingIR) -> bool:
         return True
 
     return False
+
+
+def _normalized_no_data_policy(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def _grafana_unified_no_data_is_exact(ir: AlertingIR) -> bool:
+    return _normalized_no_data_policy(ir.no_data_policy) in {"", "ok"}
+
+
+def _grafana_safe_label_tags(labels: Any) -> list[str] | None:
+    if labels is None:
+        return []
+    if not isinstance(labels, dict):
+        return None
+
+    tags: list[str] = []
+    for key, value in sorted(labels.items()):
+        key_text = str(key or "").strip()
+        value_text = str(value or "").strip()
+        if not key_text or not value_text:
+            return None
+        if any(token in key_text or token in value_text for token in ("{{", "}}", "$", "{", "}")):
+            return None
+        tags.append(f"grafana_label:{key_text}={value_text}")
+    return tags
+
+
+def _grafana_unified_is_strict_exact_query_subset(ir: AlertingIR) -> bool:
+    if ir.kind != "grafana_unified":
+        return False
+    if not _has_source_faithful_query(ir):
+        return False
+    translated_provenance = str(
+        ir.translated_query_provenance or ir.metadata.get("translated_query_provenance", "")
+    ).strip().lower()
+    if translated_provenance and translated_provenance not in {"native_promql", "translated_esql"}:
+        return False
+    if not _grafana_unified_no_data_is_exact(ir):
+        return False
+    if not _has_explicit_threshold(ir):
+        return False
+
+    ext = ir.source_extension or {}
+    source_queries = ext.get("source_queries")
+    if not isinstance(source_queries, list) or len(source_queries) != 1:
+        return False
+    data = ext.get("data")
+    if not isinstance(data, list) or _grafana_unified_has_complex_expression_graph(data):
+        return False
+
+    if _grafana_safe_label_tags(ext.get("labels")) is None:
+        return False
+
+    annotations = ext.get("annotations")
+    if isinstance(annotations, dict) and (
+        annotations.get("__dashboardUid__") or annotations.get("__panelId__")
+    ):
+        return False
+
+    return True
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _legacy_condition_where_clause(condition: dict[str, Any]) -> str:
+    eval_type = str(condition.get("evaluator_type", "")).lower()
+    params = condition.get("evaluator_params", []) if isinstance(condition.get("evaluator_params"), list) else []
+    comp_map = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}
+    if eval_type in comp_map:
+        threshold = _coerce_float(params[0] if params else None)
+        if threshold is None:
+            return ""
+        return f"value {comp_map[eval_type]} {threshold}"
+
+    if eval_type not in {"within_range", "outside_range"} or len(params) < 2:
+        return ""
+    lower = _coerce_float(params[0])
+    upper = _coerce_float(params[1])
+    if lower is None or upper is None or lower > upper:
+        return ""
+    if eval_type == "within_range":
+        return f"value >= {lower} AND value <= {upper}"
+    return f"value < {lower} OR value > {upper}"
 
 
 def _primary_source_query(ir: AlertingIR) -> dict[str, str]:
@@ -166,6 +269,14 @@ def _source_query_language(source_query: dict[str, str]) -> str:
 def _has_explicit_threshold(ir: AlertingIR) -> bool:
     ext = ir.source_extension or {}
 
+    if ir.kind == "grafana_legacy":
+        raw_conditions = ext.get("conditions")
+        conditions: list[Any] = raw_conditions if isinstance(raw_conditions, list) else []
+        if len(conditions) != 1:
+            return False
+        condition = conditions[0]
+        return isinstance(condition, dict) and bool(_legacy_condition_where_clause(condition))
+
     if ir.kind == "grafana_unified":
         data_list = ext.get("data")
         if not isinstance(data_list, list):
@@ -205,6 +316,147 @@ def _default_promql_index(data_view: str) -> str:
     return index
 
 
+def _grafana_unified_simple_threshold_where_clause(ir: AlertingIR) -> str:
+    ext = ir.source_extension or {}
+    data_list = ext.get("data")
+    if not isinstance(data_list, list):
+        return ""
+    comp_map = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue
+        raw_model = item.get("model")
+        model = raw_model if isinstance(raw_model, dict) else {}
+        if model.get("type") != "threshold":
+            continue
+        conditions = model.get("conditions")
+        if not isinstance(conditions, list) or len(conditions) != 1:
+            return ""
+        condition = conditions[0]
+        if not isinstance(condition, dict):
+            return ""
+        raw_evaluator = condition.get("evaluator")
+        evaluator = raw_evaluator if isinstance(raw_evaluator, dict) else {}
+        comparator = comp_map.get(str(evaluator.get("type", "") or "").strip().lower())
+        if not comparator:
+            return ""
+        params = evaluator.get("params")
+        threshold = _coerce_float(params[0] if isinstance(params, list) and params else None)
+        if threshold is None:
+            return ""
+        return f"value {comparator} {threshold}"
+    return ""
+
+
+def _grafana_unified_primary_source_model(ir: AlertingIR) -> dict[str, Any]:
+    ext = ir.source_extension or {}
+    data_list = ext.get("data")
+    if not isinstance(data_list, list):
+        return {}
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue
+        datasource_uid = str(item.get("datasourceUid", "") or "").strip()
+        if not datasource_uid or datasource_uid in {"__expr__", "-100"}:
+            continue
+        raw_model = item.get("model")
+        return raw_model if isinstance(raw_model, dict) else {}
+    return {}
+
+
+def _grafana_unified_source_is_instant_like(ir: AlertingIR) -> bool:
+    model = _grafana_unified_primary_source_model(ir)
+    if not model:
+        return False
+    return bool(model.get("instant")) or ("range" in model and model.get("range") is False)
+
+
+def _promql_rank_limit(expr: str, agg_name: str) -> int | None:
+    match = re.match(
+        rf"^\s*{re.escape(agg_name)}(?:\s+(?:by|without)\s*\([^)]*\))?\s*\(\s*(\d+)\s*,",
+        str(expr or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    try:
+        limit = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    return limit if limit > 0 else None
+
+
+def _grafana_unified_exact_topk_bottomk_spec(ir: AlertingIR) -> dict[str, Any] | None:
+    if ir.kind != "grafana_unified":
+        return None
+
+    ext = ir.source_extension or {}
+    data = ext.get("data")
+    if not isinstance(data, list) or _grafana_unified_has_complex_expression_graph(data):
+        return None
+
+    source_query = _primary_source_query(ir)
+    expr = str(source_query.get("expr", "") or "")
+    if not expr or _source_query_language(source_query) != "promql":
+        return None
+
+    ds_identity = " ".join(
+        [
+            str(source_query.get("datasource_type", "") or ""),
+            str(source_query.get("datasource_uid", "") or ""),
+            str(source_query.get("datasource_name", "") or ""),
+        ]
+    ).lower()
+    if "prom" not in ds_identity and "mimir" not in ds_identity:
+        return None
+
+    if not _grafana_unified_source_is_instant_like(ir):
+        return None
+
+    threshold_where = _grafana_unified_simple_threshold_where_clause(ir)
+    if not threshold_where:
+        return None
+
+    try:
+        from observability_migration.adapters.source.grafana.panels import (
+            _native_promql_result_shape,
+            can_use_native_promql,
+        )
+        from observability_migration.adapters.source.grafana.promql import PromQLFragment, _parse_fragment
+    except ImportError:
+        return None
+
+    fragment = _parse_fragment(expr)
+    agg_name = str(getattr(fragment, "outer_agg", "") or "").strip().lower()
+    if agg_name not in {"topk", "bottomk"}:
+        return None
+    if getattr(fragment, "group_labels", None):
+        return None
+
+    inner_fragment = fragment.extra.get("inner_frag")
+    if not isinstance(inner_fragment, PromQLFragment):
+        return None
+    inner_expr = str(getattr(inner_fragment, "raw_expr", "") or "").strip()
+    if not inner_expr or not can_use_native_promql(inner_expr):
+        return None
+
+    limit = _promql_rank_limit(expr, agg_name)
+    if limit is None:
+        return None
+
+    _, group_cols = _native_promql_result_shape(inner_expr)
+    if not group_cols:
+        return None
+
+    return {
+        "agg_name": agg_name,
+        "inner_expr": inner_expr,
+        "group_cols": list(group_cols),
+        "limit": limit,
+        "threshold_where": threshold_where,
+    }
+
+
 def _has_source_faithful_query(ir: AlertingIR) -> bool:
     translated = str(ir.translated_query or "").strip()
     translated_provenance = str(
@@ -213,7 +465,10 @@ def _has_source_faithful_query(ir: AlertingIR) -> bool:
     if translated and translated_provenance in {"translated_esql", "native_promql", "manual_verified"}:
         return True
 
-    if ir.kind != "grafana_unified":
+    if ir.kind == "grafana_unified" and _grafana_unified_exact_topk_bottomk_spec(ir):
+        return True
+
+    if ir.kind not in {"grafana_unified", "grafana_legacy"}:
         return False
 
     source_query = _primary_source_query(ir)
@@ -243,7 +498,10 @@ def record_semantic_losses(ir: AlertingIR) -> list[str]:
     """Identify and record semantic losses for an alert IR."""
     losses: list[str] = []
 
-    if ir.no_data_policy and ir.no_data_policy not in ("", "no_notify"):
+    if ir.no_data_policy and (
+        (ir.kind == "grafana_unified" and not _grafana_unified_no_data_is_exact(ir))
+        or (ir.kind != "grafana_unified" and ir.no_data_policy not in ("", "no_notify"))
+    ):
         losses.append(f"no-data policy '{ir.no_data_policy}' may not have exact Kibana equivalent")
 
     ext = ir.source_extension or {}
@@ -275,10 +533,10 @@ def record_semantic_losses(ir: AlertingIR) -> list[str]:
 
     if ir.kind == "grafana_unified":
         data = ext.get("data", [])
-        if isinstance(data, list) and len(data) > 2:
+        if isinstance(data, list) and _grafana_unified_has_complex_expression_graph(data):
             losses.append("Multi-query unified alerting rule may lose expression graph semantics")
         labels = ext.get("labels", {})
-        if labels:
+        if labels and _grafana_safe_label_tags(labels) is None:
             losses.append("Grafana alert labels not directly portable to Kibana rule tags")
         annotations = ext.get("annotations", {})
         if annotations.get("__dashboardUid__"):
@@ -286,6 +544,23 @@ def record_semantic_losses(ir: AlertingIR) -> list[str]:
 
     ir.losses = losses
     return losses
+
+
+def _grafana_unified_has_complex_expression_graph(data: list[Any]) -> bool:
+    datasource_query_count = 0
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        datasource_uid = str(item.get("datasourceUid", "") or "").strip()
+        raw_model = item.get("model")
+        model = raw_model if isinstance(raw_model, dict) else {}
+        model_type = str(model.get("type", "") or "").strip().lower()
+        if datasource_uid not in {"__expr__", "-100"}:
+            datasource_query_count += 1
+            continue
+        if model_type and model_type not in {"reduce", "threshold"}:
+            return True
+    return datasource_query_count > 1
 
 
 def select_target_rule_type(ir: AlertingIR, preflight: dict[str, Any] | None = None) -> str:
@@ -334,6 +609,19 @@ def _extract_threshold_from_source(ir: AlertingIR) -> tuple[str, float]:
                     continue
         return ">", 0.0
 
+    if ir.kind == "grafana_legacy":
+        raw_conditions = ext.get("conditions")
+        conditions: list[Any] = raw_conditions if isinstance(raw_conditions, list) else []
+        if len(conditions) == 1 and isinstance(conditions[0], dict):
+            cond = conditions[0]
+            eval_type = str(cond.get("evaluator_type", "")).lower()
+            params = cond.get("evaluator_params", []) if isinstance(cond.get("evaluator_params"), list) else []
+            val = params[0] if params else 0
+            comp_map = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}
+            if eval_type in comp_map:
+                return comp_map[eval_type], float(val)
+        return ">", 0.0
+
     data_list = ext.get("data", [])
     for d in data_list:
         if not isinstance(d, dict):
@@ -351,10 +639,58 @@ def _extract_threshold_from_source(ir: AlertingIR) -> tuple[str, float]:
     return ">", 0.0
 
 
+def _threshold_where_clause_from_source(ir: AlertingIR) -> str:
+    ext = ir.source_extension or {}
+    if ir.kind == "grafana_legacy":
+        raw_conditions = ext.get("conditions")
+        conditions: list[Any] = raw_conditions if isinstance(raw_conditions, list) else []
+        if len(conditions) != 1 or not isinstance(conditions[0], dict):
+            return ""
+        return _legacy_condition_where_clause(conditions[0])
+
+    if ir.kind == "grafana_unified":
+        where_clause = _grafana_unified_simple_threshold_where_clause(ir)
+        if where_clause:
+            return where_clause
+        return ""
+
+    comparator, threshold_val = _extract_threshold_from_source(ir)
+    return f"value {comparator} {threshold_val}"
+
+
 def _generate_esql_for_alert(ir: AlertingIR, data_view: str) -> str:
     """Generate a source-faithful query for an alert rule when possible."""
-    if ir.kind != "grafana_unified" or not _has_source_faithful_query(ir):
+    if ir.kind not in {"grafana_unified", "grafana_legacy"} or not _has_source_faithful_query(ir):
         return ""
+
+    exact_rank_spec = _grafana_unified_exact_topk_bottomk_spec(ir)
+    if exact_rank_spec:
+        try:
+            from observability_migration.adapters.source.grafana.panels import build_native_promql_query
+        except ImportError:
+            return ""
+        base_query = build_native_promql_query(
+            exact_rank_spec["inner_expr"],
+            index=_default_promql_index(data_view),
+            kibana_type="metric",
+        )
+        query = "\n".join(
+            [
+                base_query,
+                "| SORT step ASC",
+                (
+                    f"| STATS value = LAST(value, step) BY "
+                    f"{', '.join(exact_rank_spec['group_cols'])}"
+                ),
+                f"| SORT value {'DESC' if exact_rank_spec['agg_name'] == 'topk' else 'ASC'}",
+                f"| LIMIT {exact_rank_spec['limit']}",
+                f"| WHERE {exact_rank_spec['threshold_where']}",
+            ]
+        )
+        ir.translated_query = query
+        ir.translated_query_provenance = "translated_esql"
+        ir.group_by = list(exact_rank_spec["group_cols"])
+        return query
 
     source_query = _primary_source_query(ir)
     expr = str(source_query.get("expr", "") or "")
@@ -377,8 +713,10 @@ def _generate_esql_for_alert(ir: AlertingIR, data_view: str) -> str:
     if not _has_explicit_threshold(ir):
         return ""
 
-    comparator, threshold_val = _extract_threshold_from_source(ir)
-    return f"{query} | WHERE value {comparator} {threshold_val}"
+    where_clause = _threshold_where_clause_from_source(ir)
+    if not where_clause:
+        return ""
+    return f"{query} | WHERE {where_clause}"
 
 
 def build_es_query_rule_params(ir: AlertingIR, data_view: str = "metrics-*") -> dict[str, Any]:
@@ -476,7 +814,9 @@ def map_alert_to_kibana_payload(
     Returns a dict with:
     - "rule_payload": the Kibana API request body (or empty dict if not mappable)
     - "automation_tier": final tier after analysis
-    - "target_rule_type": selected rule type ID
+    - "target_rule_type": emitted rule type ID
+    - "selected_target_rule_type": candidate rule type ID before emission checks
+    - "payload_emitted": whether a Kibana rule payload was produced
     - "losses": semantic losses
     - "valid": whether the payload is valid for creation
     - "validation_errors": list of validation issues
@@ -484,21 +824,48 @@ def map_alert_to_kibana_payload(
     losses = record_semantic_losses(ir)
     tier = classify_automation_tier(ir)
     rule_type = select_target_rule_type(ir, preflight)
+    normalized_rule_type = rule_type.replace(".", "").replace("_", "-") if rule_type else ""
 
     ir.automation_tier = tier
-    ir.target_rule_type = rule_type.replace(".", "").replace("_", "-") if rule_type else ""
+    ir.selected_target_rule_type = normalized_rule_type
+    ir.target_rule_type = ""
+    ir.payload_emitted = False
+    ir.payload_status = ""
+    ir.payload_status_reason = ""
+    ir.target_rule_payload = {}
     ir.losses = losses
 
     if tier == "manual_required" or not rule_type:
         ir.status = AssetStatus.MANUAL_REQUIRED
         ir.manual_required = True
+        if rule_type:
+            payload_status = "blocked_manual_review"
+            payload_status_reason = (
+                "Translated query is available, but payload emission is intentionally blocked because "
+                "the alert remains manual_required"
+            )
+            validation_errors: list[str] = []
+        elif _has_source_faithful_query(ir):
+            payload_status = "blocked_no_target_rule_type"
+            payload_status_reason = "No suitable target rule type is available for the source-faithful query"
+            validation_errors = [payload_status_reason]
+        else:
+            payload_status = "blocked_no_source_faithful_query"
+            payload_status_reason = "No source-faithful target query could be produced"
+            validation_errors = [payload_status_reason]
+        ir.payload_status = payload_status
+        ir.payload_status_reason = payload_status_reason
         return {
             "rule_payload": {},
             "automation_tier": tier,
-            "target_rule_type": rule_type,
+            "target_rule_type": "",
+            "selected_target_rule_type": rule_type,
+            "payload_emitted": False,
+            "payload_status": payload_status,
+            "payload_status_reason": payload_status_reason,
             "losses": losses,
             "valid": False,
-            "validation_errors": ["No suitable target rule type or alert requires manual migration"],
+            "validation_errors": validation_errors,
         }
 
     if rule_type == ES_QUERY_RULE_TYPE:
@@ -513,13 +880,20 @@ def map_alert_to_kibana_payload(
     if not params:
         ir.status = AssetStatus.MANUAL_REQUIRED
         ir.manual_required = True
+        payload_status_reason = "No source-faithful target query could be produced"
+        ir.payload_status = "blocked_no_source_faithful_query"
+        ir.payload_status_reason = payload_status_reason
         return {
             "rule_payload": {},
             "automation_tier": "manual_required",
             "target_rule_type": "",
+            "selected_target_rule_type": rule_type,
+            "payload_emitted": False,
+            "payload_status": "blocked_no_source_faithful_query",
+            "payload_status_reason": payload_status_reason,
             "losses": losses,
             "valid": False,
-            "validation_errors": ["No source-faithful target query could be produced"],
+            "validation_errors": [payload_status_reason],
         }
 
     schedule = ir.schedule_interval or "1m"
@@ -530,6 +904,9 @@ def map_alert_to_kibana_payload(
         CUSTOM_THRESHOLD_RULE_TYPE: "observability",
     }
     consumer = CONSUMER_MAP.get(rule_type, "stackAlerts")
+    extra_tags: list[str] = []
+    if ir.kind == "grafana_unified":
+        extra_tags = _grafana_safe_label_tags((ir.source_extension or {}).get("labels")) or []
 
     payload = {
         "rule_type_id": rule_type,
@@ -539,10 +916,14 @@ def map_alert_to_kibana_payload(
         "params": params,
         "actions": [],
         "enabled": False,
-        "tags": ["obs-migration", f"source:{ir.kind}"],
+        "tags": ["obs-migration", f"source:{ir.kind}", *extra_tags],
     }
 
     ir.target_rule_payload = payload
+    ir.target_rule_type = normalized_rule_type
+    ir.payload_emitted = True
+    ir.payload_status = "emitted"
+    ir.payload_status_reason = ""
 
     if tier == "automated":
         ir.status = AssetStatus.TRANSLATED
@@ -559,6 +940,10 @@ def map_alert_to_kibana_payload(
         "rule_payload": payload,
         "automation_tier": tier,
         "target_rule_type": rule_type,
+        "selected_target_rule_type": rule_type,
+        "payload_emitted": True,
+        "payload_status": "emitted",
+        "payload_status_reason": "",
         "losses": losses,
         "valid": len(validation_errors) == 0,
         "validation_errors": validation_errors,
@@ -580,6 +965,7 @@ def map_alerts_batch(
     results = []
     by_tier: dict[str, int] = {}
     by_rule_type: dict[str, int] = {}
+    by_selected_rule_type: dict[str, int] = {}
     total_losses: list[str] = []
 
     for ir in alerts:
@@ -595,6 +981,9 @@ def map_alerts_batch(
         rt = mapping["target_rule_type"]
         if rt:
             by_rule_type[rt] = by_rule_type.get(rt, 0) + 1
+        selected_rt = mapping.get("selected_target_rule_type", "")
+        if selected_rt:
+            by_selected_rule_type[selected_rt] = by_selected_rule_type.get(selected_rt, 0) + 1
         total_losses.extend(mapping["losses"])
 
     unique_losses: dict[str, int] = {}
@@ -607,6 +996,7 @@ def map_alerts_batch(
             "total": len(alerts),
             "by_automation_tier": by_tier,
             "by_target_rule_type": by_rule_type,
+            "by_selected_target_rule_type": by_selected_rule_type,
             "unique_semantic_losses": dict(sorted(unique_losses.items(), key=lambda x: -x[1])),
         },
     }

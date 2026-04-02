@@ -37,6 +37,7 @@ class FieldMapProfile:
     name: str = "default"
     metric_index: str = "metrics-*"
     logs_index: str = "logs-*"
+    log_index_map: dict[str, str] = field(default_factory=dict)
     timestamp_field: str = "@timestamp"
     metrics_dataset_filter: str = ""
     logs_dataset_filter: str = ""
@@ -82,6 +83,10 @@ class FieldMapProfile:
         if dd_field in self.tag_map:
             return self.tag_map[dd_field]
         return dd_field
+
+    def map_log_index(self, dd_index: str) -> str:
+        """Map a Datadog log index name to an ES index pattern."""
+        return self.log_index_map.get(dd_index, "")
 
     def field_capability(self, field_name: str, context: str = "") -> FieldCapability | None:
         if context == "metric":
@@ -269,6 +274,7 @@ def _profile_from_model(model: FieldMapProfileModel) -> FieldMapProfile:
         name=model.name,
         metric_index=model.metric_index,
         logs_index=model.logs_index,
+        log_index_map=dict(model.log_index_map),
         timestamp_field=model.timestamp_field,
         metrics_dataset_filter=metrics_ds,
         logs_dataset_filter=logs_ds,
@@ -285,6 +291,7 @@ def _clone_profile(profile: FieldMapProfile) -> FieldMapProfile:
         name=profile.name,
         metric_index=profile.metric_index,
         logs_index=profile.logs_index,
+        log_index_map=deepcopy(profile.log_index_map),
         timestamp_field=profile.timestamp_field,
         metrics_dataset_filter=profile.metrics_dataset_filter,
         logs_dataset_filter=profile.logs_dataset_filter,

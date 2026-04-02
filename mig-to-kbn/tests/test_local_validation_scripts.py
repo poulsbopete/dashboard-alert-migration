@@ -64,6 +64,12 @@ class LocalValidationScriptTests(unittest.TestCase):
         self.assertIn("docker compose -p \"$PROJECT_NAME\" -f \"$COMPOSE_FILE\" ps", script_text)
         self.assertIn("configured lab ports are already serving Elasticsearch/Kibana", script_text)
 
+    def test_full_local_demo_builds_start_command_without_empty_array_expansion(self):
+        script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('start_lab_cmd=(bash "$ROOT/scripts/start_local_lab.sh")', script_text)
+        self.assertIn('if [[ ${#start_args[@]} -gt 0 ]]; then', script_text)
+
     def test_full_local_demo_uses_integrated_grafana_smoke_flow(self):
         script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
 

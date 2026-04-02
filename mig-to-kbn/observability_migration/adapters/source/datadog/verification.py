@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from observability_migration.adapters.source.datadog.execution import build_source_execution_summary
 from observability_migration.adapters.source.grafana.execution.target import build_target_execution_summary
-from observability_migration.adapters.source.grafana.esql_validate import _query_source_and_index
+from observability_migration.adapters.source.grafana.esql_validate import (
+    _query_source_and_index,
+    validate_query_with_fixes,
+)
 from observability_migration.core.assets.operational import build_operational_ir
 from observability_migration.core.verification.comparators import (
     build_comparison_result,
@@ -349,6 +353,81 @@ def _lookup_validation_record(validation_index: dict[tuple[str, str, str], list[
     return None
 
 
+def validate_monitor_queries(
+    monitor_irs: list[Any],
+    *,
+    es_url: str = "",
+    es_api_key: str = "",
+    validate_query_fn=validate_query_with_fixes,
+    max_attempts: int = 8,
+) -> list[dict[str, Any]]:
+    """Validate translated monitor queries against Elasticsearch when configured."""
+    records: list[dict[str, Any]] = []
+    for ir in monitor_irs:
+        alert_id = str(getattr(ir, "alert_id", "") or "")
+        translated_query = str(getattr(ir, "translated_query", "") or "")
+        base_record = {
+            "alert_id": alert_id,
+            "name": str(getattr(ir, "name", "") or ""),
+            "kind": str(getattr(ir, "kind", "") or ""),
+            "query": translated_query,
+            "error": "",
+            "analysis": {},
+            "fix_attempts": [],
+        }
+        if not translated_query:
+            records.append({**base_record, "status": "not_translated"})
+            continue
+        if not es_url:
+            records.append({**base_record, "status": "not_run"})
+            continue
+        validation = validate_query_fn(
+            translated_query,
+            es_url,
+            resolver=None,
+            max_attempts=max_attempts,
+            es_api_key=es_api_key or None,
+        )
+        records.append({**base_record, **validation})
+    return records
+
+
+def build_monitor_verification_lookup(
+    monitor_irs: list[Any],
+    validation_records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build monitor-target validation/execution evidence keyed by alert ID."""
+    validation_index = {
+        str(record.get("alert_id", "") or ""): record
+        for record in (validation_records or [])
+        if isinstance(record, dict)
+    }
+    verification: dict[str, Any] = {}
+
+    for ir in monitor_irs:
+        alert_id = str(getattr(ir, "alert_id", "") or "")
+        record = validation_index.get(alert_id, {"status": "not_run", "query": "", "error": "", "analysis": {}, "fix_attempts": []})
+        target_index = ""
+        if str(record.get("query", "") or ""):
+            target_index = _query_source_and_index(str(record.get("query", "") or ""))[1]
+        panel_stub = SimpleNamespace(
+            esql_query=str(getattr(ir, "translated_query", "") or ""),
+            query_ir={"target_index": target_index},
+        )
+        verification[alert_id] = {
+            "validation": {
+                "status": str(record.get("status", "not_run") or "not_run"),
+                "query": str(record.get("query", "") or ""),
+                "error": str(record.get("error", "") or ""),
+                "analysis": dict(record.get("analysis", {}) or {}),
+                "fix_attempts": list(record.get("fix_attempts", []) or []),
+            },
+            "target_execution": build_target_execution_summary(panel_stub, record).to_dict(),
+        }
+
+    return verification
+
+
 def annotate_results_with_verification(
     results: list[Any],
     validation_records: list[dict[str, Any]] | None = None,
@@ -422,6 +501,8 @@ def save_verification_packets(verification_payload: dict[str, Any], output_path:
 
 __all__ = [
     "annotate_results_with_verification",
+    "build_monitor_verification_lookup",
     "build_verification_packet",
+    "validate_monitor_queries",
     "save_verification_packets",
 ]

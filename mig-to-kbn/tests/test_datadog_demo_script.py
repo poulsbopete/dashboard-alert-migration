@@ -31,6 +31,12 @@ class DatadogDemoScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("--start-lab is only valid with --target local", result.stderr)
 
+    def test_local_target_builds_start_command_without_empty_array_expansion(self):
+        script_text = DATADOG_DEMO_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('start_lab_cmd=(bash "$ROOT/scripts/start_local_lab.sh")', script_text)
+        self.assertIn('if [[ ${#start_args[@]} -gt 0 ]]; then', script_text)
+
 
 if __name__ == "__main__":
     unittest.main()

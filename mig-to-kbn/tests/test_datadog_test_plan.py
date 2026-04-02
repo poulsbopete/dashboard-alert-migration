@@ -122,6 +122,17 @@ class TestExtractorSuite(unittest.TestCase):
             dashboards = extract_dashboards_from_files(td)
             self.assertEqual(len(dashboards), 2)
 
+    def test_non_dashboard_items_in_list_are_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = [
+                {"id": 12345, "type": "query alert", "query": "avg:system.cpu.user{*} > 90"},
+                {"title": "A", "widgets": []},
+            ]
+            (Path(td) / "mixed.json").write_text(json.dumps(data))
+            dashboards = extract_dashboards_from_files(td)
+            self.assertEqual(len(dashboards), 1)
+            self.assertEqual(dashboards[0]["title"], "A")
+
     def test_load_credentials_from_env(self):
         with mock.patch.dict(os.environ, {"DD_API_KEY": "key1", "DD_APP_KEY": "app1"}):
             creds = load_credentials_from_env()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import re
@@ -34,6 +35,25 @@ _SKIP_DIMS = {
 }
 
 
+@dataclass
+class MonitorSeedRequirements:
+    metric_fields: dict[str, str] = field(default_factory=dict)
+    log_measure_fields: dict[str, str] = field(default_factory=dict)
+    dimensions: set[str] = field(default_factory=set)
+
+    def merge_metric(self, field_name: str, metric_type: str) -> None:
+        if field_name not in self.metric_fields:
+            self.metric_fields[field_name] = metric_type
+        elif self.metric_fields[field_name] == "gauge" and metric_type == "counter":
+            self.metric_fields[field_name] = "counter"
+
+    def merge_log_measure(self, field_name: str, metric_type: str) -> None:
+        if field_name not in self.log_measure_fields:
+            self.log_measure_fields[field_name] = metric_type
+        elif self.log_measure_fields[field_name] == "gauge" and metric_type == "counter":
+            self.log_measure_fields[field_name] = "counter"
+
+
 def discover_monitor_artifact(yaml_dir: str) -> Path | None:
     """Return the sibling raw monitor artifact path when present."""
     root = Path(yaml_dir).resolve().parent
@@ -44,7 +64,7 @@ def discover_monitor_artifact(yaml_dir: str) -> Path | None:
 def load_monitor_seed_requirements(
     artifact_path: str | Path,
     field_map: FieldMapProfile,
-) -> tuple[dict[str, str], set[str]]:
+) -> MonitorSeedRequirements:
     """Load a raw monitor export and return metric/dimension seed requirements."""
     path = Path(artifact_path)
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -60,23 +80,34 @@ def load_monitor_seed_requirements(
 def extract_monitor_seed_requirements(
     monitors: list[dict[str, Any]],
     field_map: FieldMapProfile,
-) -> tuple[dict[str, str], set[str]]:
+) -> MonitorSeedRequirements:
     """Extract target metric fields and dimensions required by supported monitors."""
-    metrics: dict[str, str] = {}
-    dimensions: set[str] = set()
+    requirements = MonitorSeedRequirements()
 
     for monitor in monitors:
         ir = build_alerting_ir_from_datadog(monitor, field_map=field_map)
         query = str(ir.translated_query or "").strip()
         if not query:
             continue
-        _extract_metrics_from_query(query, metrics)
-        _extract_dims_from_query(query, dimensions)
+        target_kind = _seed_target_kind(query)
+        _extract_seed_fields_from_query(query, target_kind, requirements)
+        _extract_dims_from_query(query, requirements.dimensions)
 
-    return metrics, dimensions
+    return requirements
 
 
-def _extract_metrics_from_query(query: str, metrics: dict[str, str]) -> None:
+def _seed_target_kind(query: str) -> str:
+    first_line = next((line.strip() for line in query.splitlines() if line.strip()), "")
+    if first_line.upper().startswith("FROM LOGS"):
+        return "log"
+    return "metric"
+
+
+def _extract_seed_fields_from_query(
+    query: str,
+    target_kind: str,
+    requirements: MonitorSeedRequirements,
+) -> None:
     agg_pattern = re.compile(
         rf'(AVG|SUM|MAX|MIN|COUNT|RATE|IRATE|LAST)\(\s*({_IDENT_RE})\s*(?:,|\))'
         rf'|PERCENTILE\(\s*({_IDENT_RE})\s*,',
@@ -89,10 +120,10 @@ def _extract_metrics_from_query(query: str, metrics: dict[str, str]) -> None:
         if metric_name in ("", "*", "time_bucket", "BUCKET", "@timestamp"):
             continue
         metric_type = _classify_metric(metric_name, agg_fn)
-        if metric_name not in metrics:
-            metrics[metric_name] = metric_type
-        elif metrics[metric_name] == "gauge" and metric_type == "counter":
-            metrics[metric_name] = "counter"
+        if target_kind == "log":
+            requirements.merge_log_measure(metric_name, metric_type)
+        else:
+            requirements.merge_metric(metric_name, metric_type)
 
 
 def _extract_dims_from_query(query: str, dims: set[str]) -> None:
@@ -180,6 +211,7 @@ def _classify_metric(name: str, agg_fn: str) -> str:
 
 
 __all__ = [
+    "MonitorSeedRequirements",
     "discover_monitor_artifact",
     "extract_monitor_seed_requirements",
     "load_monitor_seed_requirements",

@@ -3,6 +3,8 @@
 name: custom_otel_serverless
 metric_index: metrics-*
 logs_index: logs-*
+log_index_map:
+  main: logs-generic-default
 timestamp_field: "@timestamp"
 metrics_dataset_filter: ""
 logs_dataset_filter: ""
@@ -11,6 +13,7 @@ metric_map:
   system.cpu.user: system.cpu.user.pct
   system.mem.usable: system.memory.actual.used.bytes
   trace.flask.request.hits: trace.flask.request.hits
+  nginx.requests.total_count: nginx.requests.total_count
 
 tag_map:
   host: host.name
@@ -18,6 +21,7 @@ tag_map:
   service: service.name
   status: log.level
   kube_namespace: kubernetes.namespace
+  datacenter: cloud.region
 
 metric_prefix: ""
 metric_suffix: ""

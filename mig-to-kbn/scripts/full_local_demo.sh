@@ -225,12 +225,17 @@ if [[ $RECREATE_LAB -eq 1 ]]; then
   docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" down --remove-orphans --volumes >/dev/null 2>&1 || true
 fi
 
-start_args=()
+declare -a start_args=()
 if [[ $WITH_ALLOY -eq 1 ]]; then
   start_args+=(--with-alloy)
 fi
 if [[ $RECREATE_LAB -eq 1 ]]; then
   start_args+=(--recreate)
+fi
+
+start_lab_cmd=(bash "$ROOT/scripts/start_local_lab.sh")
+if [[ ${#start_args[@]} -gt 0 ]]; then
+  start_lab_cmd+=("${start_args[@]}")
 fi
 
 if is_http_ready "$ES_URL/_cluster/health?wait_for_status=yellow&timeout=1s" \
@@ -247,7 +252,7 @@ EOF
   fi
 else
   printf 'Starting local lab for %s\n' "$RUN_LABEL"
-  bash "$ROOT/scripts/start_local_lab.sh" "${start_args[@]}"
+  "${start_lab_cmd[@]}"
 fi
 
 wait_for_http "Elasticsearch" "$ES_URL/_cluster/health?wait_for_status=yellow&timeout=1s" 60 2

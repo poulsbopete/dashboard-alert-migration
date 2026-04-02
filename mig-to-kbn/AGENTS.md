@@ -60,6 +60,36 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/
 set -a && source serverless_creds.env && set +a
 DATA_HOURS=6 INTERVAL_SEC=30 BULK_WORKERS=4 BATCH_DOC_LIMIT=8000 \
   .venv/bin/python scripts/setup_serverless_data.py
+
+# Pull live Grafana dashboards plus alert artifacts (no MCP, source-only)
+KIBANA_URL= GRAFANA_URL=http://localhost:23000 GRAFANA_USER=admin GRAFANA_PASS=admin \
+  .venv/bin/obs-migrate migrate --source grafana --input-mode api --output-dir migration_output \
+  --native-promql --data-view "metrics-*" --esql-index "metrics-*" --fetch-alerts
+
+# Pull live Datadog dashboards plus monitor artifacts (no MCP; monitor flags scope only monitor extraction)
+.venv/bin/obs-migrate migrate --source datadog --input-mode api --env-file datadog_creds.env \
+  --output-dir datadog_migration_output --field-profile otel --data-view "metrics-*" \
+  --fetch-alerts --monitor-query "tag:team:platform"
+
+# Compile generated YAML locally before any target exists
+.venv/bin/obs-migrate compile --yaml-dir datadog_migration_output/yaml \
+  --output-dir datadog_migration_output/compiled
+
+# Upload compiled dashboards to Kibana
+set -a && source serverless_creds.env && set +a
+.venv/bin/obs-migrate upload --compiled-dir migration_output/compiled \
+  --kibana-url "$KIBANA_ENDPOINT" --kibana-api-key "$KEY"
+
+# Generate curated alert artifacts, then verify emitted alert rule payloads against Kibana
+./.venv/bin/python scripts/generate_alert_support_report.py
+set -a && source serverless_creds.env && set +a
+.venv/bin/python scripts/verify_alert_rule_uploads.py \
+  --kibana-url "$KIBANA_ENDPOINT" --api-key "$KEY" --keep-rules
+
+# Audit migrated rules / dashboards in the target cluster
+set -a && source serverless_creds.env && set +a
+.venv/bin/python scripts/audit_migrated_rules.py
+.venv/bin/obs-migrate cluster list-dashboards --kibana-url "$KIBANA_ENDPOINT" --kibana-api-key "$KEY"
 ```
 
 ## Dependencies
@@ -212,12 +242,21 @@ Global registries (in execution order):
 | `ELASTICSEARCH_ENDPOINT` | Target ES cluster URL |
 | `KIBANA_ENDPOINT` | Target Kibana URL |
 | `KEY` | API key for ES/Kibana auth |
+| `GRAFANA_URL` | Grafana API URL for live dashboard / alert extraction |
+| `GRAFANA_USER` | Grafana basic-auth username for live extraction |
+| `GRAFANA_PASS` | Grafana basic-auth password for live extraction |
+| `GRAFANA_TOKEN` | Optional Grafana bearer token for alerting API access |
+| `DD_API_KEY` | Datadog API key for live dashboard / monitor extraction |
+| `DD_APP_KEY` | Datadog application key for live dashboard / monitor extraction |
+| `DD_SITE` | Datadog site, e.g. `datadoghq.com` |
 | `DATA_HOURS` | Hours of synthetic data to generate (default: 48, recommend 6 for quick tests) |
 | `INTERVAL_SEC` | Interval between data points in seconds (default: 30) |
 | `BULK_WORKERS` | Concurrent bulk ingest workers (default: 4) |
 | `BATCH_DOC_LIMIT` | NDJSON lines per bulk request (default: 8000) |
 | `SKIP_PREFLIGHT` | Set to `1` to bypass missing-metric / type-conflict gate |
 | `MAX_BROKEN_PCT` | Max allowed % of broken panels before validation fails (default: 10) |
+
+Example env files live at the repo root: `serverless_creds.env.example`, `datadog_creds.env.example`, `grafana_creds.env.example`.
 
 ## Sample Dashboards
 

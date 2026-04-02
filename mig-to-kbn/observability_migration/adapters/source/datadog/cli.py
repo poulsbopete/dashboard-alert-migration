@@ -27,6 +27,10 @@ from observability_migration.adapters.source.grafana.esql_validate import (
 )
 from observability_migration.adapters.source.grafana.rules import _append_unique
 from observability_migration.core.interfaces.registries import target_registry
+from observability_migration.targets.kibana.alerting import (
+    run_alerting_preflight,
+    validate_rule_payload,
+)
 from observability_migration.targets.kibana.smoke_integration import merge_smoke_into_results
 
 from .extract import (
@@ -41,10 +45,20 @@ from .models import DashboardResult, NormalizedWidget, TranslationResult
 from .normalize import normalize_dashboard
 from .planner import plan_widget
 from .preflight import PreflightResult, run_preflight
-from .report import print_report, save_detailed_report
+from .report import (
+    build_monitor_comparison_results,
+    build_monitor_migration_results,
+    print_report,
+    save_detailed_report,
+)
 from .rollout import build_rollout_plan, generate_review_queue, save_rollout_plan
 from .translate import translate_widget
-from .verification import annotate_results_with_verification, save_verification_packets
+from .verification import (
+    annotate_results_with_verification,
+    build_monitor_verification_lookup,
+    save_verification_packets,
+    validate_monitor_queries,
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -261,6 +275,38 @@ def main(argv: list[str] | None = None) -> None:
                 monitor_irs,
                 data_view=getattr(args, "data_view", "metrics-*"),
             )
+            monitor_validation_records = validate_monitor_queries(
+                monitor_irs,
+                es_url=args.es_url if getattr(args, "validate", False) else "",
+                es_api_key=getattr(args, "es_api_key", "") or "",
+            )
+            monitor_verification_lookup = build_monitor_verification_lookup(
+                monitor_irs,
+                monitor_validation_records,
+            )
+            payload_validation_by_alert_id: dict[str, Any] = {}
+            if getattr(args, "kibana_url", ""):
+                payload_preflight = run_alerting_preflight(
+                    args.kibana_url,
+                    api_key=getattr(args, "kibana_api_key", "") or "",
+                    space_id=getattr(args, "space_id", "") or "",
+                )
+                for item in mapping_batch.get("results", []):
+                    payload = item.get("mapping", {}).get("rule_payload", {})
+                    if not payload:
+                        continue
+                    payload_validation_by_alert_id[str(item.get("alert_id", "") or "")] = validate_rule_payload(
+                        payload.get("rule_type_id", ""),
+                        payload.get("params", {}),
+                        payload_preflight,
+                    )
+            monitor_comparison = build_monitor_comparison_results(
+                raw_monitors,
+                monitor_irs,
+                mapping_batch,
+                payload_validation_by_alert_id=payload_validation_by_alert_id,
+                verification_by_alert_id=monitor_verification_lookup,
+            )
 
             by_tier = mapping_batch["summary"]["by_automation_tier"]
             by_kind: dict[str, int] = {}
@@ -269,17 +315,31 @@ def main(argv: list[str] | None = None) -> None:
 
             monitor_results_path = output_dir / "monitor_migration_results.json"
             with monitor_results_path.open("w") as fh:
+                _mon_json.dump(build_monitor_migration_results(monitor_irs), fh, indent=2)
+            print(f"    Monitor migration results: {monitor_results_path}")
+
+            monitor_comparison_path = output_dir / "monitor_comparison_results.json"
+            with monitor_comparison_path.open("w") as fh:
+                _mon_json.dump(monitor_comparison, fh, indent=2)
+            print(f"    Monitor comparison results: {monitor_comparison_path}")
+
+            monitor_verification_path = output_dir / "monitor_verification_results.json"
+            monitor_validation_summary: dict[str, int] = {}
+            for record in monitor_validation_records:
+                status = str(record.get("status", "not_run") or "not_run")
+                monitor_validation_summary[status] = monitor_validation_summary.get(status, 0) + 1
+            with monitor_verification_path.open("w") as fh:
                 _mon_json.dump(
                     {
-                        "total": len(monitor_irs),
-                        "by_automation_tier": by_tier,
-                        "by_kind": by_kind,
-                        "monitors": [ir.to_dict() for ir in monitor_irs],
+                        "total": len(monitor_validation_records),
+                        "by_status": monitor_validation_summary,
+                        "records": monitor_validation_records,
+                        "by_alert_id": monitor_verification_lookup,
                     },
                     fh,
                     indent=2,
                 )
-            print(f"    Monitor migration results: {monitor_results_path}")
+            print(f"    Monitor verification results: {monitor_verification_path}")
             print(f"    Total: {len(monitor_irs)}")
             print(f"    By tier: {by_tier}")
             print(f"    By kind: {by_kind}")

@@ -120,10 +120,10 @@ All three CLIs (Grafana, Datadog, unified) support:
 The unified CLI also provides a dedicated `cluster` subcommand:
 
 ```bash
-obs-migrate cluster list-dashboards    --kibana-url "$KIBANA_URL"
-obs-migrate cluster ensure-data-views  --kibana-url "$KIBANA_URL" --data-view-patterns "metrics-*,logs-*"
-obs-migrate cluster delete-dashboards  --kibana-url "$KIBANA_URL" --dashboard-ids "id1,id2"
-obs-migrate cluster detect-serverless  --kibana-url "$KIBANA_URL"
+obs-migrate cluster list-dashboards    --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY"
+obs-migrate cluster ensure-data-views  --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY" --data-view-patterns "metrics-*,logs-*"
+obs-migrate cluster delete-dashboards  --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY" --dashboard-ids "id1,id2"
+obs-migrate cluster detect-serverless  --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY"
 ```
 
 ## Location

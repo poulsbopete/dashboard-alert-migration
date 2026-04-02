@@ -16,7 +16,7 @@ The installable distribution is `obs-migrate`, while the importable Python packa
 | Metric query translation | PromQL → native PROMQL or ES\|QL | DD metric query → ES\|QL |
 | Log query translation | LogQL → ES\|QL | DD log search → ES\|QL / KQL |
 | Variable / control migration | Mature | Supported (template variables -> Kibana controls) |
-| Alert / monitor extraction | First-class extraction for legacy tasks + unified alerting; auto-create only for source-faithful rules | First-class monitor extraction; auto-create only when a trusted target query exists |
+| Alert / monitor extraction | First-class extraction for legacy tasks + unified alerting; validated Kibana rule payloads for source-faithful rules | First-class monitor extraction; validated Kibana rule payloads for trusted monitor shapes |
 | Annotation / event extraction | Candidate annotations (derived from dashboard JSON) | Preserved in normalization, not emitted |
 | Link / drilldown translation | URL + dashboard drilldowns (derived from dashboard JSON) | Not yet first-class |
 | Transformation redesign tasks | Full classification | Not modeled |
@@ -167,28 +167,30 @@ bash scripts/run_datadog_demo.sh
 bash scripts/run_datadog_demo.sh --target serverless
 ```
 
-Datadog API mode can now extract both dashboard objects and monitors. Monitor extraction is first-class, but automatic Kibana rule creation is intentionally blocked unless the monitor has a trusted, source-faithful target query.
+Datadog API mode can now extract both dashboard objects and monitors. Monitor extraction is first-class, and the current CLI emits/validates Kibana rule payloads for trusted, source-faithful monitor shapes instead of creating rules automatically.
 Install the optional Datadog client extra before using API mode: `.venv/bin/pip install -e ".[datadog]"`.
+
+`scripts/setup_datadog_serverless_data.py` is environment-driven. It defaults to `datadog_migration_output/integrations/yaml`, so set `DASHBOARD_YAML_DIR=/path/to/generated/yaml` first when your Datadog migration output lives somewhere else.
 
 ### Alert and Monitor Migration
 
-Alert extraction is now first-class for both sources, but alert creation follows a strict correctness-first policy:
+Alert extraction is now first-class for both sources, but the current source CLIs stop at artifact generation plus Kibana payload validation:
 
-- Grafana legacy alerts are extracted as migration tasks and reports. They are **not** auto-created in Kibana unless a real translated query is present.
-- Grafana Unified Alerting rules can be auto-created only when the source query is preserved faithfully. Today that means supported Prometheus rules go through Kibana's native `PROMQL ...` path.
+- Grafana legacy alerts are extracted as migration tasks and reports. The current Grafana migration CLI does **not** auto-create Kibana rules.
+- Grafana Unified Alerting rules can emit validated `.es-query` payloads only when the source query is preserved faithfully. Today that mainly means supported Prometheus rules through Kibana's native `PROMQL ...` path.
 - Grafana Loki / LogQL alert rules are extracted and reported, but remain manual until a source-faithful alert translation path exists.
-- Datadog monitors are extracted as first-class inputs. Auto-creation is allowed only for simple metric/query alerts and simple count-based log alerts when the Datadog query parses cleanly and the configured field profile plus live target schema confirm every referenced field.
+- Datadog monitors are extracted as first-class inputs. For simple metric/query alerts and simple count-based log alerts, the pipeline can emit Kibana rule payloads and verify that they upload disabled by default when the Datadog query parses cleanly and the configured field profile plus live target schema confirm every referenced field.
 
 Examples:
 
-- Supported auto-create example:
+- Supported emitted-payload example:
   Grafana Unified Prometheus rule
   `100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
-  becomes a Kibana `.es-query` rule using a native `PROMQL ...` query plus the original threshold.
-- Supported auto-create example:
+  maps to a Kibana `.es-query` payload using a native `PROMQL ...` query plus the original threshold.
+- Supported emitted-payload example:
   Datadog monitor
   `avg(last_5m):avg:system.cpu.user{env:production} by {host} > 90`
-  can become a Kibana `.es-query` rule when the selected field profile maps `system.cpu.user` and `host` to real target fields.
+  can emit a Kibana `.es-query` payload when the selected field profile maps `system.cpu.user` and `host` to real target fields.
 - Manual-only example:
   Datadog monitor
   `sum(last_15m):sum:pipelines.component_errors_total{...} by {component_type,...} > 0`
@@ -199,6 +201,7 @@ Examples:
   is extracted and classified, but is **not** auto-created today.
 
 See `examples/alerting/README.md` for concrete sample source alerts and expected migration behavior.
+For tested live pull commands and the alert upload / verification flow, see `docs/command-contract.md`.
 
 ### Unified CLI
 
@@ -252,6 +255,7 @@ The unified CLI dispatches to the appropriate source adapter:
 .venv/bin/obs-migrate migrate \
   --source datadog \
   --input-mode api \
+  --env-file datadog_creds.env \
   --output-dir datadog_migration_output \
   --data-view "metrics-*" \
   --field-profile otel
@@ -265,7 +269,7 @@ The unified CLI dispatches to the appropriate source adapter:
 .venv/bin/obs-migrate extensions --source datadog --format yaml --template-out custom-field-profile.yaml
 ```
 
-Unified `obs-migrate migrate` accepts `--include`, but Grafana and Datadog handlers do not currently use it as source-asset selection in either `files` or `api` mode. For Datadog API mode, unified also does not expose `--env-file` or `--dashboard-ids`; it relies on the delegated Datadog CLI's default credential loading (`DD_*` env vars or `datadog_creds.env`) and source-specific options remain dedicated-CLI features.
+Unified `obs-migrate migrate` accepts `--include`, but Grafana and Datadog handlers do not currently use it as source-asset selection in either `files` or `api` mode. For Datadog API mode, unified does expose `--env-file`, but explicit dashboard scoping via `--dashboard-ids` remains a dedicated-CLI feature.
 
 ### Unified CLI Subcommands
 
@@ -278,13 +282,14 @@ Unified `obs-migrate migrate` accepts `--include`, but Grafana and Datadog handl
 # Upload compiled dashboards to Kibana
 .venv/bin/obs-migrate upload \
   --compiled-dir migration_output/compiled \
-  --kibana-url "$KIBANA_URL"
+  --kibana-url "$KIBANA_URL" \
+  --kibana-api-key "$KEY"
 
 # Cluster utilities (Kibana target)
-.venv/bin/obs-migrate cluster list-dashboards --kibana-url "$KIBANA_URL"
-.venv/bin/obs-migrate cluster ensure-data-views --kibana-url "$KIBANA_URL" --data-view-patterns "metrics-*,logs-*"
-.venv/bin/obs-migrate cluster delete-dashboards --kibana-url "$KIBANA_URL" --dashboard-ids "id1,id2"
-.venv/bin/obs-migrate cluster detect-serverless --kibana-url "$KIBANA_URL"
+.venv/bin/obs-migrate cluster list-dashboards --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY"
+.venv/bin/obs-migrate cluster ensure-data-views --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY" --data-view-patterns "metrics-*,logs-*"
+.venv/bin/obs-migrate cluster delete-dashboards --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY" --dashboard-ids "id1,id2"
+.venv/bin/obs-migrate cluster detect-serverless --kibana-url "$KIBANA_URL" --kibana-api-key "$KEY"
 ```
 
 ## Package Structure
@@ -385,6 +390,8 @@ examples/                    Rule packs, Datadog field profile, corpus profile, 
 | `KIBANA_ENDPOINT` or `KIBANA_URL` | Kibana URL |
 | `KEY` or `ES_API_KEY` | API key for ES/Kibana auth |
 
+Example env files live at the repo root: `serverless_creds.env.example`, `datadog_creds.env.example`, and `grafana_creds.env.example`.
+
 ## Field Mapping
 
 Both adapters must translate vendor-specific field names into the Elasticsearch
@@ -429,6 +436,6 @@ See `docs/sources/grafana.md` → "Schema Resolution and Field Naming" and
 
 - Missing source data in Elasticsearch will still cause validation failures regardless of translation quality.
 - Grafana and Datadog now both provide first-class preflight/validate/upload/smoke flows, including optional browser audit and screenshot capture on the main migration paths. The main remaining Datadog gap is broader source execution coverage for logs and multi-query cases.
-- Alert and monitor extraction is broader than dashboard extraction, but automatic Kibana rule creation is deliberately narrower: only source-faithful query paths are emitted.
+- Alert and monitor extraction is broader than dashboard extraction, but rule payload emission/validation is deliberately narrower: only source-faithful query paths are emitted on the main migration path.
 - Semantic gaps between source query models and ES|QL/PROMQL require approximation or custom plugins. This project now prefers `manual_required` over emitting a misleading alert query.
 - The platform makes these gaps explicit, traceable, and customizable instead of hiding them.

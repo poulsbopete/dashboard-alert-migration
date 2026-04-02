@@ -50,8 +50,13 @@ def extract_dashboards_from_files(input_dir: str) -> list[dict[str, Any]]:
         if isinstance(raw, list):
             for item in raw:
                 if isinstance(item, dict):
-                    item["_source_file"] = str(fpath)
-                    dashboards.append(item)
+                    if "widgets" in item:
+                        item["_source_file"] = str(fpath)
+                        dashboards.append(item)
+                    elif "dashboard" in item and isinstance(item.get("dashboard"), dict):
+                        inner = item["dashboard"]
+                        inner["_source_file"] = str(fpath)
+                        dashboards.append(inner)
         elif isinstance(raw, dict):
             raw["_source_file"] = str(fpath)
             if "widgets" in raw:

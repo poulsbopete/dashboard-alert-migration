@@ -336,7 +336,7 @@ else
 fi
 
 if [[ "$TARGET" == "local" ]]; then
-  start_args=()
+  declare -a start_args=()
   if [[ $WITH_ALLOY -eq 1 ]]; then
     start_args+=(--with-alloy)
   fi
@@ -344,12 +344,17 @@ if [[ "$TARGET" == "local" ]]; then
     start_args+=(--recreate)
   fi
 
+  start_lab_cmd=(bash "$ROOT/scripts/start_local_lab.sh")
+  if [[ ${#start_args[@]} -gt 0 ]]; then
+    start_lab_cmd+=("${start_args[@]}")
+  fi
+
   if is_http_ready "$ES_URL/_cluster/health?wait_for_status=yellow&timeout=1s" \
     && is_http_ready "$KIBANA_URL/api/status"; then
     if local_lab_services_running; then
       printf 'Existing local lab detected at %s / %s; reusing it\n' "$ES_URL" "$KIBANA_URL"
       if [[ $START_LAB -eq 1 ]]; then
-        bash "$ROOT/scripts/start_local_lab.sh" "${start_args[@]}"
+        "${start_lab_cmd[@]}"
       fi
     else
       cat >&2 <<EOF
@@ -360,7 +365,7 @@ EOF
     fi
   else
     printf 'Starting local lab for Datadog demo\n'
-    bash "$ROOT/scripts/start_local_lab.sh" "${start_args[@]}"
+    "${start_lab_cmd[@]}"
   fi
 
   wait_for_http "Elasticsearch" "$ES_URL/_cluster/health?wait_for_status=yellow&timeout=1s" 60 2

@@ -13,6 +13,7 @@ class FieldMapProfileModel(BaseModel):
     name: str = "custom"
     metric_index: str = "metrics-*"
     logs_index: str = "logs-*"
+    log_index_map: dict[str, str] = Field(default_factory=dict)
     timestamp_field: str = "@timestamp"
     metrics_dataset_filter: str = ""
     logs_dataset_filter: str = ""
@@ -22,7 +23,7 @@ class FieldMapProfileModel(BaseModel):
     metric_suffix: str = ""
     tag_prefix: str = ""
 
-    @field_validator("metric_map", "tag_map")
+    @field_validator("metric_map", "tag_map", "log_index_map")
     @classmethod
     def validate_string_mapping(cls, value: dict[str, str]) -> dict[str, str]:
         normalized: dict[str, str] = {}

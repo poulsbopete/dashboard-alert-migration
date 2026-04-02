@@ -43,6 +43,20 @@ def _datadog_service_check_monitor():
     }
 
 
+def _datadog_log_measure_monitor():
+    return {
+        "id": 67891,
+        "name": "Checkout latency p99 is high",
+        "type": "log alert",
+        "query": 'logs("service:checkout status:error").index("*").rollup("pc99", "@duration").last("10m") > 250',
+        "message": "Checkout latency p99 is high",
+        "options": {
+            "thresholds": {"critical": 250},
+            "notify_no_data": False,
+        },
+    }
+
+
 class TestDatadogMonitorSeedRequirements(unittest.TestCase):
     def test_metric_monitor_contributes_metric_and_dimensions(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -51,16 +65,33 @@ class TestDatadogMonitorSeedRequirements(unittest.TestCase):
         )
 
         field_map = load_profile("otel")
-        metrics, dimensions = extract_monitor_seed_requirements(
+        requirements = extract_monitor_seed_requirements(
             [_datadog_live_metric_query_alert()],
             field_map,
         )
 
-        self.assertEqual(metrics["pipelines_component_errors_total"], "counter")
+        self.assertEqual(requirements.metric_fields["pipelines_component_errors_total"], "counter")
+        self.assertEqual(requirements.log_measure_fields, {})
         self.assertEqual(
-            dimensions,
+            requirements.dimensions,
             {"component_type", "component_id", "pipeline_id", "host.name", "worker_uuid"},
         )
+
+    def test_log_measure_monitor_contributes_log_measure_and_dimensions(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+        from observability_migration.adapters.source.datadog.monitor_seed import (
+            extract_monitor_seed_requirements,
+        )
+
+        field_map = load_profile("otel")
+        requirements = extract_monitor_seed_requirements(
+            [_datadog_log_measure_monitor()],
+            field_map,
+        )
+
+        self.assertEqual(requirements.metric_fields, {})
+        self.assertEqual(requirements.log_measure_fields["duration"], "gauge")
+        self.assertIn("service.name", requirements.dimensions)
 
     def test_unsupported_monitor_does_not_contribute_requirements(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -69,10 +100,11 @@ class TestDatadogMonitorSeedRequirements(unittest.TestCase):
         )
 
         field_map = load_profile("otel")
-        metrics, dimensions = extract_monitor_seed_requirements(
+        requirements = extract_monitor_seed_requirements(
             [_datadog_service_check_monitor()],
             field_map,
         )
 
-        self.assertEqual(metrics, {})
-        self.assertEqual(dimensions, set())
+        self.assertEqual(requirements.metric_fields, {})
+        self.assertEqual(requirements.log_measure_fields, {})
+        self.assertEqual(requirements.dimensions, set())
