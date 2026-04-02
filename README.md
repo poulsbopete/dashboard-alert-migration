@@ -227,7 +227,7 @@ git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"
 
 **Ship the update:** **`./scripts/push_git_and_instruqt.sh`** (or commit + **`instruqt track push`**) so sandboxes get the new workshop commit; learners on an old VM run **`sync_workshop_from_git.sh`** then reinstall if **`mig-to-kbn`** changed.
 
-**Env overrides (update script):** **`MIG_TO_KBN_REF`** (default **`main`**), **`MIG_TO_KBN_REMOTE`** (default **`origin`**), **`MIG_TO_KBN_DIR`**.
+**Env overrides (update script):** **`MIG_TO_KBN_REF`** (default **`main`**), **`MIG_TO_KBN_REMOTE`** (default **`origin`**), **`MIG_TO_KBN_DIR`**, **`MIG_TO_KBN_GIT_URL`** (optional fork URL for vendored **`rsync`** refresh).
 
 ## Publishing
 

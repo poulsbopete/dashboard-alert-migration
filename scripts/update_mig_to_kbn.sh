@@ -10,6 +10,7 @@
 #   MIG_TO_KBN_DIR     default: <repo>/mig-to-kbn
 #   MIG_TO_KBN_REMOTE  default: origin
 #   MIG_TO_KBN_REF     default: main (branch or tag after fetch; must exist on remote)
+#   MIG_TO_KBN_GIT_URL optional: override clone URL for vendored refresh (default: https://github.com/elastic/mig-to-kbn.git)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -58,11 +59,12 @@ update_via_vendored_tree() {
   if [ ! -f "${MIG}/pyproject.toml" ] || [ -e "${MIG}/.git" ]; then
     return 1
   fi
-  echo "==> mig-to-kbn: refresh vendored directory from https://github.com/elastic/mig-to-kbn (${REF})"
+  _url="${MIG_TO_KBN_GIT_URL:-https://github.com/elastic/mig-to-kbn.git}"
+  echo "==> mig-to-kbn: refresh vendored directory from ${_url} (${REF})"
   TDIR="$(mktemp -d)"
   UP="${TDIR}/upstream"
-  if ! git clone --depth 1 --branch "$REF" "https://github.com/elastic/mig-to-kbn.git" "$UP" 2>/dev/null; then
-    git clone --depth 1 "https://github.com/elastic/mig-to-kbn.git" "$UP"
+  if ! git clone --depth 1 --branch "$REF" "$_url" "$UP" 2>/dev/null; then
+    git clone --depth 1 "$_url" "$UP"
     git -C "$UP" checkout "$REF" 2>/dev/null || true
   fi
   rsync -a --delete --exclude='.git' "${UP}/" "${MIG}/"
