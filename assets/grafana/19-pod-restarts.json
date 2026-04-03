@@ -25,13 +25,68 @@
   },
   "panels": [
     {
-      "type": "timeseries",
-      "title": "Primary",
+      "type": "text",
+      "title": "",
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 3,
+        "w": 24,
         "x": 0,
         "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Restarts** \u2014 increase over 1h by pod (kube-state-metrics style)."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Total restarts (1h)",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 3
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total[1h]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Restarts by pod",
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 3
       },
       "datasource": {
         "type": "prometheus",
@@ -59,12 +114,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Same query (comparison)",
+      "title": "Restarts by namespace",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 0
+        "x": 0,
+        "y": 11
       },
       "datasource": {
         "type": "prometheus",
@@ -72,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total[1h]))",
+          "expr": "sum by (namespace) (increase(kube_pod_container_status_restarts_total[1h]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -88,6 +143,41 @@
           "displayMode": "list",
           "placement": "bottom"
         }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Pod snapshot",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total[1h]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
       }
     }
   ]
