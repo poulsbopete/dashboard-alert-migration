@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Server latency** \u2014 same histograms as path latency (no outbound ``http_client_duration_*`` in workshop OTLP)."
+        "content": "**Server latency** \u2014 mean duration by **http.route** (sum/count). No **histogram_quantile** on Serverless ES|QL; same proxy pattern as **Latency by path** (no outbound ``http_client_duration_*`` in workshop OTLP)."
       }
     },
     {
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "(sum by (http.route) (rate(http_request_duration_seconds_sum[5m]))) / (sum by (http.route) (rate(http_request_duration_seconds_count[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p50 by route",
+      "title": "Observation rate by route",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "sum by (http.route) (rate(http_request_duration_seconds_count[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_request_duration_seconds_sum[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
+          "expr": "(sum by (http.route) (rate(http_request_duration_seconds_sum[5m]))) / (sum by (http.route) (rate(http_request_duration_seconds_count[5m])))",
           "format": "table",
           "instant": true,
           "refId": "A"

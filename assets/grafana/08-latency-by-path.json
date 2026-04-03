@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Path latency** \u2014 p99 per path plus a coarser p90 for comparison."
+        "content": "**Path latency** \u2014 mean request duration per **http.route** (sum/count from **http_request_duration_seconds_***). Serverless ES|QL has no **histogram_quantile**, so migrated Lens uses this stable proxy instead of p99/p90 from buckets."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p99 by path",
+      "title": "Mean latency by path",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "(sum by (http.route) (rate(http_request_duration_seconds_sum[5m]))) / (sum by (http.route) (rate(http_request_duration_seconds_count[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p90 by path",
+      "title": "Observation rate by path",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "sum by (http.route) (rate(http_request_duration_seconds_count[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_request_duration_seconds_sum[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
+          "expr": "(sum by (http.route) (rate(http_request_duration_seconds_sum[5m]))) / (sum by (http.route) (rate(http_request_duration_seconds_count[5m])))",
           "format": "table",
           "instant": true,
           "refId": "A"
