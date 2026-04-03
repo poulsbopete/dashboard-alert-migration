@@ -65,6 +65,8 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   echo "    Waiting ${WAIT_OTLP}s for logs/metrics/traces to land from OTLP..."
   sleep "$WAIT_OTLP"
 fi
+echo "    OTLP HTTP metrics use http_requests_total + http_request_duration_seconds_* (matches migrated Grafana PROMQL)."
+echo "    If you upgraded the workshop git copy, restart emitters: WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
 
 # mig-to-kbn defaults --es-url from ES_URL in the environment (~/.bashrc). Empty strings on the CLI override that
 # so Kibana-only upload does not auto-enable live ES|QL validation (see datadog/grafana cli.py).

@@ -141,7 +141,7 @@ def _markdown_panel(from_clause: str, probe_sql: str) -> str:
         f"- **Resolved `FROM`:** `{from_clause}`",
         f"- **Probe query:** `{probe_sql[:100]}{'…' if len(probe_sql) > 100 else ''}`",
         "",
-        "Panels use ES|QL aligned with **OTLP / mOTLP** field names (`service.name`, `http.server.request.count`, …). "
+        "Panels use ES|QL aligned with **OTLP / mOTLP** field names (`service.name`, `http_requests_total`, …). "
         "Re-run after ingest changes: `python3 tools/generate_dynamic_o11y_dashboard.py`.",
     ]
     return "\n".join(lines)
@@ -191,7 +191,7 @@ def _build_specs_for_capabilities(from_clause: str) -> list[dict[str, Any]]:
                 tf,
                 layer="area",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     f"BY bucket = {qb}, svc = {svc}"
                 ),
                 x="bucket",
@@ -206,7 +206,7 @@ def _build_specs_for_capabilities(from_clause: str) -> list[dict[str, Any]]:
                 tf,
                 layer="bar",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     f"BY path = {route} | SORT c DESC | LIMIT 12"
                 ),
                 x="path",

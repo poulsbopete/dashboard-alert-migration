@@ -6,9 +6,9 @@ Launches one Python subprocess per service (each has distinct service.name + hos
 **Applications**, **Infrastructure**, and **Hosts** in Observability show multiple entities.
 
 Also emits **OpenTelemetry semantic attributes** on HTTP metrics (``http.route``, ``http.request.method``,
-``http.response.status_code``) plus **resource** ``service.name`` / ``host.name``. Native **PROMQL** on
-Serverless expects **Elasticsearch column names** (same dotted keys and ``service.name``), not
-Prometheus-style ``http_route`` / ``entity_id`` label spellings in workshop Grafana JSON.
+``http.response.status_code``) plus **resource** ``service.name`` / ``host.name``. HTTP **instrument names**
+match workshop Grafana / **native PROMQL**: ``http_requests_total`` (counter) and ``http_request_duration_seconds``
+(histogram, seconds). Labels use dotted keys (``service.name``, etc.), not legacy ``http_route`` spellings.
 
 - **workshop.entity_id** on the resource plus **entity_id** on metric attributes (logical id; breakdowns use ``service.name`` in PromQL).
 - **operation_errors_total** — counter with **reason** (mirrors ``operation_errors_total{reason=...}``).
@@ -19,7 +19,7 @@ so `pkill -f otel_workshop_fleet.py` stops the whole fleet.
 Env:
   WORKSHOP_ALLOY_OTLP_HTTP — default http://127.0.0.1:4318
   WORKSHOP_EMIT_INTERVAL_SEC — base sleep between trace ticks per worker (default 5)
-  WORKSHOP_REQUEST_BURST — synchronous http.server.request.* records per tick (default 4) for denser TS in mOTLP
+  WORKSHOP_REQUEST_BURST — synchronous HTTP counter/histogram records per tick (default 4) for denser TS in mOTLP
   WORKSHOP_ERROR_EMIT_PROB — probability [0,1] to emit one operation error per tick (default 0.18)
   WORKSHOP_METRIC_EXPORT_INTERVAL_MS — OTLP metric reader export interval (default 5000, clamp 3000–60000)
   For historical **metrics-*** lines in Discover over multi-day ranges, run **tools/seed_workshop_telemetry.py --metrics-time-series** (bulk; optional).
@@ -173,13 +173,14 @@ def _run_worker(spec: dict[str, str]) -> int:
     )
 
     duration_hist = meter.create_histogram(
-        "http.server.request.duration",
+        "http_request_duration_seconds",
         unit="s",
-        description="HTTP server request duration",
+        description="HTTP latency (Prometheus histogram family for Grafana http_request_duration_seconds_*)",
     )
     req_counter = meter.create_counter(
-        "http.server.request.count",
-        description="HTTP server requests",
+        "http_requests_total",
+        unit="1",
+        description="HTTP requests (Prometheus-style counter for Grafana / PROMQL)",
     )
     # Name matches Grafana ``operation_errors_total`` so Elastic / mOTLP can surface a familiar metric.
     operation_errors = meter.create_counter(

@@ -3,8 +3,8 @@
 Publish workshop Grafana→Elastic or Datadog→Elastic *draft* JSON into Kibana.
 
 **Primary:** **POST /api/dashboards?apiVersion=1** with **Markdown** plus **mixed Lens** panels: each widget’s **ES|QL** is
-chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → OTLP **system.cpu.utilization** / **http.server.request.count**, HTTP → **http.server.request.count** by **service.name** (or **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** when set), latency
-→ **http.server.request.duration** or APM transactions). Type-specific panels use **narrow** ``FROM`` targets (**``metrics-*``**, **``logs-*``**, **``traces-*``**) so **logs|metrics** unions do not trip ES|QL verification. Padded “extra” panels still **vary** by index. If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
+chosen from that panel’s **PromQL or Datadog query string + title** (e.g. Go/GC → OTLP **system.cpu.utilization** / **http_requests_total**, HTTP → **http_requests_total** by **service.name** (or **`WORKSHOP_ESQL_HTTP_STATUS_COLUMN`** when set), latency
+→ **http_request_duration_seconds_**\* histogram fields or APM transactions). Type-specific panels use **narrow** ``FROM`` targets (**``metrics-*``**, **``logs-*``**, **``traces-*``**) so **logs|metrics** unions do not trip ES|QL verification. Padded “extra” panels still **vary** by index. If mixed layouts fail validation, **uniform line** fallback still shows **per-panel titles**.
 **`WORKSHOP_SIMPLE_LENS=1`** skips mixed panels.
 
 **Probes:** **`logs-*`**, **`metrics-*`**, workshop streams, unions, then **`traces-*`**. Override with **`WORKSHOP_ESQL_FROM`**.
@@ -552,7 +552,7 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
@@ -596,7 +596,7 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
+                    f"FROM metrics-* | STATS m = SUM(`http_request_duration_seconds_sum`) / SUM(`http_request_duration_seconds_count`) "
                     f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
@@ -607,7 +607,7 @@ def _panel_esql_spec(
 
     if cat == "http":
         # mOTLP metric mappings vary: attributes.http.response.status_code often does not exist as a column.
-        # Default: SUM(http.server.request.count) BY service — matches workshop OTLP; optional status column via env.
+        # Default: SUM(http_requests_total) BY service — matches workshop OTLP; optional status column via env.
         status_src = _esql_http_status_column()
         if cap["metrics"]:
             if status_src:
@@ -617,7 +617,7 @@ def _panel_esql_spec(
                     tf,
                     layer="bar",
                     query=(
-                        f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) BY code = {st} "
+                        f"FROM metrics-* | STATS c = SUM(`http_requests_total`) BY code = {st} "
                         f"| SORT c DESC | LIMIT 12"
                     ),
                     x="code",
@@ -630,7 +630,7 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) BY svc = {svc} "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) BY svc = {svc} "
                     f"| SORT c DESC | LIMIT 12"
                 ),
                 x="svc",
@@ -718,7 +718,7 @@ def _panel_esql_spec(
             tf,
             layer="line",
             query=(
-                f"FROM metrics-* | STATS m = AVG(`http.server.request.duration`) "
+                f"FROM metrics-* | STATS m = SUM(`http_request_duration_seconds_sum`) / SUM(`http_request_duration_seconds_count`) "
                 f"BY bucket = {q_b}, e = `attributes.entity_id`"
             ),
             x="bucket",
@@ -821,7 +821,7 @@ def _panel_esql_spec(
             tf,
             layer="line",
             query=(
-                f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                 f"BY bucket = {q_b}, svc = {svc}"
             ),
             x="bucket",
@@ -839,7 +839,7 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    "FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    "FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     "BY h = host.name | SORT c DESC | LIMIT 10"
                 ),
                 x="h",
@@ -895,7 +895,7 @@ def _panel_esql_spec(
                 tf,
                 layer="line",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     f"BY bucket = {q_b}, svc = {svc}"
                 ),
                 x="bucket",
@@ -910,7 +910,7 @@ def _panel_esql_spec(
             tf,
             layer="area",
             query=(
-                f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                 f"BY bucket = {q_b}, svc = {svc}"
             ),
             x="bucket",
@@ -928,7 +928,7 @@ def _panel_esql_spec(
                 tf,
                 layer="bar",
                 query=(
-                    f"FROM metrics-* | STATS c = SUM(`http.server.request.count`) "
+                    f"FROM metrics-* | STATS c = SUM(`http_requests_total`) "
                     f"BY path = {_esql_ident(_esql_http_route_column())} | SORT c DESC | LIMIT 10"
                 ),
                 x="path",
