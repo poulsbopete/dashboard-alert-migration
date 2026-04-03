@@ -728,7 +728,7 @@ class TestLensGenerationSuite(unittest.TestCase):
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
         self.assertIn("data_view", result.yaml_panel)
-        self.assertEqual(result.yaml_panel["data_view"], "metrics-*")
+        self.assertEqual(result.yaml_panel["data_view"], "metrics-generic.otel-*")
 
     def test_lens_has_metric_field(self):
         mq = parse_metric_query("avg:system.cpu.user{*}")

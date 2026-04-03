@@ -194,6 +194,9 @@ def _workshop_otel_tag_map() -> dict[str, str]:
         # Datadog @http.url_details.path / http.url facet → OTel-style route (exists in mOTLP logs).
         "http.url": "http.route",
         "@http.url_details.path": "http.route",
+        # APM-style facets → OTel workshop attributes on metrics.
+        "resource_name": "service.name",
+        "http.status_code": "http.response.status_code",
     }
 
 
@@ -251,7 +254,10 @@ _WORKSHOP_OTEL_METRIC_MAP: dict[str, str] = {
     "system.net.errors_in": "operation_errors_total",
     "system.net.errors_out": "operation_errors_total",
     "trace.http.request.hits": "http_requests_total",
+    "trace.http.client.errors": "operation_errors_total",
+    "trace.spans.finished": "http_requests_total",
     "trace.dns.lookup.duration": "system.cpu.utilization",
+    "app.apdex.score": "system.cpu.utilization",
     # --- Container (09) ---
     "container.cpu.throttled": "system.cpu.utilization",
     "container.cpu.usage": "system.cpu.utilization",
@@ -273,9 +279,12 @@ _WORKSHOP_OTEL_METRIC_MAP: dict[str, str] = {
 
 OTEL_PROFILE = FieldMapProfile(
     name="otel",
-    metric_index="metrics-*",
+    # Narrow to managed OTLP metrics so the same counter name is not merged with
+    # metrics-prometheus-* (counter_double vs counter_long → ES|QL verification errors).
+    metric_index="metrics-generic.otel-*",
     logs_index="logs-*",
     timestamp_field="@timestamp",
+    metrics_dataset_filter="generic.otel",
     tag_map=_workshop_otel_tag_map(),
     metric_map=dict(_WORKSHOP_OTEL_METRIC_MAP),
     metric_prefix="",

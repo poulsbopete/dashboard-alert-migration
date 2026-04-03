@@ -454,6 +454,9 @@ def _build_metric_query_spec(
             raise ValueError(f"target group field `{raw_group_field}` is not aggregatable")
 
     where_clauses = [TIME_FILTER]
+    ds_pred = _metrics_dataset_predicate(field_map)
+    if ds_pred:
+        where_clauses.append(ds_pred)
     for filt in mq.scope:
         clause = _metric_scope_to_esql(filt, field_map, context="metric")
         if clause:
@@ -1270,6 +1273,15 @@ def _esql_identifier(field_name: str) -> str:
 
 def _esql_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _metrics_dataset_predicate(field_map: FieldMapProfile) -> str | None:
+    """When ``metrics_dataset_filter`` is set, pin ES|QL to one data stream dataset."""
+    ds = (field_map.metrics_dataset_filter or "").strip()
+    if not ds:
+        return None
+    field = _esql_identifier("data_stream.dataset")
+    return f'{field} == "{_esql_escape(ds)}"'
 
 
 # ---------------------------------------------------------------------------

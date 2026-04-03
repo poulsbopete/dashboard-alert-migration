@@ -145,6 +145,22 @@ class TestMetricQueryParser(unittest.TestCase):
         self.assertTrue(mq.as_rate)
         self.assertFalse(mq.as_count)
 
+    def test_as_count_then_by_clause(self):
+        mq = parse_metric_query("sum:trace.http.request.errors{*}.as_count() by {service}")
+        self.assertTrue(mq.as_count)
+        self.assertEqual(mq.group_by, ["service"])
+        self.assertEqual(mq.metric, "trace.http.request.errors")
+
+    def test_as_rate_then_by_clause(self):
+        mq = parse_metric_query("sum:system.net.bytes_sent{*}.as_rate() by {interface}")
+        self.assertTrue(mq.as_rate)
+        self.assertEqual(mq.group_by, ["interface"])
+
+    def test_space_as_count_normalized(self):
+        mq = parse_metric_query("sum:trace.http.request.hits{*} as count() by {service}")
+        self.assertTrue(mq.as_count)
+        self.assertEqual(mq.group_by, ["service"])
+
     def test_query_with_chained_functions(self):
         mq = parse_metric_query(
             "avg:system.cpu.user{*}.rollup(avg, 60).fill(zero)"
@@ -840,6 +856,8 @@ class TestTranslation(unittest.TestCase):
     def test_field_map_applied(self):
         result = self._translate_metric_widget("avg:system.cpu.user{*}", force_esql=True)
         self.assertIn("system.cpu.utilization", result.esql_query)
+        self.assertIn("FROM metrics-generic.otel-*", result.esql_query)
+        self.assertIn('data_stream.dataset == "generic.otel"', result.esql_query)
 
     def test_metric_trace_includes_planner_and_translator_rule_ids(self):
         query = "sum:http.requests{*}.as_rate()"
@@ -1682,7 +1700,7 @@ class TestFieldMap(unittest.TestCase):
     def test_load_builtin_profile_returns_independent_copy(self):
         profile = load_profile("otel")
         profile.metric_index = "custom-metrics-*"
-        self.assertEqual(load_profile("otel").metric_index, "metrics-*")
+        self.assertEqual(load_profile("otel").metric_index, "metrics-generic.otel-*")
 
     @patch("observability_migration.adapters.source.datadog.field_map.fetch_field_capabilities")
     def test_load_live_field_capabilities_separates_metric_and_log_contexts(self, mock_fetch):
@@ -1703,7 +1721,7 @@ class TestFieldMap(unittest.TestCase):
         self.assertEqual(log_cap.type, "keyword")
         self.assertTrue(profile.is_numeric_field("shared.field", context="metric"))
         self.assertFalse(profile.is_numeric_field("shared.field", context="log"))
-        self.assertEqual(mock_fetch.call_args_list[0].args, ("https://example.es", "metrics-*"))
+        self.assertEqual(mock_fetch.call_args_list[0].args, ("https://example.es", "metrics-generic.otel-*"))
         self.assertEqual(mock_fetch.call_args_list[1].args, ("https://example.es", "logs-*"))
         self.assertEqual(mock_fetch.call_args_list[0].kwargs, {"es_api_key": "secret"})
         self.assertEqual(mock_fetch.call_args_list[1].kwargs, {"es_api_key": "secret"})
@@ -2461,11 +2479,15 @@ class TestDashboardDatasetFilters(unittest.TestCase):
         )
         return yaml.safe_load(yaml_str)["dashboards"][0]
 
-    def test_otel_profile_metrics_no_filter_by_default(self):
-        """OTEL_PROFILE uses metrics-* so dataset is indeterminate → no filter."""
+    def test_otel_profile_metrics_include_managed_otlp_dataset_filter(self):
+        """OTEL_PROFILE targets metrics-generic.otel-* → YAML filter pins generic.otel."""
         widget = self._make_metric_widget("1", "CPU")
         rendered = self._translate_and_generate([widget])
-        self.assertNotIn("filters", rendered)
+        self.assertIn("filters", rendered)
+        self.assertEqual(
+            rendered["filters"],
+            [{"field": "data_stream.dataset", "equals": "generic.otel"}],
+        )
 
     def test_explicit_metrics_dataset_filter_emits_filter(self):
         widget = self._make_metric_widget("1", "CPU")
