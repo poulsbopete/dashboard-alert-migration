@@ -27,18 +27,41 @@ from urllib.parse import quote
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[1]
-MIG_ROOT = ROOT / "mig-to-kbn"
 
+def _collect_emitted_rule_payloads_from_report(*comparison_reports: dict[str, Any]) -> list[dict[str, Any]]:
+    """Same logic as mig-to-kbn ``collect_emitted_rule_payloads`` (alerting.py).
 
-def _collect_emitted(report: dict[str, Any]) -> list[dict[str, Any]]:
-    if not MIG_ROOT.is_dir():
-        return []
-    sys.path = [p for p in sys.path if p != str(MIG_ROOT)]
-    sys.path.insert(0, str(MIG_ROOT))
-    from observability_migration.targets.kibana.alerting import collect_emitted_rule_payloads
-
-    return collect_emitted_rule_payloads(report)
+    Implemented here so this script does not ``import observability_migration.targets.kibana``:
+    that package's ``__init__`` pulls in modules that require **PyYAML**, which the workshop
+    VM Python may not have (grafana-migrate uses a separate venv).
+    """
+    collected: list[dict[str, Any]] = []
+    for report in comparison_reports:
+        if not isinstance(report, dict):
+            continue
+        for source_type in ("alerts", "monitors"):
+            rows = report.get(source_type)
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                target = row.get("target")
+                if not isinstance(target, dict) or not target.get("payload_emitted"):
+                    continue
+                payload = target.get("rule_payload")
+                if not isinstance(payload, dict) or not payload:
+                    continue
+                collected.append(
+                    {
+                        "source_type": source_type,
+                        "alert_id": str(row.get("alert_id", "") or ""),
+                        "name": str(row.get("name", "") or payload.get("name", "") or "unnamed"),
+                        "kind": str(row.get("kind", "") or ""),
+                        "payload": payload,
+                    }
+                )
+    return collected
 
 
 def kibana_client() -> tuple[str, dict[str, str], Any]:
@@ -166,18 +189,14 @@ def main() -> int:
         print(f"ERROR: comparison file missing: {path}", file=sys.stderr)
         return 1
 
-    if not MIG_ROOT.is_dir():
-        print(f"ERROR: vendored mig-to-kbn missing at {MIG_ROOT}", file=sys.stderr)
-        return 1
-
     report = json.loads(path.read_text(encoding="utf-8"))
-    items = _collect_emitted(report)
+    items = _collect_emitted_rule_payloads_from_report(report)
     if not items:
         auto_n = _automated_alert_count(report)
         if auto_n:
             print(
                 f"ERROR: {path} reports {auto_n} automated alert(s) but no rule payloads were collected. "
-                "Check vendored mig-to-kbn and collect_emitted_rule_payloads.",
+                "Expected alerts[].target.payload_emitted and rule_payload.",
                 file=sys.stderr,
             )
             return 1
