@@ -64,6 +64,7 @@ from observability_migration.adapters.source.datadog.field_map import (
     PASSTHROUGH_PROFILE,
     PROMETHEUS_PROFILE,
     load_profile,
+    metric_is_count_like,
 )
 from observability_migration.adapters.source.datadog.execution import build_source_execution_summary
 from observability_migration.adapters.source.datadog.manifest import build_migration_manifest
@@ -789,7 +790,7 @@ class TestTranslation(unittest.TestCase):
         mq = parse_metric_query(query_str)
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query=query_str, metric_query=mq, query_type="metric")
         w = NormalizedWidget(id="1", widget_type=widget_type, title="Test", queries=[wq], **kwargs)
-        plan = plan_widget(w)
+        plan = plan_widget(w, OTEL_PROFILE)
         if force_esql and plan.backend == "lens":
             plan.backend = "esql"
         return translate_widget(w, plan, OTEL_PROFILE)
@@ -953,7 +954,8 @@ class TestTranslation(unittest.TestCase):
 
     def test_boolean_scope_or_is_translated_safely(self):
         result = self._translate_metric_widget(
-            "sum:istio.mesh.request.count.total{(response_code:2* OR response_code:3*) AND $cluster_name}.as_count()"
+            "sum:istio.mesh.request.count.total{(response_code:2* OR response_code:3*) AND $cluster_name}.as_count()",
+            force_esql=True,
         )
         self.assertIn("response_code LIKE \"2%\"", result.esql_query)
         self.assertIn("OR", result.esql_query)
@@ -1681,6 +1683,11 @@ class TestFieldMap(unittest.TestCase):
 
     def test_otel_metric_map(self):
         self.assertEqual(OTEL_PROFILE.map_metric("system.cpu.user"), "system.cpu.utilization")
+
+    def test_metric_is_count_like_uses_mapped_es_name(self):
+        self.assertTrue(metric_is_count_like("trace.http.request.hits", "http_requests_total"))
+        self.assertFalse(metric_is_count_like("trace.http.request.hits", "system.cpu.utilization"))
+        self.assertFalse(metric_is_count_like("system.cpu.user", "system.cpu.utilization"))
 
     def test_otel_tag_map(self):
         self.assertEqual(OTEL_PROFILE.map_tag("host"), "host.name")

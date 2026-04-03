@@ -400,7 +400,7 @@ def _translate_widget(
     args: argparse.Namespace,
 ) -> TranslationResult:
     """Plan and translate a single widget."""
-    plan = plan_widget(widget)
+    plan = plan_widget(widget, field_map)
     return translate_widget(widget, plan, field_map)
 
 

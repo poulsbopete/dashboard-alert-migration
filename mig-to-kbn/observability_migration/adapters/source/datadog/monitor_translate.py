@@ -9,7 +9,7 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .field_map import FieldMapProfile
+from .field_map import FieldMapProfile, metric_is_count_like
 from .log_parser import log_ast_to_esql_where, log_ast_to_kql, parse_log_query_result
 from .models import (
     FormulaBinOp,
@@ -33,7 +33,6 @@ from .translate import (
     _esql_escape,
     _esql_identifier,
     _format_agg_expr,
-    _metric_is_count_like,
     _metric_scope_to_esql,
     _metrics_dataset_predicate,
     _needs_rate,
@@ -263,6 +262,7 @@ def _translate_metric_monitor(
                 exact_rate=exact_rate_supported,
                 exact_rollup=exact_rollup_supported,
                 exact_default_zero=exact_default_zero_supported,
+                es_metric=metric_field,
             ),
         )
 
@@ -299,6 +299,7 @@ def _translate_metric_monitor(
             exact_rate=exact_rate_supported,
             exact_rollup=exact_rollup_supported,
             exact_default_zero=exact_default_zero_supported,
+            es_metric=metric_field,
         ),
     )
 
@@ -1053,11 +1054,12 @@ def _metric_monitor_warnings(
     exact_rate: bool = False,
     exact_rollup: bool = False,
     exact_default_zero: bool = False,
+    es_metric: str | None = None,
 ) -> list[str]:
     warnings: list[str] = []
     if (metric_query.as_rate or _needs_rate(metric_query)) and not exact_rate:
         warnings.append("rate semantics approximated with delta over observed bucket span")
-    if metric_query.as_count and not _metric_is_count_like(metric_query.metric):
+    if metric_query.as_count and not metric_is_count_like(metric_query.metric, es_metric):
         warnings.append("as_count semantics are approximated for non-count metrics")
     if metric_query.rollup and not exact_rollup:
         warnings.append("rollup interval is approximated in ES|QL")

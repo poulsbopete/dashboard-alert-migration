@@ -135,6 +135,22 @@ class FieldMapProfile:
         }
 
 
+def metric_is_count_like(dd_metric: str, es_metric: str | None = None) -> bool:
+    """True when ``as_count`` / counter SUM semantics fit the Datadog + mapped ES names.
+
+    Datadog metrics like ``trace.http.request.hits`` do not end in ``_total``, but the
+    workshop profile maps them to ``http_requests_total`` / ``operation_errors_total``.
+    """
+
+    for cand in ((es_metric or "").strip(), (dd_metric or "").strip()):
+        if not cand:
+            continue
+        lowered = cand.lower()
+        if lowered.endswith((".count", "_count", ".total", "_total")):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Built-in profiles
 # ---------------------------------------------------------------------------
@@ -254,10 +270,14 @@ _WORKSHOP_OTEL_METRIC_MAP: dict[str, str] = {
     "system.net.errors_in": "operation_errors_total",
     "system.net.errors_out": "operation_errors_total",
     "trace.http.request.hits": "http_requests_total",
+    "trace.servlet.request.hits": "http_requests_total",
     "trace.http.client.errors": "operation_errors_total",
     "trace.spans.finished": "http_requests_total",
     "trace.dns.lookup.duration": "system.cpu.utilization",
     "app.apdex.score": "system.cpu.utilization",
+    "app.apdex.satisfied": "http_requests_total",
+    "app.apdex.tolerating": "http_requests_total",
+    "app.apdex.frustrated": "operation_errors_total",
     # --- Container (09) ---
     "container.cpu.throttled": "system.cpu.utilization",
     "container.cpu.usage": "system.cpu.utilization",

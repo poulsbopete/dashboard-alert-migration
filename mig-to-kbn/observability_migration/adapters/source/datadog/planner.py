@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .field_map import FieldMapProfile, metric_is_count_like
 from .models import (
     SUPPORTED_WIDGET_TYPES,
     UNSUPPORTED_DATA_SOURCES,
@@ -57,8 +58,12 @@ class PlanContext:
         return self.plan.trace
 
 
-def plan_widget(widget: NormalizedWidget) -> PanelPlan:
-    """Decide the migration backend for a single widget."""
+def plan_widget(widget: NormalizedWidget, field_map: FieldMapProfile | None = None) -> PanelPlan:
+    """Decide the migration backend for a single widget.
+
+    Pass *field_map* when available so ``as_count()`` on mapped counters can still use Lens
+    (same behavior as ``datadog-migrate``).
+    """
     plan = PanelPlan(
         widget_id=widget.id,
         data_source=widget.primary_data_source,
@@ -73,7 +78,12 @@ def plan_widget(widget: NormalizedWidget) -> PanelPlan:
     if widget.has_metric_queries:
         context.metric_queries = [q for q in widget.queries if q.metric_query]
         context.has_multi_query_formula = _has_multi_query_formula(widget, context.metric_queries)
-        context.use_lens = _should_use_lens(widget, context.metric_queries, context.has_multi_query_formula)
+        context.use_lens = _should_use_lens(
+            widget,
+            context.metric_queries,
+            context.has_multi_query_formula,
+            field_map=field_map,
+        )
         METRIC_PLANNERS.apply(context, stop_when=_plan_is_complete)
         return context.plan
 
@@ -481,6 +491,8 @@ def _should_use_lens(
     widget: NormalizedWidget,
     metric_queries: list[Any],
     has_multi_query_formula: bool,
+    *,
+    field_map: FieldMapProfile | None = None,
 ) -> bool:
     """Prefer Lens for simple single-query metrics without formulas or rate logic."""
     if has_multi_query_formula:
@@ -492,8 +504,14 @@ def _should_use_lens(
     mq = metric_queries[0].metric_query
     if not mq:
         return False
-    if mq.as_rate or mq.as_count:
+    if mq.as_rate:
         return False
+    if mq.as_count:
+        if field_map is None:
+            return False
+        es_m = field_map.map_metric(mq.metric)
+        if not metric_is_count_like(mq.metric, es_m):
+            return False
     if any(fn.name in ("per_second", "per_minute", "per_hour", "derivative") for fn in mq.functions):
         return False
     if widget.widget_type in ("heatmap", "scatterplot", "distribution"):
