@@ -132,6 +132,7 @@ def main() -> int:
         ts = now - timedelta(minutes=rng.randint(0, window_mins))
         ts_s = ts.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
         hn = rng.choice(hosts)
+        path = rng.choice(["/api/health", "/api/orders", "/api/users"])
         add_create(
             "logs-workshop-default",
             {
@@ -143,7 +144,9 @@ def main() -> int:
                 "host.name": hn,
                 "host.hostname": hn,
                 "agent.type": "workshop-seed",
-                "url.path": rng.choice(["/api/health", "/api/orders", "/api/users"]),
+                "url.path": path,
+                # Align with OTLP workshop logs (mOTLP) so migrated ES|QL uses http.route.
+                "http.route": path,
                 "http.response.status_code": rng.choice([200, 200, 200, 404, 500]),
             },
         )

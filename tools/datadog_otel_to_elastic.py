@@ -129,17 +129,43 @@ def main() -> int:
                 },
             )
 
-        py_log.info(
-            "checkout pipeline event (Datadog-style log → OTLP → Elastic)",
-            extra={
-                "http.route": route,
-                "http.method": method,
-                "http.status_code": status,
-                "duration_ms": duration_ms,
-                "dd.service": str(resource.attributes.get("service.name") or ""),
-                "dd.env": str(resource.attributes.get("deployment.environment") or ""),
-            },
-        )
+        # Mix severities so migrated "Log error spike" panels (status:error / warn) have rows.
+        if status >= 500 or rng.random() < 0.12:
+            py_log.error(
+                "checkout pipeline failure (workshop synthetic)",
+                extra={
+                    "http.route": route,
+                    "http.method": method,
+                    "http.status_code": status,
+                    "duration_ms": duration_ms,
+                    "dd.service": str(resource.attributes.get("service.name") or ""),
+                    "dd.env": str(resource.attributes.get("deployment.environment") or ""),
+                },
+            )
+        elif rng.random() < 0.18:
+            py_log.warning(
+                "checkout pipeline degraded (workshop synthetic)",
+                extra={
+                    "http.route": route,
+                    "http.method": method,
+                    "http.status_code": status,
+                    "duration_ms": duration_ms,
+                    "dd.service": str(resource.attributes.get("service.name") or ""),
+                    "dd.env": str(resource.attributes.get("deployment.environment") or ""),
+                },
+            )
+        else:
+            py_log.info(
+                "checkout pipeline event (Datadog-style log → OTLP → Elastic)",
+                extra={
+                    "http.route": route,
+                    "http.method": method,
+                    "http.status_code": status,
+                    "duration_ms": duration_ms,
+                    "dd.service": str(resource.attributes.get("service.name") or ""),
+                    "dd.env": str(resource.attributes.get("deployment.environment") or ""),
+                },
+            )
         time.sleep(interval)
 
 

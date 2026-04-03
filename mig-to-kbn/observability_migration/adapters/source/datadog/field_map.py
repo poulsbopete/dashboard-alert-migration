@@ -181,8 +181,8 @@ def _workshop_otel_tag_map() -> dict[str, str]:
     """Extra tag mappings for the migration workshop OTLP fleet (tools/otel_workshop_fleet.py).
 
     Logical hosts map to ``host.name``; there are no real disks/interfaces/containers, so
-    ``device`` / ``interface`` break down by ``service.name``. Workshop logs use ECS-style
-    fields (``url.path``, ``deployment.environment``) rather than Datadog-only facets.
+    ``device`` / ``interface`` break down by ``service.name``.     Workshop logs: OTLP from ``tools/datadog_otel_to_elastic.py`` uses **http.route** (not
+    ``url.path``) on log attributes; bulk seed duplicates **http.route** for the same value.
     """
     return {
         **_default_tag_map(),
@@ -191,8 +191,9 @@ def _workshop_otel_tag_map() -> dict[str, str]:
         # Fleet runs on the host, not in k8s — treat "container" as logical service.
         "container_name": "service.name",
         "kube_namespace": "deployment.environment",
-        "http.url": "url.path",
-        "@http.url_details.path": "url.path",
+        # Datadog @http.url_details.path / http.url facet → OTel-style route (exists in mOTLP logs).
+        "http.url": "http.route",
+        "@http.url_details.path": "http.route",
     }
 
 
