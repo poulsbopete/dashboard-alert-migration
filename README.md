@@ -13,6 +13,15 @@ Read upstream [architecture](https://github.com/elastic/mig-to-kbn/blob/main/doc
 and a **Python 3.12** venv at **`/opt/mig-to-kbn-venv`**; dashboard compile/upload invokes **`uvx kb-dashboard-cli`**, so **`uv`**
 stays on **`PATH`** via **`~/.bashrc`**. If **`mig-to-kbn/`** is missing, setup continues with a warning and Path A migrate scripts exit with an error until you install it.
 
+### Upstream boundary — do not treat `mig-to-kbn/` as a workshop scratchpad
+
+**[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the **canonical home** for **`grafana-migrate`**, **`datadog-migrate`**, translators, and the shared Kibana compile/upload path. **Do not modify vendored `mig-to-kbn/` in this repo** to fix migration behavior, add lab-only hacks, or fork the engine long term.
+
+- **Workshop-specific work** belongs here: **`assets/grafana/`**, **`assets/datadog/`**, **`scripts/`**, **`track_scripts/`**, lab **`assignment.md`**, legacy **`tools/`** publishers, **`agent-skills/`** wrappers, **`track.yml`**, etc.
+- **Engine bugs, new panel support, CLI flags, or translator fixes** → open **[Issues](https://github.com/elastic/mig-to-kbn/issues)** / **[Pull requests](https://github.com/elastic/mig-to-kbn/pulls)** on **elastic/mig-to-kbn**, then refresh this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored bump.
+
+The **`mig-to-kbn/`** directory in git is an **upstream snapshot** (aligned via the update script), not a second place to maintain migration logic.
+
 **Instruqt** track (**two labs**) for a **high-volume migration spike**: **20** **Grafana** dashboards and **10**
 **Datadog-style** dashboards (plus **4** monitor JSON files) → Kibana on **Observability Serverless**, using
 **mig-to-kbn CLIs**, legacy **alert** publishers for workshop monitors, **[Elastic Agent Skills](https://github.com/elastic/agent-skills)**,
@@ -210,6 +219,8 @@ python3 tools/datadog_to_elastic_alert.py assets/datadog/monitor-high-5xx-rate.j
 ```
 
 ## Maintainers: updating mig-to-kbn
+
+**Never commit ad hoc edits under `mig-to-kbn/`** except a **clean vendored bump** from **`./scripts/update_mig_to_kbn.sh`** (or a documented emergency cherry-pick that is already filed upstream). The migration CLIs are owned in **elastic/mig-to-kbn**.
 
 When **elastic/mig-to-kbn** changes, refresh the vendored tree, commit, reinstall the venv where **`grafana-migrate`** / **`datadog-migrate`** run, then republish the track.
 

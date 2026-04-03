@@ -1,0 +1,21 @@
+---
+description: elastic/mig-to-kbn is upstream-only; workshop edits stay outside vendored mig-to-kbn/
+alwaysApply: true
+---
+
+# Upstream boundary — `elastic/mig-to-kbn`
+
+**[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the canonical repository for **`grafana-migrate`**, **`datadog-migrate`**, PromQL/Datadog translation, and the shared Kibana YAML/compile path.
+
+## Do not edit `mig-to-kbn/` for workshop-only changes
+
+- **Do not** change files under **`mig-to-kbn/`** to adjust lab behavior, sample dashboards, Instruqt wiring, or one-off demos.
+- Put workshop logic and assets in **`assets/`**, **`scripts/`**, **`track_scripts/`**, lab **`assignment.md`**, **`track.yml`**, legacy **`tools/`**, **`agent-skills/`** workshop wrappers, etc.
+
+## Engine work belongs upstream
+
+- Fixes and features for migration CLIs or translators → **[Issues](https://github.com/elastic/mig-to-kbn/issues)** / **[PRs](https://github.com/elastic/mig-to-kbn/pulls)** on **elastic/mig-to-kbn**, then bump this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored tree.
+
+## Vendored tree
+
+- **`mig-to-kbn/`** in this repo is a **snapshot** from upstream (default branch **`main`** via **`scripts/update_mig_to_kbn.sh`**). Commits here should be **bumps**, not long-lived forks of the engine.
