@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Client calls** \u2014 outbound histogram p90 and p50."
+        "content": "**Server latency** \u2014 same histograms as path latency (no outbound ``http_client_duration_*`` in workshop OTLP)."
       }
     },
     {
       "type": "stat",
-      "title": "Client spans/sec",
+      "title": "Request count/sec",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_client_duration_seconds_count[5m]))",
+          "expr": "sum(rate(http_request_duration_seconds_count[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p90 by dependency",
+      "title": "p90 by route",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum by (le, dependency) (rate(http_client_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.90, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p50 by dependency",
+      "title": "p50 by route",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, dependency) (rate(http_client_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le, http.route) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Client mean latency",
+      "title": "Mean latency (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_client_duration_seconds_sum[5m])) / sum(rate(http_client_duration_seconds_count[5m]))",
+          "expr": "sum(rate(http_request_duration_seconds_sum[5m])) / sum(rate(http_request_duration_seconds_count[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

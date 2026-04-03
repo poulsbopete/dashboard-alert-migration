@@ -1,6 +1,6 @@
 {
   "uid": "11-entity-errors",
-  "title": "Errors by entity_id",
+  "title": "Errors by service",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Errors per entity** \u2014 pairs operation errors with HTTP context."
+        "content": "**Errors per service** \u2014 pairs operation errors with HTTP context."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Op errors by entity",
+      "title": "Op errors by service",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(operation_errors_total[5m]))",
+          "expr": "sum by (service.name) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "HTTP 5xx by entity",
+      "title": "HTTP 5xx by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total{http_response_status_code=~\"5..\"}[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total{http.response.status_code=~\"5..\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Entity error snapshot",
+      "title": "Service error snapshot",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(operation_errors_total[5m]))",
+          "expr": "sum by (service.name) (rate(operation_errors_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

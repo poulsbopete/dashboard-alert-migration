@@ -1,6 +1,6 @@
 {
   "uid": "19-pod-restarts",
-  "title": "Restart churn",
+  "title": "Error churn",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Restarts** \u2014 increase over 1h by pod (kube-state-metrics style)."
+        "content": "**Churn proxy** \u2014 operation error rates (no Kubernetes metrics in workshop OTLP)."
       }
     },
     {
       "type": "stat",
-      "title": "Total restarts (1h)",
+      "title": "Operation errors/sec",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(kube_pod_container_status_restarts_total[1h]))",
+          "expr": "sum(rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Restarts by pod",
+      "title": "Errors by reason",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total[1h]))",
+          "expr": "sum by (reason) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Restarts by namespace",
+      "title": "Errors by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (namespace) (increase(kube_pod_container_status_restarts_total[1h]))",
+          "expr": "sum by (service.name) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Pod snapshot",
+      "title": "Reason snapshot (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total[1h]))",
+          "expr": "sum by (reason) (rate(operation_errors_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

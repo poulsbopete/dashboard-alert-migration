@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Request mix** \u2014 entity volume plus method and status as **separate** single-label charts (see generator docstring)."
+        "content": "**Request mix** \u2014 service volume plus method and status as **separate** single-label charts (see generator docstring)."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Requests by entity",
+      "title": "Requests by service",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_request_method) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.request.method) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.response.status_code) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

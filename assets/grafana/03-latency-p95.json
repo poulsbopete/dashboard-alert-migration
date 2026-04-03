@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p95 by entity",
+      "title": "p95 by service",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, entity_id) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, service.name) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "p50 by entity",
+      "title": "p50 by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (le, entity_id) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le, service.name) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }

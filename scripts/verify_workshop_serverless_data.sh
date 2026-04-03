@@ -51,5 +51,6 @@ echo "==> 3) Optional: pre-upload ES|QL validation (same signals as grafana-migr
 echo "    WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
 
 echo ""
-echo "OK: If (1) shows docs > 0, OTLP metrics are landing. Panel queries must use OTel label names"
-echo "    (http_response_status_code, http_request_method, http_route) — see generate_grafana_dashboards.py."
+echo "OK: If (1) shows docs > 0, OTLP metrics are landing. Native PROMQL on Serverless expects"
+echo "    Elasticsearch column names (http.response.status_code, http.request.method, http.route, service.name)."
+echo "    See scripts/generate_grafana_dashboards.py."

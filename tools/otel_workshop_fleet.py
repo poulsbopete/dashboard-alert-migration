@@ -5,10 +5,12 @@ Multiple synthetic microservices → OTLP → local Grafana Alloy → Elastic mO
 Launches one Python subprocess per service (each has distinct service.name + host.name) so
 **Applications**, **Infrastructure**, and **Hosts** in Observability show multiple entities.
 
-Also emits **Grafana-shaped dimensions** so migrated dashboards and ES|QL can break down like the
-source PromQL samples under ``assets/grafana/``:
+Also emits **OpenTelemetry semantic attributes** on HTTP metrics (``http.route``, ``http.request.method``,
+``http.response.status_code``) plus **resource** ``service.name`` / ``host.name``. Native **PROMQL** on
+Serverless expects **Elasticsearch column names** (same dotted keys and ``service.name``), not
+Prometheus-style ``http_route`` / ``entity_id`` label spellings in workshop Grafana JSON.
 
-- **entity_id** — stable per-service logical id (mirrors ``sum by (entity_id)`` panels).
+- **workshop.entity_id** on the resource plus **entity_id** on metric attributes (logical id; breakdowns use ``service.name`` in PromQL).
 - **operation_errors_total** — counter with **reason** (mirrors ``operation_errors_total{reason=...}``).
 
 Parent process only supervises; workers are spawned with this same file + "worker" + JSON spec
@@ -32,7 +34,7 @@ import sys
 import time
 from pathlib import Path
 
-# entity_id aligns with Grafana JSON that uses sum by (entity_id) (rate(http_requests_total...)) etc.
+# entity_id is a metric attribute; Grafana assets use sum by (service.name) for ES native PROMQL parity.
 FLEET: list[dict[str, str]] = [
     {
         "service": "checkout-api",

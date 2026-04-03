@@ -1,6 +1,6 @@
 {
   "uid": "18-cache-hit-ratio",
-  "title": "Cache hit ratio",
+  "title": "Success share (2xx)",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Cache** \u2014 hit ratio with hits and misses as supporting series."
+        "content": "**Availability proxy** \u2014 2xx share of traffic (no ``cache_*`` counters in workshop OTLP)."
       }
     },
     {
       "type": "stat",
-      "title": "Hit ratio",
+      "title": "2xx share",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m])))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"2..\"}[5m])) / sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Hit ratio",
+      "title": "2xx share",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cache_hits_total[5m])) / (sum(rate(cache_hits_total[5m])) + sum(rate(cache_misses_total[5m])))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"2..\"}[5m])) / sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Hits/sec",
+      "title": "2xx requests/sec",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cache_hits_total[5m]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"2..\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Misses/sec",
+      "title": "Non-2xx requests/sec",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(cache_misses_total[5m]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code!~\"2..\"}[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

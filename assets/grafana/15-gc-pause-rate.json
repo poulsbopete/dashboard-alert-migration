@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Request burst by instance",
+      "title": "Request burst by host",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (rate(http_requests_total[5m]))",
+          "expr": "sum by (host.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Requests by job (instant)",
+      "title": "Requests by service (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (job) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

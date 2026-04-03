@@ -1,6 +1,6 @@
 {
   "uid": "13-cpu-saturation",
-  "title": "CPU-style saturation proxy",
+  "title": "Throughput by host",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**CPU** \u2014 process CPU seconds per instance."
+        "content": "**Saturation proxy** \u2014 HTTP request rate by ``host.name`` (workshop OTLP has no ``process_cpu_seconds_total``)."
       }
     },
     {
       "type": "stat",
-      "title": "CPU cores used (avg)",
+      "title": "Requests/sec (total)",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(process_cpu_seconds_total[5m]))",
+          "expr": "sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU rate by instance",
+      "title": "Request rate by host",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "avg(rate(process_cpu_seconds_total[5m])) by (instance)",
+          "expr": "sum by (host.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU by job",
+      "title": "Request rate by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (job) (rate(process_cpu_seconds_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "CPU by instance (instant)",
+      "title": "By host (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "avg(rate(process_cpu_seconds_total[5m])) by (instance)",
+          "expr": "sum by (host.name) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

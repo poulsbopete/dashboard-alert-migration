@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.response.status_code) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

@@ -1,6 +1,6 @@
 {
   "uid": "06-top-entities",
-  "title": "Top entities by traffic",
+  "title": "Top services by traffic",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Entity ranking** \u2014 Grafana ``topk`` is omitted so migration stays on the supported PromQL subset; use Lens Top Values or ``LIMIT`` in Kibana for strict top-N."
+        "content": "**Service ranking** \u2014 Grafana ``topk`` is omitted so migration stays on the supported PromQL subset; use Lens Top Values or ``LIMIT`` in Kibana for strict top-N."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Rate by entity_id",
+      "title": "Rate by service",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_request_method) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.request.method) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Entity snapshot (instant)",
+      "title": "Service snapshot (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

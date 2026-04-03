@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Queues** \u2014 synthetic ``workqueue_depth`` by queue name."
+        "content": "**Queues** \u2014 request **rate** by route and service (no ``workqueue_depth`` in workshop OTLP)."
       }
     },
     {
       "type": "stat",
-      "title": "Total queue depth",
+      "title": "Total requests/sec",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(workqueue_depth)",
+          "expr": "sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Depth by queue",
+      "title": "Rate by route",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum(workqueue_depth) by (queue)",
+          "expr": "sum by (http.route) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Depth by instance",
+      "title": "Rate by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(workqueue_depth) by (instance)",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Queue snapshot",
+      "title": "Route snapshot (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum(workqueue_depth) by (queue)",
+          "expr": "sum by (http.route) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

@@ -1,6 +1,6 @@
 {
   "uid": "02-request-rate",
-  "title": "Request rate by entity_id",
+  "title": "Request rate by service",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Entity throughput** \u2014 entity rate plus **single-label** splits (route and status); multi-label ``sum by`` breaks native PROMQL in Lens."
+        "content": "**Service throughput** \u2014 per-service rate plus **single-label** splits (route and status); multi-label ``sum by`` breaks native PROMQL in Lens."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Rate by entity",
+      "title": "Rate by service",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
+          "expr": "sum by (service.name) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_route) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.route) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http.response.status_code) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

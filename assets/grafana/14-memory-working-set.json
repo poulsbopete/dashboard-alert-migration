@@ -1,6 +1,6 @@
 {
   "uid": "14-memory-working-set",
-  "title": "Memory working set style",
+  "title": "Workload mix",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Memory** \u2014 resident set in MiB with per-instance table."
+        "content": "**Workload** \u2014 HTTP traffic plus operation errors (no ``process_resident_memory_bytes`` in workshop OTLP)."
       }
     },
     {
       "type": "stat",
-      "title": "Total RSS (MiB)",
+      "title": "Requests/sec",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(process_resident_memory_bytes / 1024 / 1024)",
+          "expr": "sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "RSS by instance",
+      "title": "Operation errors/sec",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "expr": "sum(rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "RSS by job",
+      "title": "Errors by service",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (job) (process_resident_memory_bytes) / 1024 / 1024",
+          "expr": "sum by (service.name) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "RSS snapshot",
+      "title": "Errors by reason (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "expr": "sum by (reason) (rate(operation_errors_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

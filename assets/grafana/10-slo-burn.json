@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "1 - (sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))",
+          "expr": "1 - (sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "1 - (sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))",
+          "expr": "1 - (sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[1h])) / sum(rate(http_requests_total[1h])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{http_response_status_code=~\"5..\"}[1h]))",
+          "expr": "sum(rate(http_requests_total{http.response.status_code=~\"5..\"}[1h]))",
           "legendFormat": "",
           "refId": "A"
         }
