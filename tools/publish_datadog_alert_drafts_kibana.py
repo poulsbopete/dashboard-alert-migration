@@ -47,6 +47,13 @@ def kibana_client() -> tuple[str, dict[str, str], Any]:
     return kibana, headers, auth
 
 
+def _put_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Kibana rule PUT rejects bodies that include read-only fields like ``rule_type_id``."""
+    body = dict(payload)
+    body.pop("rule_type_id", None)
+    return body
+
+
 def _clean_payload(raw: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     data = dict(raw)
     rid = str(data.pop("id", "") or "datadog-import-rule").strip()
@@ -76,7 +83,7 @@ def _post_or_put(
     if r.status_code == 409 or (
         r.status_code == 400 and "already exists" in (r.text or "").lower()
     ):
-        r2 = requests.put(url, headers=h, auth=auth, json=payload, timeout=120)
+        r2 = requests.put(url, headers=h, auth=auth, json=_put_payload(payload), timeout=120)
         if r2.ok:
             return True, ""
         return False, f"PUT HTTP {r2.status_code} {r2.text[:500]}"
@@ -93,7 +100,7 @@ def _post_or_put(
         if r3.status_code in (200, 201):
             return True, ""
         if r3.status_code == 409:
-            r4 = requests.put(url, headers=h, auth=auth, json=alt, timeout=120)
+            r4 = requests.put(url, headers=h, auth=auth, json=_put_payload(alt), timeout=120)
             if r4.ok:
                 return True, ""
             return False, f"PUT(stackAlerts) HTTP {r4.status_code} {r4.text[:500]}"

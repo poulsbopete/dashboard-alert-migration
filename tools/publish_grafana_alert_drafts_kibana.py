@@ -133,6 +133,13 @@ def _automated_alert_count(report: dict[str, Any]) -> int:
     return int(tiers.get("automated", 0) or 0)
 
 
+def _put_body(body: dict[str, Any]) -> dict[str, Any]:
+    """Kibana rule PUT rejects bodies that include read-only fields like ``rule_type_id``."""
+    b = dict(body)
+    b.pop("rule_type_id", None)
+    return b
+
+
 def _post_or_put(
     kibana: str,
     headers: dict[str, str],
@@ -150,7 +157,7 @@ def _post_or_put(
     if r.status_code == 409 or (
         r.status_code == 400 and "already exists" in (r.text or "").lower()
     ):
-        r2 = requests.put(url, headers=h, auth=auth, json=body, timeout=120)
+        r2 = requests.put(url, headers=h, auth=auth, json=_put_body(body), timeout=120)
         if r2.ok:
             return True, ""
         return False, f"PUT HTTP {r2.status_code} {r2.text[:500]}"
@@ -166,7 +173,7 @@ def _post_or_put(
         if r3.status_code in (200, 201):
             return True, ""
         if r3.status_code == 409:
-            r4 = requests.put(url, headers=h, auth=auth, json=alt, timeout=120)
+            r4 = requests.put(url, headers=h, auth=auth, json=_put_body(alt), timeout=120)
             if r4.ok:
                 return True, ""
             return False, f"PUT(stackAlerts) HTTP {r4.status_code} {r4.text[:500]}"

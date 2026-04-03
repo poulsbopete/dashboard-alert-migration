@@ -1202,6 +1202,8 @@ def _infer_log_group_by(widget: NormalizedWidget, field_map: FieldMapProfile) ->
     """Infer group-by fields from log widget queries or formulas."""
     group_by_keys = []
     for q in widget.queries:
+        if q.log_group_by:
+            group_by_keys.extend(q.log_group_by)
         if q.metric_query and q.metric_query.group_by:
             group_by_keys.extend(q.metric_query.group_by)
 

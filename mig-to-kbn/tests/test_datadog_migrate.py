@@ -546,6 +546,33 @@ class TestNormalization(unittest.TestCase):
         self.assertIsNotNone(mq)
         self.assertEqual(mq.functions[-1].name, "per_second")
 
+    def test_legacy_logs_rollups_q_becomes_log_query(self):
+        raw = {
+            "title": "Log TS",
+            "widgets": [
+                {
+                    "definition": {
+                        "type": "timeseries",
+                        "title": "Errors by svc",
+                        "requests": [
+                            {
+                                "q": 'logs("status:error").index("*").rollup("count").by("service")',
+                            }
+                        ],
+                    },
+                    "layout": {"x": 0, "y": 0, "width": 6, "height": 4},
+                }
+            ],
+        }
+        nd = normalize_dashboard(raw)
+        w = nd.widgets[0]
+        self.assertTrue(w.has_log_queries)
+        q0 = w.queries[0]
+        self.assertEqual(q0.data_source, "logs")
+        self.assertEqual(q0.query_type, "log")
+        self.assertEqual(q0.log_group_by, ["service"])
+        self.assertIsNotNone(q0.log_query)
+
     def test_event_stream_in_list_widget_stays_unsupported(self):
         raw = {
             "title": "Events",
@@ -812,7 +839,7 @@ class TestTranslation(unittest.TestCase):
 
     def test_field_map_applied(self):
         result = self._translate_metric_widget("avg:system.cpu.user{*}", force_esql=True)
-        self.assertIn("system_cpu_user", result.esql_query)
+        self.assertIn("system.cpu.utilization", result.esql_query)
 
     def test_metric_trace_includes_planner_and_translator_rule_ids(self):
         query = "sum:http.requests{*}.as_rate()"
@@ -1635,12 +1662,14 @@ class TestSemanticPipelineRoundTrip(unittest.TestCase):
 class TestFieldMap(unittest.TestCase):
 
     def test_otel_metric_map(self):
-        self.assertEqual(OTEL_PROFILE.map_metric("system.cpu.user"), "system_cpu_user")
+        self.assertEqual(OTEL_PROFILE.map_metric("system.cpu.user"), "system.cpu.utilization")
 
     def test_otel_tag_map(self):
         self.assertEqual(OTEL_PROFILE.map_tag("host"), "host.name")
         self.assertEqual(OTEL_PROFILE.map_tag("env"), "deployment.environment")
         self.assertEqual(OTEL_PROFILE.map_tag("service"), "service.name")
+        self.assertEqual(OTEL_PROFILE.map_tag("container_name"), "service.name")
+        self.assertEqual(OTEL_PROFILE.map_tag("device"), "service.name")
 
     def test_passthrough_keeps_names(self):
         self.assertEqual(PASSTHROUGH_PROFILE.map_metric("system.cpu.user"), "system_cpu_user")

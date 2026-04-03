@@ -736,7 +736,7 @@ class TestLensGenerationSuite(unittest.TestCase):
         w = NormalizedWidget(id="1", widget_type="query_value", title="CPU", queries=[wq])
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
-        self.assertEqual(result.yaml_panel["metric_field"], "system_cpu_user")
+        self.assertEqual(result.yaml_panel["metric_field"], "system.cpu.utilization")
 
     def test_lens_has_aggregation(self):
         mq = parse_metric_query("sum:http.requests.count{*}")

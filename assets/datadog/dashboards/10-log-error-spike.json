@@ -98,7 +98,7 @@
         "title": "Security proxy",
         "requests": [
           {
-            "q": "logs(\"source:security\").index(\"*\").rollup(\"count\").by(\"service\")",
+            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"service\")",
             "display_type": "line"
           }
         ]
@@ -116,7 +116,7 @@
         "title": "Apache errors",
         "requests": [
           {
-            "q": "logs(\"source:apache\").index(\"*\").rollup(\"count\").by(\"host\")",
+            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"host\")",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Nginx access proxy",
         "requests": [
           {
-            "q": "logs(\"source:nginx\").index(\"*\").rollup(\"count\").by(\"http.url\")",
+            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"http.url\")",
             "display_type": "line"
           }
         ]
