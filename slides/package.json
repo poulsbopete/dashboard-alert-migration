@@ -2,6 +2,7 @@
   "name": "migration-workshop-slides",
   "private": true,
   "version": "1.0.0",
+  "description": "Grafana & Datadog → Elastic workshop slides. Upstream: elastic/mig-to-kbn (Issues/PRs https://github.com/elastic/mig-to-kbn/issues , https://github.com/elastic/mig-to-kbn/pulls); kb-dashboard-cli / kb-yaml-to-lens (https://github.com/strawgate/kb-yaml-to-lens/issues , https://github.com/strawgate/kb-yaml-to-lens/pulls).",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -23,6 +23,30 @@ export type Slide = {
 
 const INSTRUQT_INVITE = "https://play.instruqt.com/elastic/invite/fmt96ftdm41w";
 
+/** Upstream repos for the Instruqt labs — open issues & PRs here (migration CLI + YAML compiler). */
+const UPSTREAM_REPOS: {
+  label: string;
+  repoUrl: string;
+  issuesUrl: string;
+  pullsUrl: string;
+  note?: string;
+}[] = [
+  {
+    label: "elastic/mig-to-kbn",
+    repoUrl: "https://github.com/elastic/mig-to-kbn",
+    issuesUrl: "https://github.com/elastic/mig-to-kbn/issues",
+    pullsUrl: "https://github.com/elastic/mig-to-kbn/pulls",
+    note: "Grafana & Datadog → Kibana migration (`grafana-migrate`, `datadog-migrate`).",
+  },
+  {
+    label: "strawgate/kb-yaml-to-lens",
+    repoUrl: "https://github.com/strawgate/kb-yaml-to-lens",
+    issuesUrl: "https://github.com/strawgate/kb-yaml-to-lens/issues",
+    pullsUrl: "https://github.com/strawgate/kb-yaml-to-lens/pulls",
+    note: "kb-dashboard-cli — YAML dashboards → Kibana NDJSON (used by mig-to-kbn compile).",
+  },
+];
+
 const SLIDES: Slide[] = [
   {
     title: "Try the guided experience",
@@ -282,39 +306,103 @@ export function SlideDeck() {
           </div>
         </main>
 
-        <footer className="flex items-center justify-center gap-4 border-t border-white/10 bg-black/30 px-4 py-4 backdrop-blur-md">
-          <button
-            type="button"
-            onClick={prev}
-            className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10"
-            aria-label="Previous slide"
-          >
-            <ChevronLeft className="size-4" />
-            Prev
-          </button>
-          <div className="flex gap-1.5">
-            {SLIDES.map((_, idx) => (
+        <footer className="border-t border-white/10 bg-black/30 px-4 py-4 backdrop-blur-md">
+          <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="flex items-center justify-center gap-4 sm:justify-start">
               <button
-                key={idx}
                 type="button"
-                onClick={() => setI(idx)}
-                className={cn(
-                  "h-2 w-2 rounded-full transition",
-                  idx === i ? "bg-[var(--primary)]" : "bg-white/30 hover:bg-white/50",
-                )}
-                aria-label={`Go to slide ${idx + 1}`}
-              />
-            ))}
+                onClick={prev}
+                className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+                aria-label="Previous slide"
+              >
+                <ChevronLeft className="size-4" />
+                Prev
+              </button>
+              <div className="flex gap-1.5">
+                {SLIDES.map((_, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setI(idx)}
+                    className={cn(
+                      "h-2 w-2 rounded-full transition",
+                      idx === i ? "bg-[var(--primary)]" : "bg-white/30 hover:bg-white/50",
+                    )}
+                    aria-label={`Go to slide ${idx + 1}`}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={next}
+                className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+                aria-label="Next slide"
+              >
+                Next
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+            <div className="text-center font-mono text-[10px] leading-relaxed text-zinc-500 sm:max-w-md sm:text-left sm:text-xs">
+              <p className="text-zinc-400">
+                Upstream feedback — <span className="text-zinc-300">Subham</span> and team ship the migration
+                stack in{" "}
+                <a
+                  href={UPSTREAM_REPOS[0].repoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {UPSTREAM_REPOS[0].label}
+                </a>
+                ; open{" "}
+                <a
+                  href={UPSTREAM_REPOS[0].issuesUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  Issues
+                </a>{" "}
+                or{" "}
+                <a
+                  href={UPSTREAM_REPOS[0].pullsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  PRs
+                </a>
+                . Compiler:{" "}
+                <a
+                  href={UPSTREAM_REPOS[1].repoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  {UPSTREAM_REPOS[1].label}
+                </a>{" "}
+                (
+                <a
+                  href={UPSTREAM_REPOS[1].issuesUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  Issues
+                </a>
+                ,{" "}
+                <a
+                  href={UPSTREAM_REPOS[1].pullsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--primary)] underline decoration-white/20 underline-offset-2 hover:decoration-[var(--primary)]"
+                >
+                  PRs
+                </a>
+                ).
+              </p>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={next}
-            className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10"
-            aria-label="Next slide"
-          >
-            Next
-            <ChevronRight className="size-4" />
-          </button>
         </footer>
       </div>
     </div>
