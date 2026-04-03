@@ -363,6 +363,9 @@ def build_alert_comparison_results(
                     "payload_status_reason": (
                         mapping_entry.get("payload_status_reason", "") if isinstance(mapping_entry, dict) else ""
                     ),
+                    "review_gates": (
+                        dict(mapping_entry.get("review_gates", {}) or {}) if isinstance(mapping_entry, dict) else {}
+                    ),
                     "rule_payload": target_payload,
                     "valid": bool(mapping_entry.get("valid")) if isinstance(mapping_entry, dict) else False,
                     "validation_errors": validation_errors,

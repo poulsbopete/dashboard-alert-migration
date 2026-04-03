@@ -9,8 +9,8 @@ be taken up without redoing the coverage analysis.
 
 Based on the generated alert standings:
 
-- Grafana: `24` curated cases -> `6 automated`, `3 draft_requires_review`, `15 manual_required`
-- Datadog: `35` curated cases -> `10 automated`, `4 draft_requires_review`, `21 manual_required`
+- Grafana: `27` curated cases -> `6 automated`, `5 draft_requires_review`, `16 manual_required`
+- Datadog: `35` curated cases -> `15 automated`, `4 draft_requires_review`, `16 manual_required`
 
 After running `scripts/generate_alert_support_report.py`, the generated standings
 are available locally in:
@@ -33,6 +33,13 @@ Why:
   - `Memory pressure alert`
   - `High CPU usage`
   - `Mimir request saturation`
+  - `Prometheus Target Down`
+  - `High Load 5m`
+
+The generated Grafana comparison artifact now also exposes `target.review_gates`
+for unified rules, including `no_data_only_blocks_strict_automation`, so
+reviewers can tell when a rule is blocked only by the strict-subset policy (for
+example `noDataState=NoData`) rather than by a query translation failure.
 
 ### Strict subset boundary
 
@@ -148,6 +155,12 @@ Implemented with correctness-first boundaries:
   - the wrapped metric/query translation already carries approximation warnings such as `rollup()`
   - the target query still applies the exact null / `N/A` group filtering
   - the migrated alert remains `manual_required` because the wrapped query warning boundary is unchanged
+
+- exact unshifted gauge-arithmetic formulas when:
+  - the formula is plain arithmetic over metric refs and numeric literals
+  - every metric ref is unshifted
+  - every metric ref uses the same supported time aggregation and matching scope / group-by
+  - no metric ref uses `as_rate()`, `as_count()`, or inner metric functions
 
 - exact `calendar_shift()` subset for shifted formula/query alerts when:
   - `calendar_shift()` uses explicit `UTC` or an IANA timezone whose UTC offset stays stable under current tzdata

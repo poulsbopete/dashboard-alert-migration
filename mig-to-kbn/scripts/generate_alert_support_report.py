@@ -147,6 +147,9 @@ def _source_snippet(row: dict[str, Any]) -> str:
 
 def _reason_items(row: dict[str, Any]) -> list[str]:
     items: list[str] = []
+    review_gates = ((row.get("target") or {}).get("review_gates", {}) or {})
+    if review_gates.get("no_data_only_blocks_strict_automation"):
+        items.append("Only exact no-data parity blocks automated promotion")
     for bucket in [
         row.get("blocked_reasons", []) or [],
         ((row.get("translation") or {}).get("warnings", []) or []),
@@ -299,6 +302,12 @@ def _datadog_detailed_family_label(row: dict[str, Any]) -> str:
         return "Log alerts with explicit index()"
     if "exclude_null(" in query:
         return "Metric/query alerts with exclude_null()"
+    if source_type in {"metric alert", "query alert"} and "default_zero(" in query:
+        return "Metric/query alerts with default_zero()"
+    if source_type in {"metric alert", "query alert"} and ".as_rate()" in query:
+        return "Metric/query alerts with as_rate()"
+    if source_type in {"metric alert", "query alert"} and ".rollup(" in query:
+        return "Metric/query alerts with rollup()"
     if "rate semantics approximated" in warnings:
         return "Metric/query alerts with as_rate()"
     if "rollup interval is approximated" in warnings:
@@ -557,6 +566,44 @@ def _top_blockers(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"reason": reason, "count": count} for reason, count in counts.most_common()]
 
 
+def _parser_diagnostic_codes(row: dict[str, Any]) -> list[str]:
+    diagnostics = ((row.get("translation") or {}).get("parser_diagnostics", []) or [])
+    seen: list[str] = []
+    for diagnostic in diagnostics:
+        if not isinstance(diagnostic, dict):
+            continue
+        code = str(diagnostic.get("code", "") or "").strip()
+        if code and code not in seen:
+            seen.append(code)
+    return seen
+
+
+def _top_parser_diagnostics(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts.update(_parser_diagnostic_codes(row))
+    return [{"code": code, "count": count} for code, count in counts.most_common()]
+
+
+def _render_parser_diagnostic_table(rows: list[dict[str, Any]], title: str) -> list[str]:
+    lines = [f"### {title}", ""]
+    entries = _top_parser_diagnostics(rows)
+    if not entries:
+        lines.append("_None_")
+        lines.append("")
+        return lines
+    lines.extend(
+        [
+            "| Diagnostic code | Count |",
+            "| --- | ---: |",
+        ]
+    )
+    for entry in entries:
+        lines.append(f"| `{_table_escape(entry['code'])}` | {entry['count']} |")
+    lines.append("")
+    return lines
+
+
 def _render_cases(rows: list[dict[str, Any]], source_name: str) -> list[str]:
     sections: list[str] = []
     for tier in TIER_ORDER:
@@ -625,6 +672,7 @@ def _source_support_summary(source_name: str, comparison: dict[str, Any]) -> dic
         "expected_detailed_families": sorted(_expected_detailed_families(source_name)),
         "missing_expected_detailed_families": _missing_expected_detailed_families(rows, source_name),
         "top_blockers": _top_blockers(rows),
+        "parser_diagnostic_breakdown": _top_parser_diagnostics(rows),
         "artifacts": _artifact_paths(source_name),
     }
 
@@ -716,6 +764,12 @@ def render_markdown_report(grafana_comparison: dict[str, Any], datadog_compariso
     ])
     lines.extend(_render_blocker_table(grafana_rows, "Grafana"))
     lines.extend(_render_blocker_table(datadog_rows, "Datadog"))
+    lines.extend([
+        "## Parser Diagnostics",
+        "",
+    ])
+    lines.extend(_render_parser_diagnostic_table(grafana_rows, "Grafana"))
+    lines.extend(_render_parser_diagnostic_table(datadog_rows, "Datadog"))
     lines.extend([
         "## Example Appendix",
         "",

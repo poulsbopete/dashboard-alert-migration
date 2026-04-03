@@ -26,13 +26,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from observability_migration.adapters.source.datadog.query_parser import (
     ParseError,
     parse_formula,
+    parse_formula_result,
     parse_legacy_query,
     parse_metric_query,
+    parse_metric_query_result,
 )
 from observability_migration.adapters.source.datadog.log_parser import (
     log_ast_to_esql_where,
     log_ast_to_kql,
     parse_log_query,
+    parse_log_query_result,
 )
 from observability_migration.adapters.source.datadog.models import (
     DashboardResult,
@@ -166,6 +169,22 @@ class TestMetricQueryParser(unittest.TestCase):
         self.assertEqual(mq.scope[0].key, "$host")
         self.assertEqual(mq.scope[0].value, "*")
 
+    def test_boolean_scope_with_and_before_paren(self):
+        mq = parse_metric_query(
+            "avg:system.cpu.user{env:prod AND(host:web01 OR host:web02)}"
+        )
+        scope_map = {item.key: item.value for item in mq.scope}
+        self.assertEqual(scope_map["env"], "prod")
+        self.assertEqual(scope_map["host"], "web01|web02")
+
+    def test_boolean_scope_with_no_space_before_and(self):
+        mq = parse_metric_query(
+            "avg:system.cpu.user{(host:web01 OR host:web02)AND env:prod}"
+        )
+        scope_map = {item.key: item.value for item in mq.scope}
+        self.assertEqual(scope_map["env"], "prod")
+        self.assertEqual(scope_map["host"], "web01|web02")
+
     def test_wildcard_in_scope_value(self):
         mq = parse_metric_query("avg:system.cpu.user{host:web*}")
         self.assertEqual(mq.scope[0].value, "web*")
@@ -193,6 +212,17 @@ class TestMetricQueryParser(unittest.TestCase):
     def test_no_colon_raises(self):
         with self.assertRaises(ParseError):
             parse_metric_query("invalid query string")
+
+    def test_trailing_tokens_raise(self):
+        with self.assertRaises(ParseError):
+            parse_metric_query("avg:system.cpu.user{*} trailing")
+
+    def test_trailing_tokens_result_reports_diagnostic(self):
+        result = parse_metric_query_result("avg:system.cpu.user{*} trailing")
+        self.assertIsNone(result.value)
+        self.assertTrue(result.degraded)
+        self.assertFalse(result.lossless)
+        self.assertEqual(result.diagnostics[0].code, "METRIC_TRAILING_TOKENS")
 
 
 # =========================================================================
@@ -252,6 +282,13 @@ class TestFormulaParser(unittest.TestCase):
         fe = parse_formula("")
         self.assertIsNone(fe.ast)
 
+    def test_invalid_formula_result_reports_diagnostic(self):
+        result = parse_formula_result("query1 + )")
+        self.assertIsNone(result.value)
+        self.assertTrue(result.degraded)
+        self.assertFalse(result.lossless)
+        self.assertEqual(result.diagnostics[0].code, "FORMULA_PARSE_ERROR")
+
     def test_precedence(self):
         fe = parse_formula("query1 + query2 * query3")
         self.assertIsInstance(fe.ast, FormulaBinOp)
@@ -300,6 +337,11 @@ class TestLegacyQueryParser(unittest.TestCase):
         self.assertEqual(mq.group_by, ["host"])
         self.assertEqual(fns[0].name, "top")
         self.assertEqual(fns[0].args, [10, "mean", "desc"])
+
+    def test_malformed_wrapped_query_does_not_leak_outer_functions(self):
+        mq, fns = parse_legacy_query("per_second(invalid query)")
+        self.assertIsNone(mq)
+        self.assertEqual(fns, [])
 
 
 # =========================================================================
@@ -388,6 +430,12 @@ class TestLogParser(unittest.TestCase):
         self.assertIn('service == "web"', esql)
         self.assertIn('status == "error"', esql)
         self.assertIn('host == "api"', esql)
+
+    def test_unbalanced_group_result_reports_fallback_diagnostic(self):
+        result = parse_log_query_result("service:web AND (status:error OR host:api")
+        self.assertTrue(result.degraded)
+        codes = {diagnostic.code for diagnostic in result.diagnostics}
+        self.assertIn("LOG_BOOLEAN_FALLBACK", codes)
 
     def test_ast_to_kql(self):
         lq = parse_log_query("service:web AND status:error")

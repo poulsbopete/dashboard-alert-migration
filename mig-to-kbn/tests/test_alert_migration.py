@@ -803,6 +803,34 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         ir = build_alerting_ir_from_datadog(mon)
         self.assertEqual(ir.target_rule_type, "custom-threshold")
 
+    def test_anomaly_query_alert_maps_to_manual_only_kind(self):
+        ir = build_alerting_ir_from_datadog(_datadog_anomaly_query_alert())
+        self.assertEqual(ir.kind, "datadog_anomaly_alert")
+
+    def test_forecast_query_alert_maps_to_manual_only_kind(self):
+        ir = build_alerting_ir_from_datadog(
+            {
+                "id": 901,
+                "name": "Forecasted CPU saturation",
+                "type": "query alert",
+                "query": "avg(last_1h):forecast(avg:system.cpu.user{env:production} by {host}, 'linear', 1, interval=60) > 80",
+                "options": {"thresholds": {"critical": 80}},
+            }
+        )
+        self.assertEqual(ir.kind, "datadog_forecast")
+
+    def test_outlier_query_alert_maps_to_manual_only_kind(self):
+        ir = build_alerting_ir_from_datadog(
+            {
+                "id": 902,
+                "name": "Outlier CPU host",
+                "type": "query alert",
+                "query": "avg(last_30m):outliers(avg:system.cpu.user{env:production} by {host}, 'dbscan', 7) > 0",
+                "options": {"thresholds": {"critical": 0}},
+            }
+        )
+        self.assertEqual(ir.kind, "datadog_outlier")
+
     def test_log_monitor_kind(self):
         mon = _datadog_log_monitor()
         ir = build_alerting_ir_from_datadog(mon)
@@ -915,12 +943,12 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         ir = build_alerting_ir_from_datadog(_datadog_as_rate_query_alert(), field_map=field_map)
 
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
-        self.assertIn("MAX(", ir.translated_query)
-        self.assertIn("MIN(", ir.translated_query)
+        self.assertIn("SUM(http_requests)", ir.translated_query)
+        self.assertIn("/ 300", ir.translated_query)
         self.assertIn("http_requests", ir.translated_query)
         self.assertIn("service.name", ir.translated_query)
         self.assertIn("| WHERE value > 5.0", ir.translated_query)
-        self.assertTrue(any("rate semantics approximated" in warning for warning in ir.warnings))
+        self.assertFalse(any("rate semantics approximated" in warning for warning in ir.warnings))
 
     def test_query_alert_with_rollup_gets_translated_query(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -929,13 +957,15 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         ir = build_alerting_ir_from_datadog(_datadog_rollup_query_alert(), field_map=field_map)
 
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
-        self.assertIn("AVG(system.cpu.user.pct)", ir.translated_query)
+        self.assertIn("rollup_bucket = BUCKET(", ir.translated_query)
+        self.assertIn("rollup_value = AVG(system.cpu.user.pct)", ir.translated_query)
+        self.assertIn("STATS value = AVG(rollup_value)", ir.translated_query)
         self.assertIn('deployment.environment == "production"', ir.translated_query)
         self.assertIn("host.name", ir.translated_query)
         self.assertIn("| WHERE value > 80.0", ir.translated_query)
-        self.assertTrue(any("rollup interval is approximated" in warning for warning in ir.warnings))
+        self.assertFalse(any("rollup interval is approximated" in warning for warning in ir.warnings))
 
-    def test_query_alert_with_default_zero_wrapper_gets_translated_query(self):
+    def test_query_alert_with_default_zero_wrapper_gets_translated_without_warning(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
@@ -948,13 +978,36 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertIn("kubernetes.namespace", ir.translated_query)
         self.assertIn("kubernetes.pod.name", ir.translated_query)
         self.assertIn("| WHERE value >= 1.0", ir.translated_query)
-        self.assertTrue(any("default_zero" in warning for warning in ir.warnings))
+        self.assertFalse(any("default_zero" in warning for warning in ir.warnings))
 
-    def test_formula_query_alert_stays_untranslated(self):
+    def test_formula_query_alert_gets_translated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
+        field_map.metric_map["redis.mem.used"] = "redis.mem.used"
+        field_map.metric_map["redis.mem.maxmemory"] = "redis.mem.maxmemory"
         ir = build_alerting_ir_from_datadog(_datadog_formula_ratio_query_alert(), field_map=field_map)
+
+        self.assertEqual(ir.translated_query_provenance, "translated_esql")
+        self.assertIn("FROM metrics-*", ir.translated_query)
+        self.assertIn("q1 = AVG(redis.mem.used)", ir.translated_query)
+        self.assertIn("q2 = AVG(redis.mem.maxmemory)", ir.translated_query)
+        self.assertIn("| WHERE q1 IS NOT NULL AND q2 IS NOT NULL", ir.translated_query)
+        self.assertIn("CASE(q2 == 0, NULL, ((100 * q1) / q2))", ir.translated_query)
+        self.assertIn("| WHERE value > 90.0", ir.translated_query)
+
+    def test_formula_query_alert_with_mismatched_group_by_stays_untranslated(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        field_map = load_profile("otel")
+        field_map.metric_map["redis.mem.used"] = "redis.mem.used"
+        field_map.metric_map["redis.mem.maxmemory"] = "redis.mem.maxmemory"
+        monitor = _datadog_formula_ratio_query_alert()
+        monitor["query"] = (
+            "avg(last_5m):100 * avg:redis.mem.used{*} by {host} / "
+            "avg:redis.mem.maxmemory{*} > 90"
+        )
+        ir = build_alerting_ir_from_datadog(monitor, field_map=field_map)
 
         self.assertEqual(ir.translated_query, "")
         self.assertEqual(ir.translated_query_provenance, "")
@@ -1092,6 +1145,9 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
 
         self.assertEqual(ir.translated_query, "")
         self.assertEqual(ir.translated_query_provenance, "")
+        self.assertFalse(ir.metadata.get("parse_degraded"))
+        self.assertTrue(any("formula monitor requires manual review" in warning.lower() for warning in ir.warnings))
+        self.assertFalse(any("parse degraded" in warning.lower() for warning in ir.warnings))
 
     def test_calendar_shift_query_alert_with_stable_offset_timezone_gets_translated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1117,7 +1173,7 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertEqual(ir.evaluation_window, "46085m")
         self.assertIn("@timestamp >= NOW() - 1 month - 5 minutes", ir.translated_query)
 
-    def test_exclude_null_rollup_query_alert_gets_translated_with_warnings(self):
+    def test_exclude_null_rollup_query_alert_gets_translated_without_rollup_warning(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("elastic_agent")
@@ -1126,7 +1182,7 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
         self.assertIn("host.name IS NOT NULL", ir.translated_query)
         self.assertIn('host.name != "N/A"', ir.translated_query)
-        self.assertTrue(any("rollup interval is approximated" in warning for warning in ir.warnings))
+        self.assertFalse(any("rollup interval is approximated" in warning for warning in ir.warnings))
 
     def test_log_monitor_with_field_profile_gets_translated_query(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1163,6 +1219,7 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         ir = build_alerting_ir_from_datadog(_datadog_log_measure_monitor(), field_map=field_map)
 
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
+        self.assertEqual(ir.evaluation_window, "10m")
         self.assertIn("FROM logs-*", ir.translated_query)
         self.assertIn('service.name == "checkout"', ir.translated_query)
         self.assertIn('log.level == "error"', ir.translated_query)
@@ -1178,6 +1235,24 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
         self.assertIn("AVG(duration)", ir.translated_query)
         self.assertIn("| WHERE value > 150.0", ir.translated_query)
+
+    def test_log_monitor_with_unbalanced_group_is_not_source_faithful(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        field_map = load_profile("otel")
+        monitor = _datadog_log_monitor()
+        monitor["query"] = (
+            'logs("service:checkout AND (status:error OR host:api").index("*").rollup("count").last("5m") > 3'
+        )
+        ir = build_alerting_ir_from_datadog(monitor, field_map=field_map)
+
+        self.assertEqual(ir.translated_query, "")
+        self.assertEqual(ir.translated_query_provenance, "")
+        self.assertTrue(any("log search parse" in warning.lower() for warning in ir.warnings))
+        self.assertTrue(ir.metadata.get("parse_degraded"))
+        diagnostics = list(ir.metadata.get("parser_diagnostics", []) or [])
+        diagnostic_codes = {str(item.get("code", "")) for item in diagnostics if isinstance(item, dict)}
+        self.assertIn("LOG_BOOLEAN_FALLBACK", diagnostic_codes)
 
     def test_log_measure_monitor_with_missing_live_field_stays_untranslated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1316,12 +1391,19 @@ class TestClassifyAutomationTier(unittest.TestCase):
         ir = build_alerting_ir_from_datadog(_datadog_calendar_shift_no_dst_timezone_query_alert(), field_map=field_map)
         self.assertEqual(classify_automation_tier(ir), "automated")
 
-    def test_datadog_exclude_null_rollup_query_alert_is_manual_due_to_warnings(self):
+    def test_datadog_exclude_null_rollup_query_alert_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("elastic_agent")
         ir = build_alerting_ir_from_datadog(_datadog_exclude_null_rollup_query_alert(), field_map=field_map)
-        self.assertEqual(classify_automation_tier(ir), "manual_required")
+        self.assertEqual(classify_automation_tier(ir), "automated")
+
+    def test_datadog_default_zero_query_alert_is_automated(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        field_map = load_profile("otel")
+        ir = build_alerting_ir_from_datadog(_datadog_default_zero_query_alert(), field_map=field_map)
+        self.assertEqual(classify_automation_tier(ir), "automated")
 
     def test_datadog_composite_is_manual(self):
         ir = AlertingIR(kind="datadog_composite")
@@ -1329,6 +1411,15 @@ class TestClassifyAutomationTier(unittest.TestCase):
 
     def test_datadog_log_is_manual_without_translation(self):
         ir = AlertingIR(kind="datadog_log")
+        self.assertEqual(classify_automation_tier(ir), "manual_required")
+
+    def test_datadog_parse_degraded_translation_is_manual(self):
+        ir = AlertingIR(
+            kind="datadog_log",
+            translated_query="FROM logs-* | STATS value = COUNT(*)",
+            translated_query_provenance="translated_esql",
+            metadata={"parse_degraded": True},
+        )
         self.assertEqual(classify_automation_tier(ir), "manual_required")
 
     def test_unknown_kind_is_manual(self):
@@ -1409,6 +1500,20 @@ class TestRecordSemanticLosses(unittest.TestCase):
         losses = record_semantic_losses(ir)
         self.assertFalse(any("alert labels" in l for l in losses))
 
+    def test_grafana_unified_literal_dollar_label_has_no_label_loss(self):
+        rule = _grafana_unified_prometheus_safe_rule()
+        rule["labels"] = {"cost_center": "cost$center"}
+        ir = build_alerting_ir_from_grafana_unified(rule)
+        losses = record_semantic_losses(ir)
+        self.assertFalse(any("alert labels" in l for l in losses))
+
+    def test_grafana_unified_templated_label_reports_loss(self):
+        rule = _grafana_unified_prometheus_safe_rule()
+        rule["labels"] = {"instance": "{{ $labels.instance }}"}
+        ir = build_alerting_ir_from_grafana_unified(rule)
+        losses = record_semantic_losses(ir)
+        self.assertTrue(any("alert labels" in l for l in losses))
+
     def test_grafana_unified_safe_topk_subset_has_no_review_losses(self):
         rule = _grafana_unified_prometheus_topk_safe_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
@@ -1423,8 +1528,15 @@ class TestRecordSemanticLosses(unittest.TestCase):
         losses = record_semantic_losses(ir)
         self.assertTrue(any("Multi-query" in l for l in losses))
 
-    def test_grafana_unified_dashboard_link_loss(self):
+    def test_grafana_unified_literal_dashboard_link_reports_loss(self):
         rule = _grafana_unified_rule()
+        ir = build_alerting_ir_from_grafana_unified(rule)
+        losses = record_semantic_losses(ir)
+        self.assertTrue(any("Dashboard-linked" in l for l in losses))
+
+    def test_grafana_unified_templated_dashboard_link_reports_loss(self):
+        rule = _grafana_unified_rule()
+        rule["annotations"]["__dashboardUid__"] = "{{ $dashboard }}"
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
         self.assertTrue(any("Dashboard-linked" in l for l in losses))
@@ -1438,6 +1550,11 @@ class TestRecordSemanticLosses(unittest.TestCase):
         ir = AlertingIR(kind="grafana_legacy", no_data_policy="", source_extension={"alert_type": "legacy"})
         losses = record_semantic_losses(ir)
         self.assertEqual(len(losses), 0)
+
+    def test_parse_degraded_alert_records_parser_loss(self):
+        ir = AlertingIR(kind="datadog_log", metadata={"parse_degraded": True})
+        losses = record_semantic_losses(ir)
+        self.assertTrue(any("degraded parse" in loss.lower() for loss in losses))
 
 
 # =====================================================================
@@ -1640,6 +1757,29 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertIn("grafana_label:severity=warning", result["rule_payload"]["tags"])
         self.assertIn("grafana_label:team=infra", result["rule_payload"]["tags"])
 
+    def test_grafana_unified_literal_dollar_label_is_preserved_as_tag(self):
+        rule = _grafana_unified_prometheus_safe_rule()
+        rule["labels"] = {"cost_center": "cost$center"}
+        ir = build_alerting_ir_from_grafana_unified(
+            rule,
+            datasource_map={"prometheus": {"type": "prometheus", "name": "Prometheus"}},
+        )
+        result = map_alert_to_kibana_payload(ir)
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["review_gates"]["static_labels"])
+        self.assertIn("grafana_label:cost_center=cost$center", result["rule_payload"]["tags"])
+
+    def test_grafana_unified_templated_label_stays_review_only(self):
+        rule = _grafana_unified_prometheus_safe_rule()
+        rule["labels"] = {"instance": "{{ $labels.instance }}"}
+        ir = build_alerting_ir_from_grafana_unified(
+            rule,
+            datasource_map={"prometheus": {"type": "prometheus", "name": "Prometheus"}},
+        )
+        result = map_alert_to_kibana_payload(ir)
+        self.assertEqual(result["automation_tier"], "draft_requires_review")
+        self.assertFalse(result["review_gates"]["static_labels"])
+
     def test_grafana_unified_prometheus_safe_topk_subset_is_automated(self):
         ir = build_alerting_ir_from_grafana_unified(
             _grafana_unified_prometheus_topk_safe_rule(),
@@ -1686,6 +1826,59 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertEqual(result["rule_payload"], {})
 
+    def test_grafana_unified_review_gates_identify_no_data_only_blocker(self):
+        ir = build_alerting_ir_from_grafana_unified(
+            _grafana_unified_prometheus_rule(),
+            datasource_map={"prometheus": {"type": "prometheus", "name": "Prometheus"}},
+        )
+        result = map_alert_to_kibana_payload(ir)
+
+        gates = result["review_gates"]
+        self.assertFalse(gates["strict_subset_ready"])
+        self.assertFalse(gates["exact_no_data_policy"])
+        self.assertTrue(gates["no_data_only_blocks_strict_automation"])
+        self.assertTrue(gates["source_faithful_query"])
+        self.assertTrue(gates["supported_provenance"])
+        self.assertTrue(gates["explicit_threshold"])
+        self.assertTrue(gates["single_source_query"])
+        self.assertTrue(gates["simple_expression_graph"])
+        self.assertTrue(gates["static_labels"])
+        self.assertTrue(gates["dashboard_link_safe"])
+
+    def test_grafana_unified_dashboard_annotations_are_preserved_as_tags(self):
+        ir = build_alerting_ir_from_grafana_unified(
+            _grafana_unified_rule(),
+            datasource_map={"prometheus": {"type": "prometheus", "name": "Prometheus"}},
+        )
+        result = map_alert_to_kibana_payload(ir)
+
+        self.assertEqual(result["automation_tier"], "draft_requires_review")
+        self.assertTrue(result["valid"])
+        self.assertIn("grafana_dashboard_uid:dash-123", result["rule_payload"]["tags"])
+        self.assertIn("grafana_panel_id:42", result["rule_payload"]["tags"])
+        self.assertFalse(result["review_gates"]["dashboard_link_safe"])
+        self.assertFalse(result["review_gates"]["strict_subset_ready"])
+
+    def test_grafana_unified_safe_dashboard_link_requires_review_but_keeps_tags(self):
+        rule = _grafana_unified_prometheus_safe_rule()
+        rule["annotations"] = {
+            "summary": "CPU is above threshold",
+            "__dashboardUid__": "dash-123",
+            "__panelId__": "42",
+        }
+        ir = build_alerting_ir_from_grafana_unified(
+            rule,
+            datasource_map={"prometheus": {"type": "prometheus", "name": "Prometheus"}},
+        )
+        result = map_alert_to_kibana_payload(ir)
+
+        self.assertEqual(result["automation_tier"], "draft_requires_review")
+        self.assertTrue(result["valid"])
+        self.assertIn("grafana_dashboard_uid:dash-123", result["rule_payload"]["tags"])
+        self.assertIn("grafana_panel_id:42", result["rule_payload"]["tags"])
+        self.assertFalse(result["review_gates"]["dashboard_link_safe"])
+        self.assertFalse(result["review_gates"]["strict_subset_ready"])
+
     def test_grafana_unified_prometheus_outside_native_boundary_is_manual(self):
         ir = build_alerting_ir_from_grafana_unified(
             _grafana_unified_unsupported_prometheus_rule(),
@@ -1718,6 +1911,14 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertEqual(result["automation_tier"], "manual_required")
         self.assertFalse(result["valid"])
         self.assertEqual(result["rule_payload"], {})
+
+    def test_datadog_service_check_manual_reason_names_manual_only_family(self):
+        ir = build_alerting_ir_from_datadog(_datadog_service_check_monitor())
+        result = map_alert_to_kibana_payload(ir)
+
+        self.assertEqual(result["automation_tier"], "manual_required")
+        self.assertFalse(result["valid"])
+        self.assertIn("service check", result["payload_status_reason"].lower())
 
     def test_datadog_metric_with_explicit_translated_query_is_valid(self):
         ir = build_alerting_ir_from_datadog(_datadog_metric_monitor())
@@ -1793,50 +1994,55 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
         self.assertIn("PERCENTILE(duration, 99)", result["rule_payload"]["params"]["esqlQuery"]["esql"])
+        self.assertEqual(result["rule_payload"]["params"]["timeWindowSize"], 10)
+        self.assertEqual(result["rule_payload"]["params"]["timeWindowUnit"], "m")
 
-    def test_datadog_as_rate_query_with_profile_translation_is_manual(self):
+    def test_datadog_as_rate_query_with_profile_translation_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
         ir = build_alerting_ir_from_datadog(_datadog_as_rate_query_alert(), field_map=field_map)
         result = map_alert_to_kibana_payload(ir)
 
-        self.assertEqual(result["automation_tier"], "manual_required")
-        self.assertFalse(result["valid"])
-        self.assertEqual(result["rule_payload"], {})
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
 
-    def test_datadog_rollup_query_with_profile_translation_is_manual(self):
+    def test_datadog_rollup_query_with_profile_translation_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
         ir = build_alerting_ir_from_datadog(_datadog_rollup_query_alert(), field_map=field_map)
         result = map_alert_to_kibana_payload(ir)
 
-        self.assertEqual(result["automation_tier"], "manual_required")
-        self.assertFalse(result["valid"])
-        self.assertEqual(result["rule_payload"], {})
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
 
-    def test_datadog_default_zero_query_with_profile_translation_is_manual(self):
+    def test_datadog_default_zero_query_with_profile_translation_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
         ir = build_alerting_ir_from_datadog(_datadog_default_zero_query_alert(), field_map=field_map)
         result = map_alert_to_kibana_payload(ir)
 
-        self.assertEqual(result["automation_tier"], "manual_required")
-        self.assertFalse(result["valid"])
-        self.assertEqual(result["rule_payload"], {})
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
 
-    def test_datadog_formula_query_alert_is_manual(self):
+    def test_datadog_formula_query_alert_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("otel")
+        field_map.metric_map["redis.mem.used"] = "redis.mem.used"
+        field_map.metric_map["redis.mem.maxmemory"] = "redis.mem.maxmemory"
         ir = build_alerting_ir_from_datadog(_datadog_formula_ratio_query_alert(), field_map=field_map)
         result = map_alert_to_kibana_payload(ir)
 
-        self.assertEqual(result["automation_tier"], "manual_required")
-        self.assertFalse(result["valid"])
-        self.assertEqual(result["rule_payload"], {})
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
+        self.assertIn("q1 = AVG(redis.mem.used)", result["rule_payload"]["params"]["esqlQuery"]["esql"])
 
     def test_datadog_formula_as_count_error_rate_query_alert_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1884,6 +2090,7 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertEqual(result["automation_tier"], "manual_required")
         self.assertFalse(result["valid"])
         self.assertEqual(result["rule_payload"], {})
+        self.assertIn("anomaly alert monitors are intentionally manual-only", result["payload_status_reason"])
 
     def test_datadog_exclude_null_query_alert_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1939,6 +2146,10 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertEqual(result["selected_target_rule_type"], "")
         self.assertEqual(result["target_rule_type"], "")
         self.assertFalse(result["payload_emitted"])
+        self.assertIn("formula monitor requires manual review", result["payload_status_reason"].lower())
+        self.assertNotIn("no source-faithful target query", result["payload_status_reason"].lower())
+        self.assertFalse(ir.metadata.get("parse_degraded"))
+        self.assertFalse(any("parse degraded" in warning.lower() for warning in ir.warnings))
 
     def test_datadog_calendar_shift_query_alert_with_stable_offset_timezone_is_automated(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
@@ -1952,19 +2163,19 @@ class TestMapAlertToKibanaPayload(unittest.TestCase):
         self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
         self.assertIn("NOW() - 1 days", result["rule_payload"]["params"]["esqlQuery"]["esql"])
 
-    def test_datadog_exclude_null_rollup_query_alert_stays_manual_with_translation(self):
+    def test_datadog_exclude_null_rollup_query_alert_is_automated_with_translation(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
         field_map = load_profile("elastic_agent")
         ir = build_alerting_ir_from_datadog(_datadog_exclude_null_rollup_query_alert(), field_map=field_map)
         result = map_alert_to_kibana_payload(ir)
 
-        self.assertEqual(result["automation_tier"], "manual_required")
-        self.assertFalse(result["valid"])
-        self.assertEqual(result["rule_payload"], {})
+        self.assertEqual(result["automation_tier"], "automated")
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["rule_payload"]["rule_type_id"], ES_QUERY_RULE_TYPE)
         self.assertEqual(result["selected_target_rule_type"], ES_QUERY_RULE_TYPE)
-        self.assertEqual(result["target_rule_type"], "")
-        self.assertFalse(result["payload_emitted"])
+        self.assertEqual(result["target_rule_type"], ES_QUERY_RULE_TYPE)
+        self.assertTrue(result["payload_emitted"])
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
         self.assertIn("host.name IS NOT NULL", ir.translated_query)
 
@@ -1997,7 +2208,7 @@ class TestMapAlertsBatch(unittest.TestCase):
 
         result = map_alerts_batch(alerts)
 
-        self.assertEqual(result["summary"]["by_target_rule_type"].get(ES_QUERY_RULE_TYPE), 1)
+        self.assertEqual(result["summary"]["by_target_rule_type"].get(ES_QUERY_RULE_TYPE), 2)
         self.assertEqual(result["summary"]["by_selected_target_rule_type"].get(ES_QUERY_RULE_TYPE), 2)
 
 
@@ -2028,8 +2239,8 @@ class TestDatadogMonitorComparisonArtifact(unittest.TestCase):
             row["target"]["rule_payload"],
             mapping_batch["results"][0]["mapping"]["rule_payload"],
         )
-        self.assertEqual(row["target"]["automation_tier"], "manual_required")
-        self.assertTrue(any("approximated" in reason for reason in row["blocked_reasons"]))
+        self.assertEqual(row["target"]["automation_tier"], "automated")
+        self.assertFalse(any("approximated" in reason for reason in row["blocked_reasons"]))
         self.assertIn("semantic_losses", row)
 
     def test_build_monitor_comparison_results_includes_payload_validation(self):
@@ -2076,6 +2287,40 @@ class TestDatadogMonitorComparisonArtifact(unittest.TestCase):
         self.assertTrue(row["blocked_reasons"])
         self.assertTrue(any("duration" in reason for reason in row["blocked_reasons"]))
 
+    def test_build_monitor_comparison_results_includes_parser_diagnostics(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+        from observability_migration.adapters.source.datadog.report import build_monitor_comparison_results
+
+        raw_monitor = _datadog_log_monitor()
+        raw_monitor["query"] = (
+            'logs("service:checkout AND (status:error OR host:api").index("*").rollup("count").last("5m") > 3'
+        )
+        field_map = load_profile("otel")
+        ir = build_alerting_ir_from_datadog(raw_monitor, field_map=field_map)
+        mapping_batch = map_alerts_batch([ir])
+        comparison = build_monitor_comparison_results([raw_monitor], [ir], mapping_batch)
+
+        row = comparison["monitors"][0]
+        self.assertTrue(row["translation"]["parse_degraded"])
+        codes = {
+            str(item.get("code", ""))
+            for item in row["translation"]["parser_diagnostics"]
+            if isinstance(item, dict)
+        }
+        self.assertIn("LOG_BOOLEAN_FALLBACK", codes)
+
+    def test_build_monitor_comparison_results_uses_service_check_block_reason(self):
+        from observability_migration.adapters.source.datadog.report import build_monitor_comparison_results
+
+        raw_monitor = _datadog_service_check_monitor()
+        ir = build_alerting_ir_from_datadog(raw_monitor)
+        mapping_batch = map_alerts_batch([ir])
+        comparison = build_monitor_comparison_results([raw_monitor], [ir], mapping_batch)
+
+        row = comparison["monitors"][0]
+        self.assertTrue(row["blocked_reasons"])
+        self.assertTrue(any("service check" in reason.lower() for reason in row["blocked_reasons"]))
+
     def test_build_monitor_comparison_results_exposes_selected_vs_emitted_rule_type(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
         from observability_migration.adapters.source.datadog.report import build_monitor_comparison_results
@@ -2089,8 +2334,8 @@ class TestDatadogMonitorComparisonArtifact(unittest.TestCase):
 
         row = comparison["monitors"][0]
         self.assertEqual(row["target"]["selected_target_rule_type"], ES_QUERY_RULE_TYPE)
-        self.assertEqual(row["target"]["target_rule_type"], "")
-        self.assertFalse(row["target"]["payload_emitted"])
+        self.assertEqual(row["target"]["target_rule_type"], ES_QUERY_RULE_TYPE)
+        self.assertTrue(row["target"]["payload_emitted"])
         self.assertFalse(any("No suitable target rule type" in reason for reason in row["blocked_reasons"]))
 
 
@@ -2108,12 +2353,12 @@ class TestDatadogMonitorMigrationResultsArtifact(unittest.TestCase):
 
         results = build_monitor_migration_results(irs)
 
-        self.assertEqual(results["by_target_rule_type"].get("es-query"), 1)
+        self.assertEqual(results["by_target_rule_type"].get("es-query"), 2)
         self.assertEqual(results["by_selected_target_rule_type"].get("es-query"), 2)
-        blocked = next(row for row in results["monitors"] if row["name"] == "CPU exclude_null rollup wrapper")
-        self.assertEqual(blocked["target_rule_type"], "")
-        self.assertEqual(blocked["selected_target_rule_type"], "es-query")
-        self.assertEqual(blocked["payload_emitted"], False)
+        translated = next(row for row in results["monitors"] if row["name"] == "CPU exclude_null rollup wrapper")
+        self.assertEqual(translated["target_rule_type"], "es-query")
+        self.assertEqual(translated["selected_target_rule_type"], "es-query")
+        self.assertEqual(translated["payload_emitted"], True)
 
 
 # =====================================================================
@@ -2153,6 +2398,22 @@ class TestGrafanaAlertComparisonArtifact(unittest.TestCase):
         self.assertEqual(row["target"]["automation_tier"], "manual_required")
         self.assertTrue(row["blocked_reasons"])
         self.assertTrue(any("No source-faithful target query" in reason for reason in row["blocked_reasons"]))
+
+    def test_build_alert_comparison_results_includes_review_gates(self):
+        from observability_migration.adapters.source.grafana.alerts import build_alert_comparison_results
+
+        raw_rule = _grafana_unified_prometheus_rule()
+        datasource_map = {"prometheus": {"type": "prometheus", "name": "Prometheus"}}
+        ir = build_alerting_ir_from_grafana_unified(raw_rule, datasource_map=datasource_map)
+        mapping_batch = map_alerts_batch([ir])
+
+        comparison = build_alert_comparison_results([raw_rule], [ir], mapping_batch)
+
+        row = comparison["alerts"][0]
+        self.assertIn("review_gates", row["target"])
+        self.assertFalse(row["target"]["review_gates"]["strict_subset_ready"])
+        self.assertFalse(row["target"]["review_gates"]["exact_no_data_policy"])
+        self.assertTrue(row["target"]["review_gates"]["no_data_only_blocks_strict_automation"])
 
 
 class TestGrafanaAlertMigrationResultsArtifact(unittest.TestCase):
@@ -2243,7 +2504,42 @@ class TestAlertSupportReportCoverageContract(unittest.TestCase):
             self.assertIn("grouped_family_breakdown", summary[source_name])
             self.assertIn("detailed_family_breakdown", summary[source_name])
             self.assertIn("missing_expected_detailed_families", summary[source_name])
+            self.assertIn("parser_diagnostic_breakdown", summary[source_name])
             self.assertEqual(summary[source_name]["missing_expected_detailed_families"], [], source_name)
+
+    def test_support_summary_rolls_up_parser_diagnostic_codes(self):
+        from scripts.generate_alert_support_report import build_support_summary
+
+        summary = build_support_summary(
+            {"total": 0, "summary": {"by_automation_tier": {}}, "alerts": []},
+            {
+                "total": 1,
+                "summary": {"by_automation_tier": {"manual_required": 1}},
+                "monitors": [
+                    {
+                        "name": "broken log monitor",
+                        "kind": "datadog_log",
+                        "source": {"query": "service:web AND (status:error OR host:api"},
+                        "translation": {
+                            "warnings": ["Datadog log search parse degraded; manual review required"],
+                            "parser_diagnostics": [
+                                {
+                                    "code": "LOG_BOOLEAN_FALLBACK",
+                                    "message": "Datadog log parser used boolean fallback and may alter precedence",
+                                    "degraded": True,
+                                }
+                            ],
+                        },
+                        "target": {"automation_tier": "manual_required"},
+                        "semantic_losses": [],
+                        "blocked_reasons": [],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(summary["datadog"]["parser_diagnostic_breakdown"][0]["code"], "LOG_BOOLEAN_FALLBACK")
+        self.assertEqual(summary["datadog"]["parser_diagnostic_breakdown"][0]["count"], 1)
 
     def test_support_summary_marks_formula_family_with_supported_datadog_case(self):
         from scripts.generate_alert_support_report import build_support_summary
@@ -2277,7 +2573,7 @@ class TestAlertSupportReportCoverageContract(unittest.TestCase):
             )
         )
 
-    def test_support_summary_keeps_exclude_null_manual_warning_case_visible(self):
+    def test_support_summary_removes_exclude_null_manual_warning_case(self):
         from scripts.generate_alert_support_report import build_support_summary
 
         summary = build_support_summary(
@@ -2285,7 +2581,7 @@ class TestAlertSupportReportCoverageContract(unittest.TestCase):
             self._build_datadog_example_comparison(),
         )
 
-        self.assertTrue(
+        self.assertFalse(
             any(
                 row["family"] == "Metric/query alerts with exclude_null()"
                 and row["automation_tier"] == "manual_required"
@@ -2424,6 +2720,17 @@ class TestAlertSupportReportCoverageContract(unittest.TestCase):
         self.assertIn("- Selected rule type: `.es-query`", markdown)
         self.assertIn("- Emitted rule type: `none`", markdown)
         self.assertIn("- Payload emitted: `no`", markdown)
+
+    def test_support_report_reason_summary_calls_out_no_data_only_grafana_review_case(self):
+        from scripts.generate_alert_support_report import _reason_summary
+
+        comparison = self._build_grafana_example_comparison()
+        row = next(item for item in comparison["alerts"] if item["name"] == "High CPU usage")
+
+        self.assertIn(
+            "only exact no-data parity blocks automated promotion",
+            _reason_summary(row).lower(),
+        )
 
     def test_prepare_datadog_input_dir_synthesizes_placeholder_dashboard(self):
         import scripts.generate_alert_support_report as report
@@ -2579,9 +2886,9 @@ class TestAlertingIRSerialization(unittest.TestCase):
 
         d = ir.to_dict()
         self.assertEqual(d["selected_target_rule_type"], "es-query")
-        self.assertEqual(d["target_rule_type"], "")
-        self.assertEqual(d["payload_emitted"], False)
-        self.assertEqual(d["payload_status"], "blocked_manual_review")
+        self.assertEqual(d["target_rule_type"], "es-query")
+        self.assertEqual(d["payload_emitted"], True)
+        self.assertEqual(d["payload_status"], "emitted")
 
 
 # =====================================================================
@@ -2937,12 +3244,12 @@ class TestDatadogCliFetchMonitorsFlag(unittest.TestCase):
 
 class TestMigrationResultAlertFields(unittest.TestCase):
     def test_default_alert_fields(self):
-        result = MigrationResult(dashboard_title="Test", dashboard_uid="uid-1")
+        result = MigrationResult("Test", "uid-1")
         self.assertEqual(result.alert_results, [])
         self.assertEqual(result.alert_summary, {})
 
     def test_alert_fields_can_be_populated(self):
-        result = MigrationResult(dashboard_title="Test", dashboard_uid="uid-1")
+        result = MigrationResult("Test", "uid-1")
         ir = build_alerting_ir_from_datadog(_datadog_metric_monitor())
         result.alert_results = [ir.to_dict()]
         result.alert_summary = {"total": 1, "automated": 0, "draft_review": 1, "manual_required": 0}

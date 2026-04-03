@@ -95,6 +95,9 @@ def build_monitor_comparison_results(
         source_tags = raw.get("tags")
         if not isinstance(source_tags, list):
             source_tags = list(getattr(ir, "metadata", {}).get("tags", []) or [])
+        metadata = getattr(ir, "metadata", {}) if isinstance(getattr(ir, "metadata", {}), dict) else {}
+        parser_diagnostics = list(metadata.get("parser_diagnostics", []) or [])
+        parse_degraded = bool(metadata.get("parse_degraded"))
 
         monitor_row = {
             "alert_id": getattr(ir, "alert_id", ""),
@@ -112,6 +115,8 @@ def build_monitor_comparison_results(
                 "provenance": getattr(ir, "translated_query_provenance", ""),
                 "warnings": list(getattr(ir, "warnings", []) or []),
                 "group_by": list(getattr(ir, "group_by", []) or []),
+                "parser_diagnostics": parser_diagnostics,
+                "parse_degraded": parse_degraded,
             },
             "target": {
                 "automation_tier": automation_tier,

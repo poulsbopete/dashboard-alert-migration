@@ -1,6 +1,6 @@
 # Kibana Alert Migration Blockers
 
-Snapshot date: `2026-04-01`
+Snapshot date: `2026-04-02`
 
 ## Purpose
 
@@ -25,13 +25,13 @@ path `examples/alerting/generated/alert_support_standings.md`.
 
 | Source | Total cases | Automated | Draft review | Manual required |
 | --- | ---: | ---: | ---: | ---: |
-| Grafana | 24 | 6 | 3 | 15 |
-| Datadog | 35 | 10 | 4 | 21 |
+| Grafana | 27 | 6 | 5 | 16 |
+| Datadog | 35 | 11 | 4 | 20 |
 
 Important Datadog nuance:
 
-- The current raw Datadog results show `18` monitors where `.es-query` is the
-  selected target rule type, but only `14` emitted `.es-query` payloads. The
+- The current raw Datadog results show `19` monitors where `.es-query` is the
+  selected target rule type, but only `15` emitted `.es-query` payloads. The
   missing `4` are intentionally blocked because the translated query is still
   approximate and therefore not source-faithful. See the local artifact path
   `examples/alerting/generated/datadog/monitor_migration_results.json`.
@@ -40,15 +40,32 @@ Top blockers from the current generated artifacts:
 
 | Source | Blocker | Cases |
 | --- | --- | ---: |
-| Grafana | No source-faithful target query could be produced | 15 |
-| Grafana | no-data policy `NoData` may not have exact Kibana equivalent | 15 |
-| Datadog | No source-faithful target query could be produced | 17 |
+| Grafana | No source-faithful target query could be produced | 16 |
+| Grafana | no-data policy `NoData` may not have exact Kibana equivalent | 16 |
+| Datadog | No source-faithful target query could be produced | 4 |
 | Datadog | rollup interval is approximated in ES\|QL | 2 |
-| Datadog | Datadog formula monitor requires manual review outside the current exact subset | 2 |
+| Datadog | Datadog formula monitor requires manual review outside the current exact subset | 1 |
 | Datadog | rate semantics approximated with delta over observed bucket span | 1 |
 | Datadog | default_zero semantics are approximated in ES\|QL | 1 |
 | Datadog | Datadog recovery/trigger threshold windows not directly portable | 1 |
 | Datadog | Datadog require_full_window semantics differ from Kibana evaluation | 1 |
+| Datadog | Datadog composite monitors depend on cross-monitor state and require manual migration | 1 |
+| Datadog | Datadog service check monitors use status-count semantics and require manual migration | 1 |
+
+The Datadog comparison artifacts now preserve explicit manual-only blocked
+reasons for service checks and other product-specific monitor families, so the
+generated standings no longer lump those cases into the generic
+`No source-faithful target query could be produced` bucket.
+
+The Grafana comparison artifacts also expose
+`target.review_gates.no_data_only_blocks_strict_automation` for unified rules
+whose source-faithful query is ready but whose promotion from
+`draft_requires_review` to `automated` is still blocked solely by exact
+`NoData` parity.
+
+These blocker buckets can overlap. For example, the same Grafana manual rule
+can contribute both the `No source-faithful target query` and `NoData`
+rows when query fidelity and no-data parity are both unresolved.
 
 ## Evidence Base
 
@@ -92,9 +109,9 @@ Top blockers from the current generated artifacts:
 
 ### Summary
 
-Grafana currently has `15` `manual_required` cases out of `24`.
+Grafana currently has `16` `manual_required` cases out of `27`.
 
-Those `15` blockers are dominated by two things:
+Those `16` blockers are dominated by two things:
 
 - advanced PromQL semantics outside the current exact migration boundary
 - non-PromQL datasource alert families
@@ -108,8 +125,8 @@ Kibana rule path we emit today.
 | Bucket | Cases | Example alerts | Why the current migration keeps them manual |
 | --- | ---: | --- | --- |
 | Advanced PromQL semantics outside the current exact boundary | 13 | `Pinned timestamp CPU`, `Subquery request rate`, `Label replace CPU`, `CPU unless network down` | These alerts rely on PromQL semantics that are documented by Prometheus but not yet preserved by our exact alert-emission path. In current artifacts, all of these remain blocked with `No source-faithful target query could be produced`. |
-| Non-PromQL datasource alert families | 2 | `Error log spike`, `Graphite queue depth` | The current target path is built around Kibana query rules over Elasticsearch data. No source-faithful target query is produced for Loki / LogQL or Graphite alert expressions in the current implementation. |
-| Grafana `NoData` / `Error` semantics mismatch | cross-cutting | affects all 15 manual Grafana cases, plus some emitted rules | Grafana-managed alert rules have documented `No Data` and `Error` states, including `DatasourceNoData` / `DatasourceError` behaviors and configurable transitions. Our current Kibana query-rule path does not provide a generic one-to-one equivalent for those semantics. |
+| Non-PromQL datasource alert families | 3 | `Error log spike`, `High Error Rate in Logs`, `Graphite queue depth` | The current target path is built around Kibana query rules over Elasticsearch data. No source-faithful target query is produced for Loki / LogQL or Graphite alert expressions in the current implementation. |
+| Grafana `NoData` / `Error` semantics mismatch | cross-cutting | affects all 16 manual Grafana cases, plus some emitted rules | Grafana-managed alert rules have documented `No Data` and `Error` states, including `DatasourceNoData` / `DatasourceError` behaviors and configurable transitions. Our current Kibana query-rule path does not provide a generic one-to-one equivalent for those semantics. |
 
 ### The Blocked PromQL Families In The Current Curated Suite
 
@@ -152,7 +169,7 @@ Important nuance:
 
 The current curated non-PromQL blocker families are:
 
-- `Loki / LogQL` via `Error log spike`
+- `Loki / LogQL` via `Error log spike` and `High Error Rate in Logs`
 - `Graphite datasource` via `Graphite queue depth`
 
 These are not simple threshold-mapping gaps. They are source-language gaps. The
@@ -185,9 +202,9 @@ discussion because they represent parity gaps:
 
 ### Summary
 
-Datadog currently has `21` `manual_required` cases out of `35`.
+Datadog currently has `20` `manual_required` cases out of `35`.
 
-Those `21` blockers fall into four main categories:
+Those `20` blockers fall into four main categories:
 
 - translated candidate query exists, but we intentionally do not emit because it
   is approximate
@@ -202,7 +219,7 @@ Those `21` blockers fall into four main categories:
 | Bucket | Cases | Example monitors | Why the current migration keeps them manual |
 | --- | ---: | --- | --- |
 | Approximation-blocked metric/query alerts with selected `.es-query` candidate but no emitted payload | 4 | `Checkout request rate is high`, `CPU rollup is high`, `CrashloopBackOff`, `CPU exclude_null rollup wrapper` | The translator can produce an ES\|QL candidate, but current semantics are still approximate for `as_rate()`, `rollup()`, and `default_zero()`. We intentionally block payload emission rather than claiming exact support. |
-| Formula / time-shift boundaries with no source-faithful query | 2 | `[Redis] High memory consumption`, `CPU calendar_shift timezone-sensitive` | Exact automation currently covers only a stricter Datadog formula subset. Broader arithmetic formulas and DST-sensitive `calendar_shift()` are still manual. |
+| Formula / time-shift boundaries with no source-faithful query | 1 | `CPU calendar_shift timezone-sensitive` | Exact automation now covers the curated aligned unshifted gauge-arithmetic formula case plus the prior `as_count()` / shifted subset. DST-sensitive `calendar_shift()` remains manual. |
 | Analytical monitor families | 3 | anomaly, forecast, outlier examples | Datadog defines these as algorithmic monitor types with historical / predictive / peer-comparison semantics. The current Kibana rule types we target do not provide a source-faithful generic equivalent. |
 | Product-specific / manual-only monitor families | 12 | composite, service check, event, APM, RUM, Synthetics, CI, SLO, audit, cost, network, watchdog | These rely on Datadog product surfaces, cross-monitor state, or status semantics that do not map cleanly to the generic Kibana query rules we emit today. |
 
@@ -230,16 +247,16 @@ Relevant Datadog references:
 
 ### Formula And `calendar_shift()` Boundaries
 
-The current curated manual Datadog formula / time-shift blockers are:
+The current curated manual Datadog formula / time-shift blocker is:
 
-- broader arithmetic formula monitor:
-  `[Redis] High memory consumption`
 - DST-sensitive `calendar_shift()`:
   `CPU calendar_shift timezone-sensitive`
 
 Current exact boundary:
 
 - arithmetic formulas over the current exact `as_count()` subset
+- aligned unshifted gauge-arithmetic formulas with matching aggregation, scope,
+  and group-by
 - single-query shifted formulas such as `week_before()`, `timeshift()`, and
   `calendar_shift()` in `UTC` or stable-offset IANA time zones for day / week /
   month shifts

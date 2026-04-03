@@ -42,6 +42,18 @@ Generated outputs land in the ignored local artifact directory:
 - `examples/alerting/generated/datadog/monitor_migration_results.json`
 - `examples/alerting/generated/datadog/monitor_comparison_results.json`
 
+Artifact notes:
+
+- Grafana unified alert comparison rows include `target.review_gates`, which
+  show exactly which strict-subset checks passed or failed before a rule could
+  be promoted from `draft_requires_review` to `automated`. The
+  `no_data_only_blocks_strict_automation` gate highlights the common case where
+  source-faithful query migration succeeded and only exact Grafana `NoData`
+  parity still blocks auto-promotion.
+- Datadog manual-only families now preserve explicit `payload_status_reason`
+  / `blocked_reasons` values so policy-manual monitor families are
+  distinguishable from translation failures.
+
 ## Example Suites
 
 - Grafana file-based examples: `examples/alerting/grafana`

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .status import AssetStatus
 
 _REL_LAST_RE = re.compile(
-    r"(?:\blast_\s*(\d+\s*[smhdw])\b|\blast\s*\(\s*(\d+\s*[smhdw])\s*\))",
+    r"(?:\blast_\s*(\d+\s*[smhdw])\b|\blast\s*\(\s*['\"]?(\d+\s*[smhdw])['\"]?\s*\))",
     re.IGNORECASE,
 )
 
@@ -123,9 +123,25 @@ def _parse_datadog_query_time_window(query: str) -> str:
     return _datadog_seconds_to_window(total_seconds)
 
 
-def _datadog_kind(monitor_type: str) -> str:
+def _datadog_metric_family_kind(query: str) -> str:
+    expression = str(query or "").strip().lower()
+    if ":" in expression:
+        expression = expression.split(":", 1)[1].strip()
+    if expression.startswith("anomalies(") or expression.startswith("anomaly("):
+        return "datadog_anomaly_alert"
+    if expression.startswith("forecast("):
+        return "datadog_forecast"
+    if expression.startswith("outliers(") or expression.startswith("outlier("):
+        return "datadog_outlier"
+    return ""
+
+
+def _datadog_kind(monitor_type: str, query: str = "") -> str:
     t = (monitor_type or "").lower().strip()
     if t in ("metric alert", "query alert"):
+        family_kind = _datadog_metric_family_kind(query)
+        if family_kind:
+            return family_kind
         return "datadog_metric"
     if t == "log alert":
         return "datadog_log"
@@ -375,9 +391,9 @@ def build_alerting_ir_from_datadog(
 ) -> AlertingIR:
     """Build an AlertingIR from a raw Datadog monitor API-style dict."""
     mtype = str(monitor.get("type", "") or "")
-    kind = _datadog_kind(mtype)
-    opts = monitor.get("options") if isinstance(monitor.get("options"), dict) else {}
     query = str(monitor.get("query", "") or "")
+    kind = _datadog_kind(mtype, query)
+    opts = monitor.get("options") if isinstance(monitor.get("options"), dict) else {}
     name = str(monitor.get("name", "") or "")
     alert_id = str(monitor.get("id", "") or monitor.get("monitor_id", "") or "")
 
@@ -428,6 +444,10 @@ def build_alerting_ir_from_datadog(
             ir.group_by = list(translation.group_by)
         if translation.warnings:
             ir.warnings.extend(w for w in translation.warnings if w not in ir.warnings)
+        if translation.parse_diagnostics:
+            ir.metadata["parser_diagnostics"] = list(translation.parse_diagnostics)
+        if translation.parse_degraded:
+            ir.metadata["parse_degraded"] = True
 
     return ir
 

@@ -10,7 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .field_map import FieldMapProfile
-from .log_parser import log_ast_to_esql_where, log_ast_to_kql, parse_log_query
+from .log_parser import log_ast_to_esql_where, log_ast_to_kql, parse_log_query_result
 from .models import (
     FormulaBinOp,
     FormulaFuncCall,
@@ -27,7 +27,8 @@ from .models import (
     ScopeBoolOp,
     TagFilter,
 )
-from .query_parser import ParseError, parse_formula, parse_metric_query
+from .parser_results import ParserResult
+from .query_parser import parse_formula_result, parse_metric_query_result
 from .translate import (
     _esql_escape,
     _esql_identifier,
@@ -96,6 +97,8 @@ _SUPPORTED_SHIFTED_FORMULA_FUNCTIONS = {
 _FORMULA_MONITOR_MANUAL_WARNING = (
     "Datadog formula monitor requires manual review; exact support currently covers "
     "arithmetic formulas over as_count() metrics with sum aggregation, plus "
+    "arithmetic formulas over aligned unshifted gauge metrics with matching aggregation, "
+    "scope, and group-by, plus "
     "single-query shifted formulas such as week_before(), calendar_shift() in UTC "
     "or stable-offset IANA time zones for day/week/month shifts, and timeshift()"
 )
@@ -107,6 +110,8 @@ class DatadogMonitorTranslation:
     translated_query_provenance: str = ""
     group_by: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    parse_diagnostics: list[dict[str, Any]] = field(default_factory=list)
+    parse_degraded: bool = False
 
 
 @dataclass
@@ -114,6 +119,19 @@ class _FormulaMonitorQueryRef:
     metric_query: Any
     shift_seconds: int = 0
     shift_esql_span: str = ""
+
+
+def _parser_diagnostics_as_dicts(parse_result: ParserResult) -> list[dict[str, Any]]:
+    return [diagnostic.to_dict() for diagnostic in parse_result.diagnostics]
+
+
+def _parser_degraded_warnings(context: str, diagnostics: list[dict[str, Any]]) -> list[str]:
+    warnings = [f"{context} parse degraded; manual review required"]
+    for diagnostic in diagnostics:
+        message = str(diagnostic.get("message", "") or "").strip()
+        if message and message not in warnings:
+            warnings.append(message)
+    return warnings
 
 
 def translate_monitor_to_alert_query(
@@ -148,6 +166,7 @@ def _translate_metric_monitor(
         return DatadogMonitorTranslation()
 
     time_agg = str(match.group("time_agg") or "").lower()
+    window = f"last_{str(match.group('window') or '').strip()}"
     metric_query_text = str(match.group("metric_query") or "").strip()
     comparator = str(match.group("comparator") or "").strip()
     threshold = float(match.group("threshold"))
@@ -155,7 +174,15 @@ def _translate_metric_monitor(
     if time_agg not in _SUPPORTED_METRIC_TIME_AGGS:
         return DatadogMonitorTranslation()
 
-    metric_query, outer_functions = _parse_metric_monitor_query(metric_query_text)
+    metric_query, outer_functions, parse_diagnostics, parse_degraded = _parse_metric_monitor_query(
+        metric_query_text
+    )
+    if parse_degraded:
+        return DatadogMonitorTranslation(
+            warnings=_parser_degraded_warnings("Datadog metric monitor query", parse_diagnostics),
+            parse_diagnostics=parse_diagnostics,
+            parse_degraded=True,
+        )
     if metric_query is None:
         return DatadogMonitorTranslation()
     if not _metric_query_is_supported(metric_query, outer_functions):
@@ -164,13 +191,30 @@ def _translate_metric_monitor(
     if time_agg != metric_query.space_agg and time_agg != "last":
         return DatadogMonitorTranslation()
 
+    window_seconds = _monitor_span_to_seconds(window)
+    exact_rate_supported = _metric_monitor_exact_as_rate_supported(
+        metric_query,
+        outer_functions,
+        time_agg=time_agg,
+        window_seconds=window_seconds,
+    )
+    exact_rollup_supported = _metric_monitor_exact_rollup_supported(
+        metric_query,
+        outer_functions,
+        time_agg=time_agg,
+        window_seconds=window_seconds,
+    )
+    exact_default_zero_supported = _metric_monitor_exact_default_zero_supported(
+        metric_query,
+        outer_functions,
+        time_agg=time_agg,
+        comparator=comparator,
+        threshold=threshold,
+        exact_rate=exact_rate_supported,
+        exact_rollup=exact_rollup_supported,
+    )
+
     metric_field = _resolve_metric_field(metric_query.metric, field_map)
-    agg_expr = _metric_agg_expr(time_agg, metric_field, metric_query)
-    if not agg_expr:
-        return DatadogMonitorTranslation()
-    agg_expr = _apply_outer_metric_functions(agg_expr, outer_functions)
-    if not agg_expr:
-        return DatadogMonitorTranslation()
     metric_capability_issues = _metric_query_field_issues(metric_query, metric_field, field_map)
     if _metric_caps_loaded(field_map) and metric_capability_issues:
         return DatadogMonitorTranslation(warnings=metric_capability_issues)
@@ -184,6 +228,51 @@ def _translate_metric_monitor(
     if exclude_null_clauses is None:
         return DatadogMonitorTranslation()
     where_clauses.extend(exclude_null_clauses)
+
+    if exact_rollup_supported:
+        exact_rollup_query = _build_exact_rollup_metric_query(
+            metric_index=field_map.metric_index,
+            where_clauses=where_clauses,
+            group_by=[
+                _esql_identifier(field_map.map_tag(tag, context="metric"))
+                for tag in metric_query.group_by
+            ],
+            metric_field=metric_field,
+            time_agg=time_agg,
+            metric_query=metric_query,
+            window_seconds=window_seconds,
+            comparator=comparator,
+            threshold=threshold,
+        )
+        if not exact_rollup_query:
+            return DatadogMonitorTranslation()
+        return DatadogMonitorTranslation(
+            translated_query=exact_rollup_query,
+            translated_query_provenance="translated_esql",
+            group_by=[
+                _esql_identifier(field_map.map_tag(tag, context="metric"))
+                for tag in metric_query.group_by
+            ],
+            warnings=_metric_monitor_warnings(
+                metric_query,
+                outer_functions,
+                exact_rate=exact_rate_supported,
+                exact_rollup=exact_rollup_supported,
+                exact_default_zero=exact_default_zero_supported,
+            ),
+        )
+
+    agg_expr = _metric_agg_expr(
+        time_agg,
+        metric_field,
+        metric_query,
+        exact_rate_window_seconds=window_seconds if exact_rate_supported else 0,
+    )
+    if not agg_expr:
+        return DatadogMonitorTranslation()
+    agg_expr = _apply_outer_metric_functions(agg_expr, outer_functions)
+    if not agg_expr:
+        return DatadogMonitorTranslation()
 
     lines = [f"FROM {field_map.metric_index}"]
     if where_clauses:
@@ -200,7 +289,13 @@ def _translate_metric_monitor(
         translated_query="\n".join(lines),
         translated_query_provenance="translated_esql",
         group_by=group_by,
-        warnings=_metric_monitor_warnings(metric_query, outer_functions),
+        warnings=_metric_monitor_warnings(
+            metric_query,
+            outer_functions,
+            exact_rate=exact_rate_supported,
+            exact_rollup=exact_rollup_supported,
+            exact_default_zero=exact_default_zero_supported,
+        ),
     )
 
 
@@ -221,11 +316,17 @@ def _translate_formula_metric_monitor(
     threshold = float(match.group("threshold"))
     window = f"last_{str(match.group('window') or '').strip()}"
 
-    parsed = _parse_formula_metric_monitor_expression(formula_text)
-    if parsed is None:
+    formula_ast, query_refs, parse_diagnostics, parse_degraded = _parse_formula_metric_monitor_expression(
+        formula_text
+    )
+    if parse_degraded:
+        return DatadogMonitorTranslation(
+            warnings=_parser_degraded_warnings("Datadog formula monitor query", parse_diagnostics),
+            parse_diagnostics=parse_diagnostics,
+            parse_degraded=True,
+        )
+    if formula_ast is None or not query_refs:
         return DatadogMonitorTranslation(warnings=[_FORMULA_MONITOR_MANUAL_WARNING])
-
-    formula_ast, query_refs = parsed
     support_mode = _formula_monitor_support_mode(formula_ast, query_refs, time_agg)
     if not support_mode:
         return DatadogMonitorTranslation(warnings=[_FORMULA_MONITOR_MANUAL_WARNING])
@@ -326,7 +427,15 @@ def _translate_change_metric_monitor(
     if time_agg not in _SUPPORTED_CHANGE_TIME_AGGS:
         return DatadogMonitorTranslation()
 
-    metric_query, outer_functions = _parse_metric_monitor_query(metric_query_text)
+    metric_query, outer_functions, parse_diagnostics, parse_degraded = _parse_metric_monitor_query(
+        metric_query_text
+    )
+    if parse_degraded:
+        return DatadogMonitorTranslation(
+            warnings=_parser_degraded_warnings("Datadog change monitor query", parse_diagnostics),
+            parse_diagnostics=parse_diagnostics,
+            parse_degraded=True,
+        )
     if metric_query is None:
         return DatadogMonitorTranslation()
     if outer_functions or metric_query.functions or metric_query.as_rate or metric_query.as_count:
@@ -414,7 +523,16 @@ def _translate_log_monitor(
     if not agg_expr:
         return DatadogMonitorTranslation()
 
-    log_query = parse_log_query(search)
+    log_parse_result = parse_log_query_result(search)
+    log_query = log_parse_result.value
+    parse_diagnostics = _parser_diagnostics_as_dicts(log_parse_result)
+    if log_parse_result.degraded:
+        return DatadogMonitorTranslation(
+            warnings=_parser_degraded_warnings("Datadog log search", parse_diagnostics),
+            parse_diagnostics=parse_diagnostics,
+            parse_degraded=True,
+        )
+
     tag_map = {key: field_map.map_tag(key, context="log") for key in field_map.tag_map}
     log_capability_issues = _log_query_field_issues(
         log_query.ast,
@@ -527,7 +645,16 @@ def _collect_metric_scope_fields(scope_items: list[Any]) -> list[str]:
     return fields
 
 
-def _metric_agg_expr(time_agg: str, metric_field: str, metric_query: Any | None = None) -> str:
+def _metric_agg_expr(
+    time_agg: str,
+    metric_field: str,
+    metric_query: Any | None = None,
+    *,
+    exact_rate_window_seconds: int = 0,
+) -> str:
+    if exact_rate_window_seconds > 0:
+        return _exact_as_rate_expr(metric_field, exact_rate_window_seconds)
+
     if metric_query is not None and time_agg != "last":
         try:
             es_agg = _resolve_agg(time_agg, metric_field)
@@ -551,7 +678,200 @@ def _metric_agg_expr(time_agg: str, metric_field: str, metric_query: Any | None 
     return ""
 
 
-def _parse_metric_monitor_query(raw: str) -> tuple[Any | None, list[FunctionCall]]:
+def _exact_as_rate_expr(metric_field: str, window_seconds: int) -> str:
+    if window_seconds <= 0:
+        return ""
+    field_ident = _esql_identifier(metric_field)
+    return f"SUM({field_ident}) / {float(window_seconds)}"
+
+
+def _rollup_interval_seconds(metric_query: Any) -> int:
+    rollup = metric_query.rollup
+    if not rollup or len(rollup.args) < 2:
+        return 0
+    interval = rollup.args[1]
+    if isinstance(interval, (int, float)) and interval > 0:
+        return int(interval)
+    if isinstance(interval, str):
+        stripped = interval.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return 0
+
+
+def _metric_monitor_exact_as_rate_supported(
+    metric_query: Any,
+    outer_functions: list[FunctionCall],
+    *,
+    time_agg: str,
+    window_seconds: int,
+) -> bool:
+    if window_seconds <= 0:
+        return False
+    if not metric_query.as_rate:
+        return False
+    if _needs_rate(metric_query):
+        return False
+    if metric_query.rollup is not None:
+        return False
+    if metric_query.fill_value is not None:
+        return False
+    if time_agg != "sum" or str(metric_query.space_agg or "").lower() != "sum":
+        return False
+    if metric_query.as_count:
+        return False
+    if any(str(fn.name or "").lower() not in {"exclude_null"} for fn in outer_functions or []):
+        return False
+    for fn in metric_query.functions or []:
+        if str(fn.name or "").lower() != "rollup":
+            return False
+    return True
+
+
+def _metric_monitor_exact_rollup_supported(
+    metric_query: Any,
+    outer_functions: list[FunctionCall],
+    *,
+    time_agg: str,
+    window_seconds: int,
+) -> bool:
+    if window_seconds <= 0:
+        return False
+    if metric_query.as_rate or metric_query.as_count or _needs_rate(metric_query):
+        return False
+    if metric_query.fill_value is not None:
+        return False
+    if any(str(fn.name or "").lower() not in {"exclude_null"} for fn in outer_functions or []):
+        return False
+    if str(metric_query.space_agg or "").lower() != time_agg:
+        return False
+    rollup = metric_query.rollup
+    if not rollup or not rollup.args:
+        return False
+    rollup_agg = str(rollup.args[0] or "").lower().strip()
+    if rollup_agg != time_agg:
+        return False
+    if time_agg not in {"avg", "sum", "min", "max"}:
+        return False
+    rollup_seconds = _rollup_interval_seconds(metric_query)
+    if rollup_seconds <= 0:
+        return False
+    if window_seconds % rollup_seconds != 0:
+        return False
+    bucket_count = window_seconds // rollup_seconds
+    if bucket_count <= 0 or bucket_count > 1000:
+        return False
+    for fn in metric_query.functions or []:
+        if str(fn.name or "").lower() != "rollup":
+            return False
+    return True
+
+
+def _metric_monitor_exact_default_zero_supported(
+    metric_query: Any,
+    outer_functions: list[FunctionCall],
+    *,
+    time_agg: str,
+    comparator: str,
+    threshold: float,
+    exact_rate: bool,
+    exact_rollup: bool,
+) -> bool:
+    if exact_rate or exact_rollup:
+        return False
+    if not any(str(fn.name or "").lower() == "default_zero" for fn in outer_functions or []):
+        return False
+    if any(str(fn.name or "").lower() not in {"default_zero", "exclude_null"} for fn in outer_functions or []):
+        return False
+    if metric_query.as_rate or metric_query.as_count or _needs_rate(metric_query):
+        return False
+    if metric_query.rollup is not None:
+        return False
+    if metric_query.fill_value is not None:
+        return False
+    if metric_query.functions:
+        return False
+    if comparator not in {">", ">="}:
+        return False
+    if threshold <= 0:
+        return False
+    if time_agg not in {"avg", "sum", "min", "max", "count"}:
+        return False
+    if str(metric_query.space_agg or "").lower() != time_agg:
+        return False
+    return True
+
+
+def _rollup_reducer_expr(agg_name: str) -> str:
+    normalized = str(agg_name or "").lower().strip()
+    if normalized == "avg":
+        return "AVG(rollup_value)"
+    if normalized == "sum":
+        return "SUM(rollup_value)"
+    if normalized == "min":
+        return "MIN(rollup_value)"
+    if normalized == "max":
+        return "MAX(rollup_value)"
+    return ""
+
+
+def _build_exact_rollup_metric_query(
+    *,
+    metric_index: str,
+    where_clauses: list[str],
+    group_by: list[str],
+    metric_field: str,
+    time_agg: str,
+    metric_query: Any,
+    window_seconds: int,
+    comparator: str,
+    threshold: float,
+) -> str:
+    rollup_seconds = _rollup_interval_seconds(metric_query)
+    if window_seconds <= 0 or rollup_seconds <= 0:
+        return ""
+    window_span = _seconds_to_esql_span(window_seconds)
+    if not window_span:
+        return ""
+    bucket_count = window_seconds // rollup_seconds
+    if bucket_count <= 0:
+        return ""
+
+    rollup_agg_expr = _metric_agg_expr(time_agg, metric_field)
+    if not rollup_agg_expr:
+        return ""
+    reducer_expr = _rollup_reducer_expr(time_agg)
+    if not reducer_expr:
+        return ""
+
+    all_where = list(where_clauses)
+    all_where.append(f"@timestamp >= NOW() - {window_span}")
+    all_where.append("@timestamp < NOW()")
+    bucket_expr = f"BUCKET(@timestamp, {bucket_count}, NOW() - {window_span}, NOW())"
+
+    lines = [f"FROM {metric_index}"]
+    lines.append(f"| WHERE {' AND '.join(all_where)}")
+    if group_by:
+        lines.append(
+            "| STATS "
+            f"rollup_value = {rollup_agg_expr} "
+            f"BY {', '.join(group_by)}, rollup_bucket = {bucket_expr}"
+        )
+        lines.append(f"| STATS value = {reducer_expr} BY {', '.join(group_by)}")
+    else:
+        lines.append(
+            "| STATS "
+            f"rollup_value = {rollup_agg_expr} "
+            f"BY rollup_bucket = {bucket_expr}"
+        )
+        lines.append(f"| STATS value = {reducer_expr}")
+    lines.append(f"| WHERE value {comparator} {threshold}")
+    return "\n".join(lines)
+
+
+def _parse_metric_monitor_query(
+    raw: str,
+) -> tuple[Any | None, list[FunctionCall], list[dict[str, Any]], bool]:
     inner = str(raw or "").strip()
     outer_functions: list[FunctionCall] = []
 
@@ -577,10 +897,11 @@ def _parse_metric_monitor_query(raw: str) -> tuple[Any | None, list[FunctionCall
         )
         inner = arg_parts[0].strip()
 
-    try:
-        return parse_metric_query(inner), outer_functions
-    except ParseError:
-        return None, outer_functions
+    parse_result = parse_metric_query_result(inner)
+    diagnostics = _parser_diagnostics_as_dicts(parse_result)
+    if parse_result.degraded:
+        return None, [], diagnostics, True
+    return parse_result.value, outer_functions, diagnostics, False
 
 
 def _find_matching_monitor_paren(text: str) -> int:
@@ -711,19 +1032,26 @@ def _apply_outer_metric_functions(agg_expr: str, outer_functions: list[FunctionC
     return expr
 
 
-def _metric_monitor_warnings(metric_query: Any, outer_functions: list[FunctionCall]) -> list[str]:
+def _metric_monitor_warnings(
+    metric_query: Any,
+    outer_functions: list[FunctionCall],
+    *,
+    exact_rate: bool = False,
+    exact_rollup: bool = False,
+    exact_default_zero: bool = False,
+) -> list[str]:
     warnings: list[str] = []
-    if metric_query.as_rate or _needs_rate(metric_query):
+    if (metric_query.as_rate or _needs_rate(metric_query)) and not exact_rate:
         warnings.append("rate semantics approximated with delta over observed bucket span")
     if metric_query.as_count and not _metric_is_count_like(metric_query.metric):
         warnings.append("as_count semantics are approximated for non-count metrics")
-    if metric_query.rollup:
+    if metric_query.rollup and not exact_rollup:
         warnings.append("rollup interval is approximated in ES|QL")
     if metric_query.fill_value == "zero":
         warnings.append(
             "fill(zero) only applies to null values in returned rows; empty buckets may still be omitted"
         )
-    if any(str(fn.name or "").lower() == "default_zero" for fn in outer_functions or []):
+    if any(str(fn.name or "").lower() == "default_zero" for fn in outer_functions or []) and not exact_default_zero:
         warnings.append("default_zero semantics are approximated in ES|QL")
     return warnings
 
@@ -760,10 +1088,13 @@ def _monitor_formula_has_top_level_arithmetic(text: str) -> bool:
     return False
 
 
-def _parse_formula_metric_monitor_expression(raw_expr: str) -> tuple[Any, dict[str, _FormulaMonitorQueryRef]] | None:
+def _parse_formula_metric_monitor_expression(
+    raw_expr: str,
+) -> tuple[Any | None, dict[str, _FormulaMonitorQueryRef], list[dict[str, Any]], bool]:
     formula_parts: list[str] = []
     query_refs: dict[str, _FormulaMonitorQueryRef] = {}
     term_ref_map: dict[tuple[str, int, str], str] = {}
+    parse_diagnostics: list[dict[str, Any]] = []
     idx = 0
     expect_value = True
     ref_idx = 1
@@ -795,12 +1126,18 @@ def _parse_formula_metric_monitor_expression(raw_expr: str) -> tuple[Any, dict[s
             shifted = _consume_shifted_formula_metric_term(text, idx)
             if shifted is not None:
                 term, shift_seconds, shift_esql_span, next_idx = shifted
+                if shift_seconds <= 0:
+                    return None, {}, parse_diagnostics, False
                 ref_name = term_ref_map.get((term, shift_seconds, shift_esql_span))
                 if ref_name is None:
-                    try:
-                        metric_query = parse_metric_query(term)
-                    except ParseError:
-                        return None
+                    parse_result = parse_metric_query_result(term)
+                    diagnostics = _parser_diagnostics_as_dicts(parse_result)
+                    if parse_result.degraded:
+                        parse_diagnostics.extend(diagnostics)
+                        return None, {}, parse_diagnostics, True
+                    metric_query = parse_result.value
+                    if metric_query is None:
+                        return None, {}, parse_diagnostics, False
                     ref_name = f"q{ref_idx}"
                     ref_idx += 1
                     query_refs[ref_name] = _FormulaMonitorQueryRef(
@@ -816,17 +1153,21 @@ def _parse_formula_metric_monitor_expression(raw_expr: str) -> tuple[Any, dict[s
 
             term, next_idx = _consume_formula_metric_term(text, idx)
             if not term:
-                return None
-            ref_name = term_ref_map.get((term, 0))
+                return None, {}, parse_diagnostics, False
+            ref_name = term_ref_map.get((term, 0, ""))
             if ref_name is None:
-                try:
-                    metric_query = parse_metric_query(term)
-                except ParseError:
-                    return None
+                parse_result = parse_metric_query_result(term)
+                diagnostics = _parser_diagnostics_as_dicts(parse_result)
+                if parse_result.degraded:
+                    parse_diagnostics.extend(diagnostics)
+                    return None, {}, parse_diagnostics, True
+                metric_query = parse_result.value
+                if metric_query is None:
+                    return None, {}, parse_diagnostics, False
                 ref_name = f"q{ref_idx}"
                 ref_idx += 1
                 query_refs[ref_name] = _FormulaMonitorQueryRef(metric_query=metric_query)
-                term_ref_map[(term, 0)] = ref_name
+                term_ref_map[(term, 0, "")] = ref_name
             formula_parts.append(ref_name)
             idx = next_idx
             expect_value = False
@@ -841,15 +1182,16 @@ def _parse_formula_metric_monitor_expression(raw_expr: str) -> tuple[Any, dict[s
             formula_parts.append(ch)
             idx += 1
             continue
-        return None
+        return None, {}, parse_diagnostics, False
 
-    try:
-        parsed = parse_formula("".join(formula_parts))
-    except ParseError:
-        return None
-    if parsed.ast is None or not query_refs:
-        return None
-    return parsed.ast, query_refs
+    formula_result = parse_formula_result("".join(formula_parts))
+    parse_diagnostics.extend(_parser_diagnostics_as_dicts(formula_result))
+    if formula_result.degraded:
+        return None, {}, parse_diagnostics, True
+    parsed = formula_result.value
+    if parsed is None or parsed.ast is None or not query_refs:
+        return None, {}, parse_diagnostics, bool(parse_diagnostics)
+    return parsed.ast, query_refs, parse_diagnostics, bool(parse_diagnostics)
 
 
 def _consume_formula_metric_term(text: str, start: int) -> tuple[str, int]:
@@ -933,7 +1275,10 @@ def _consume_shifted_formula_metric_term(text: str, start: int) -> tuple[str, in
             return None
         shift_seconds, shift_esql_span = _parse_calendar_shift_shift(arg_parts[1], arg_parts[2])
         if shift_seconds <= 0:
-            return None
+            # Recognized calendar_shift syntax, but outside the exact-supported subset.
+            # Return a sentinel shift so the caller can classify this as manual without
+            # treating it as a parser degradation.
+            return arg_parts[0].strip(), 0, "", next_idx
         return arg_parts[0].strip(), shift_seconds, shift_esql_span, next_idx
 
     if len(arg_parts) != 1:
@@ -1019,6 +1364,8 @@ def _formula_monitor_support_mode(
         return "shifted"
     if _formula_monitor_exact_as_count_supported(formula_ast, query_refs, time_agg):
         return "as_count"
+    if _formula_monitor_exact_gauge_arithmetic_supported(formula_ast, query_refs, time_agg):
+        return "gauge_arithmetic"
     return ""
 
 
@@ -1081,6 +1428,37 @@ def _formula_monitor_exact_shift_supported(
     return True
 
 
+def _formula_monitor_exact_gauge_arithmetic_supported(
+    formula_ast: Any,
+    query_refs: dict[str, _FormulaMonitorQueryRef],
+    time_agg: str,
+) -> bool:
+    if time_agg not in {"avg", "sum", "min", "max"}:
+        return False
+    if len(query_refs) < 2:
+        return False
+    if not _monitor_formula_ast_is_exact_as_count_safe(formula_ast):
+        return False
+
+    base_alignment: tuple[Any, ...] | None = None
+    for ref in query_refs.values():
+        if ref.shift_seconds != 0:
+            return False
+        metric_query = ref.metric_query
+        if metric_query.as_rate or metric_query.as_count:
+            return False
+        if metric_query.functions:
+            return False
+        if metric_query.space_agg != time_agg:
+            return False
+        alignment = _metric_query_formula_alignment_identity(metric_query)
+        if base_alignment is None:
+            base_alignment = alignment
+        elif alignment != base_alignment:
+            return False
+    return True
+
+
 def _monitor_formula_ast_is_exact_as_count_safe(node: Any) -> bool:
     if isinstance(node, (FormulaRef, FormulaNumber)):
         return True
@@ -1117,6 +1495,14 @@ def _metric_query_identity(metric_query: Any) -> tuple[Any, ...]:
     return (
         metric_query.space_agg,
         metric_query.metric,
+        tuple(repr(item) for item in metric_query.scope or []),
+        tuple(metric_query.group_by or []),
+    )
+
+
+def _metric_query_formula_alignment_identity(metric_query: Any) -> tuple[Any, ...]:
+    return (
+        metric_query.space_agg,
         tuple(repr(item) for item in metric_query.scope or []),
         tuple(metric_query.group_by or []),
     )

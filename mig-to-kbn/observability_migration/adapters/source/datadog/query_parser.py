@@ -18,6 +18,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .parser_results import (
+    ParserDiagnostic,
+    ParserDiagnosticCode,
+    ParserResult,
+)
 from .models import (
     FunctionCall,
     MetricQuery,
@@ -96,7 +101,9 @@ def parse_metric_query(raw: str) -> MetricQuery:
         group_by = [t.strip() for t in gb_str.split(",") if t.strip()]
         rest = rest[gb_close + 1:].strip()
 
-    functions, as_rate, as_count = _parse_function_chain(rest)
+    functions, as_rate, as_count, remainder = _parse_function_chain(rest)
+    if remainder.strip():
+        raise ParseError(f"unexpected trailing tokens in metric query: {remainder}")
 
     return MetricQuery(
         raw=raw,
@@ -108,6 +115,26 @@ def parse_metric_query(raw: str) -> MetricQuery:
         as_rate=as_rate,
         as_count=as_count,
     )
+
+
+def parse_metric_query_result(raw: str) -> ParserResult:
+    """Parse metric query with structured diagnostics instead of exceptions."""
+    try:
+        query = parse_metric_query(raw)
+    except ParseError as exc:
+        message = str(exc)
+        code = (
+            ParserDiagnosticCode.METRIC_TRAILING_TOKENS
+            if "trailing tokens" in message.lower()
+            else ParserDiagnosticCode.METRIC_PARSE_ERROR
+        )
+        return ParserResult(
+            value=None,
+            diagnostics=[ParserDiagnostic(code=code.value, message=message)],
+            degraded=True,
+            lossless=False,
+        )
+    return ParserResult(value=query)
 
 
 def _find_aggregator_colon(text: str) -> int:
@@ -234,7 +261,8 @@ def _split_on_keyword(text: str, keyword: str) -> list[str]:
     in_quote = False
     quote_char = ""
     i = 0
-    marker = f" {keyword.upper()} "
+    marker = keyword.upper()
+    marker_len = len(marker)
     text_upper = text.upper()
 
     while i < len(text):
@@ -255,11 +283,16 @@ def _split_on_keyword(text: str, keyword: str) -> list[str]:
                 depth += 1
             elif ch == ")":
                 depth = max(depth - 1, 0)
-            if depth == 0 and text_upper[i:i + len(marker)] == marker:
-                parts.append("".join(current))
-                current = []
-                i += len(marker)
-                continue
+            if depth == 0 and text_upper[i:i + marker_len] == marker:
+                prev = text[i - 1] if i > 0 else ""
+                nxt = text[i + marker_len] if i + marker_len < len(text) else ""
+                prev_ok = not prev or not (prev.isalnum() or prev == "_")
+                next_ok = not nxt or not (nxt.isalnum() or nxt == "_")
+                if prev_ok and next_ok:
+                    parts.append("".join(current))
+                    current = []
+                    i += marker_len
+                    continue
         current.append(ch)
         i += 1
 
@@ -291,7 +324,7 @@ def _parse_single_filter(part: str) -> TagFilter:
     return TagFilter(key=key, value=value, negated=negated)
 
 
-def _parse_function_chain(text: str) -> tuple[list[FunctionCall], bool, bool]:
+def _parse_function_chain(text: str) -> tuple[list[FunctionCall], bool, bool, str]:
     """Parse `.rollup(avg, 60).fill(zero).as_count()` chains."""
     functions: list[FunctionCall] = []
     as_rate = False
@@ -325,7 +358,7 @@ def _parse_function_chain(text: str) -> tuple[list[FunctionCall], bool, bool]:
         args = _parse_function_args(args_str)
         functions.append(FunctionCall(name=fname, args=args))
 
-    return functions, as_rate, as_count
+    return functions, as_rate, as_count, rest
 
 
 def _find_matching_paren(text: str) -> int:
@@ -456,7 +489,7 @@ def parse_legacy_query(raw: str) -> tuple[MetricQuery | None, list[FunctionCall]
         mq = parse_metric_query(inner)
         return mq, outer_fns
     except ParseError:
-        return None, outer_fns
+        return None, []
 
 
 def _coerce_arg(val: str) -> Any:
@@ -543,7 +576,10 @@ class _FormulaParser:
 
     def expr(self) -> Any:
         left = self.term()
-        while self.peek() and self.peek()[0] == "OP" and self.peek()[1] in ("+", "-"):
+        while True:
+            tok = self.peek()
+            if not tok or tok[0] != "OP" or tok[1] not in ("+", "-"):
+                break
             op = self.consume()[1]
             right = self.term()
             left = FormulaBinOp(op=op, left=left, right=right)
@@ -551,7 +587,10 @@ class _FormulaParser:
 
     def term(self) -> Any:
         left = self.unary()
-        while self.peek() and self.peek()[0] == "OP" and self.peek()[1] in ("*", "/"):
+        while True:
+            tok = self.peek()
+            if not tok or tok[0] != "OP" or tok[1] not in ("*", "/"):
+                break
             op = self.consume()[1]
             right = self.unary()
             left = FormulaBinOp(op=op, left=left, right=right)
@@ -610,3 +649,22 @@ def parse_formula(raw: str) -> FormulaExpression:
     parser = _FormulaParser(tokens)
     ast = parser.parse()
     return FormulaExpression(raw=raw, ast=ast)
+
+
+def parse_formula_result(raw: str) -> ParserResult:
+    """Parse formula with structured diagnostics instead of exceptions."""
+    try:
+        expression = parse_formula(raw)
+    except ParseError as exc:
+        return ParserResult(
+            value=None,
+            diagnostics=[
+                ParserDiagnostic(
+                    code=ParserDiagnosticCode.FORMULA_PARSE_ERROR.value,
+                    message=str(exc),
+                )
+            ],
+            degraded=True,
+            lossless=False,
+        )
+    return ParserResult(value=expression)

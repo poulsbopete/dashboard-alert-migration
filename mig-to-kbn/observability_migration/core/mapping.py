@@ -138,45 +138,83 @@ def _grafana_safe_label_tags(labels: Any) -> list[str] | None:
         value_text = str(value or "").strip()
         if not key_text or not value_text:
             return None
-        if any(token in key_text or token in value_text for token in ("{{", "}}", "$", "{", "}")):
+        if any(token in key_text or token in value_text for token in ("{{", "}}", "{", "}")):
             return None
         tags.append(f"grafana_label:{key_text}={value_text}")
     return tags
 
 
-def _grafana_unified_is_strict_exact_query_subset(ir: AlertingIR) -> bool:
+def _grafana_safe_dashboard_link_tags(annotations: Any) -> list[str] | None:
+    if annotations is None:
+        return []
+    if not isinstance(annotations, dict):
+        return None
+
+    dashboard_uid = str(annotations.get("__dashboardUid__", "") or "").strip()
+    panel_id = str(annotations.get("__panelId__", "") or "").strip()
+    if not dashboard_uid and not panel_id:
+        return []
+    if not dashboard_uid:
+        return None
+    if any(token in dashboard_uid or token in panel_id for token in ("{{", "}}", "$", "{", "}")):
+        return None
+
+    tags = [f"grafana_dashboard_uid:{dashboard_uid}"]
+    if panel_id:
+        if not re.fullmatch(r"\d+", panel_id):
+            return None
+        tags.append(f"grafana_panel_id:{panel_id}")
+    return tags
+
+
+def _grafana_unified_review_gates(ir: AlertingIR) -> dict[str, bool]:
     if ir.kind != "grafana_unified":
-        return False
-    if not _has_source_faithful_query(ir):
-        return False
-    translated_provenance = str(
-        ir.translated_query_provenance or ir.metadata.get("translated_query_provenance", "")
-    ).strip().lower()
-    if translated_provenance and translated_provenance not in {"native_promql", "translated_esql"}:
-        return False
-    if not _grafana_unified_no_data_is_exact(ir):
-        return False
-    if not _has_explicit_threshold(ir):
-        return False
+        return {}
 
     ext = ir.source_extension or {}
     source_queries = ext.get("source_queries")
-    if not isinstance(source_queries, list) or len(source_queries) != 1:
-        return False
     data = ext.get("data")
-    if not isinstance(data, list) or _grafana_unified_has_complex_expression_graph(data):
-        return False
-
-    if _grafana_safe_label_tags(ext.get("labels")) is None:
-        return False
-
     annotations = ext.get("annotations")
-    if isinstance(annotations, dict) and (
-        annotations.get("__dashboardUid__") or annotations.get("__panelId__")
-    ):
-        return False
+    translated_provenance = str(
+        ir.translated_query_provenance or ir.metadata.get("translated_query_provenance", "")
+    ).strip().lower()
 
-    return True
+    gates = {
+        "source_faithful_query": _has_source_faithful_query(ir),
+        "supported_provenance": (
+            not translated_provenance or translated_provenance in {"native_promql", "translated_esql"}
+        ),
+        "exact_no_data_policy": _grafana_unified_no_data_is_exact(ir),
+        "explicit_threshold": _has_explicit_threshold(ir),
+        "single_source_query": isinstance(source_queries, list) and len(source_queries) == 1,
+        "simple_expression_graph": isinstance(data, list) and not _grafana_unified_has_complex_expression_graph(data),
+        "static_labels": _grafana_safe_label_tags(ext.get("labels")) is not None,
+        "dashboard_link_safe": not (
+            isinstance(annotations, dict)
+            and (annotations.get("__dashboardUid__") or annotations.get("__panelId__"))
+        ),
+    }
+    non_no_data_gates = [
+        "source_faithful_query",
+        "supported_provenance",
+        "explicit_threshold",
+        "single_source_query",
+        "simple_expression_graph",
+        "static_labels",
+        "dashboard_link_safe",
+    ]
+    gates["no_data_only_blocks_strict_automation"] = (
+        not gates["exact_no_data_policy"] and all(gates[key] for key in non_no_data_gates)
+    )
+    gates["strict_subset_ready"] = gates["exact_no_data_policy"] and all(
+        gates[key] for key in non_no_data_gates
+    )
+    return gates
+
+
+def _grafana_unified_is_strict_exact_query_subset(ir: AlertingIR) -> bool:
+    gates = _grafana_unified_review_gates(ir)
+    return bool(gates and gates.get("strict_subset_ready"))
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -458,6 +496,9 @@ def _grafana_unified_exact_topk_bottomk_spec(ir: AlertingIR) -> dict[str, Any] |
 
 
 def _has_source_faithful_query(ir: AlertingIR) -> bool:
+    if bool((ir.metadata or {}).get("parse_degraded")):
+        return False
+
     translated = str(ir.translated_query or "").strip()
     translated_provenance = str(
         ir.translated_query_provenance or ir.metadata.get("translated_query_provenance", "")
@@ -506,6 +547,9 @@ def record_semantic_losses(ir: AlertingIR) -> list[str]:
 
     ext = ir.source_extension or {}
 
+    if bool((ir.metadata or {}).get("parse_degraded")):
+        losses.append("Parser diagnostics indicate degraded parse; source-faithful translation is not trusted")
+
     if ir.kind.startswith("datadog_"):
         opts = ext.get("options", {}) if isinstance(ext.get("options"), dict) else {}
         if opts.get("renotify_interval"):
@@ -539,11 +583,35 @@ def record_semantic_losses(ir: AlertingIR) -> list[str]:
         if labels and _grafana_safe_label_tags(labels) is None:
             losses.append("Grafana alert labels not directly portable to Kibana rule tags")
         annotations = ext.get("annotations", {})
-        if annotations.get("__dashboardUid__"):
+        if annotations.get("__dashboardUid__") or annotations.get("__panelId__"):
             losses.append("Dashboard-linked alert annotation requires manual Kibana linkage")
 
     ir.losses = losses
     return losses
+
+
+def _manual_only_family_reason(ir: AlertingIR) -> str:
+    if ir.kind == "datadog_service_check":
+        return (
+            "Datadog service check monitors use status-count semantics and require manual migration"
+        )
+    if ir.kind == "datadog_composite":
+        return "Datadog composite monitors depend on cross-monitor state and require manual migration"
+    if ir.kind in MANUAL_ONLY_KINDS:
+        family = str(ir.kind or "").replace("datadog_", "").replace("_", " ").strip()
+        return f"Datadog {family} monitors are intentionally manual-only in the current migration policy"
+    return ""
+
+
+def _manual_boundary_reason(ir: AlertingIR) -> str:
+    reason = _manual_only_family_reason(ir)
+    if reason:
+        return reason
+    for warning in ir.warnings or []:
+        text = str(warning or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _grafana_unified_has_complex_expression_graph(data: list[Any]) -> bool:
@@ -824,6 +892,7 @@ def map_alert_to_kibana_payload(
     losses = record_semantic_losses(ir)
     tier = classify_automation_tier(ir)
     rule_type = select_target_rule_type(ir, preflight)
+    review_gates = _grafana_unified_review_gates(ir) if ir.kind == "grafana_unified" else {}
     normalized_rule_type = rule_type.replace(".", "").replace("_", "-") if rule_type else ""
 
     ir.automation_tier = tier
@@ -851,7 +920,7 @@ def map_alert_to_kibana_payload(
             validation_errors = [payload_status_reason]
         else:
             payload_status = "blocked_no_source_faithful_query"
-            payload_status_reason = "No source-faithful target query could be produced"
+            payload_status_reason = _manual_boundary_reason(ir) or "No source-faithful target query could be produced"
             validation_errors = [payload_status_reason]
         ir.payload_status = payload_status
         ir.payload_status_reason = payload_status_reason
@@ -864,6 +933,7 @@ def map_alert_to_kibana_payload(
             "payload_status": payload_status,
             "payload_status_reason": payload_status_reason,
             "losses": losses,
+            "review_gates": review_gates,
             "valid": False,
             "validation_errors": validation_errors,
         }
@@ -892,6 +962,7 @@ def map_alert_to_kibana_payload(
             "payload_status": "blocked_no_source_faithful_query",
             "payload_status_reason": payload_status_reason,
             "losses": losses,
+            "review_gates": review_gates,
             "valid": False,
             "validation_errors": [payload_status_reason],
         }
@@ -906,7 +977,11 @@ def map_alert_to_kibana_payload(
     consumer = CONSUMER_MAP.get(rule_type, "stackAlerts")
     extra_tags: list[str] = []
     if ir.kind == "grafana_unified":
-        extra_tags = _grafana_safe_label_tags((ir.source_extension or {}).get("labels")) or []
+        label_tags = _grafana_safe_label_tags((ir.source_extension or {}).get("labels")) or []
+        dashboard_tags = _grafana_safe_dashboard_link_tags((ir.source_extension or {}).get("annotations"))
+        extra_tags = [*label_tags]
+        if dashboard_tags:
+            extra_tags.extend(dashboard_tags)
 
     payload = {
         "rule_type_id": rule_type,
@@ -945,6 +1020,7 @@ def map_alert_to_kibana_payload(
         "payload_status": "emitted",
         "payload_status_reason": "",
         "losses": losses,
+        "review_gates": review_gates,
         "valid": len(validation_errors) == 0,
         "validation_errors": validation_errors,
     }

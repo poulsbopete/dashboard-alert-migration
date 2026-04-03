@@ -29,6 +29,11 @@ from .models import (
     LogTerm,
     LogWildcard,
 )
+from .parser_results import (
+    ParserDiagnostic,
+    ParserDiagnosticCode,
+    ParserResult,
+)
 
 _TEMPLATE_VAR_RE = re.compile(r"\$\w+(?:\.\w+)*")
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_]\w*$")
@@ -99,13 +104,60 @@ def parse_log_query(raw: str) -> LogQuery:
     return LogQuery(raw=raw, ast=ast)
 
 
+def parse_log_query_result(raw: str) -> ParserResult:
+    """Parse log query and capture degradation diagnostics."""
+    query = parse_log_query(raw)
+    diagnostics: list[ParserDiagnostic] = []
+
+    if LogTokenizeWarning.skipped_chars:
+        sample = [f"{pos}:{char}" for pos, char in LogTokenizeWarning.skipped_chars[:8]]
+        diagnostics.append(
+            ParserDiagnostic(
+                code=ParserDiagnosticCode.LOG_TOKENIZER_SKIPPED_CHARS.value,
+                message="Datadog log tokenizer skipped unsupported characters",
+                detail={
+                    "count": len(LogTokenizeWarning.skipped_chars),
+                    "sample": sample,
+                },
+            )
+        )
+
+    if LogTokenizeWarning.fallback_used:
+        diagnostics.append(
+            ParserDiagnostic(
+                code=ParserDiagnosticCode.LOG_BOOLEAN_FALLBACK.value,
+                message="Datadog log parser used boolean fallback and may alter precedence",
+            )
+        )
+
+    raw_stripped = str(raw or "").strip()
+    if query.ast is None and raw_stripped not in {"", "*"}:
+        diagnostics.append(
+            ParserDiagnostic(
+                code=ParserDiagnosticCode.LOG_PARSE_ERROR.value,
+                message="Datadog log parser produced an empty AST for a non-empty query",
+                detail={"query": raw_stripped[:160]},
+            )
+        )
+
+    degraded = bool(diagnostics)
+    return ParserResult(
+        value=query,
+        diagnostics=diagnostics,
+        degraded=degraded,
+        lossless=not degraded,
+    )
+
+
 class LogTokenizeWarning:
     """Tracks characters skipped during log query tokenization."""
     skipped_chars: list[tuple[int, str]] = []
+    fallback_used: bool = False
 
     @classmethod
     def reset(cls):
         cls.skipped_chars = []
+        cls.fallback_used = False
 
 
 def _tokenize(text: str) -> list[tuple[str, str]]:
@@ -180,10 +232,12 @@ def _parse_tokens_with_lark(tokens: list[tuple[str, str]]) -> Any | None:
     try:
         tree = _LOG_BOOL_PARSER.parse(expression)
     except LarkError:
+        LogTokenizeWarning.fallback_used = True
         return _collapse_bool("AND", atoms)
     try:
         return _BoolExprTransformer(atoms).transform(tree)
     except (LarkError, StopIteration):
+        LogTokenizeWarning.fallback_used = True
         return _collapse_bool("AND", atoms)
 
 
@@ -213,6 +267,8 @@ def _build_lark_expression(tokens: list[tuple[str, str]]) -> tuple[str, list[Any
                 expression_parts.append(")")
                 open_groups -= 1
                 expect_operand = False
+            elif token_value == ")":
+                LogTokenizeWarning.fallback_used = True
             continue
 
         if token_type in {"NEG", "NOT"}:
@@ -235,6 +291,8 @@ def _build_lark_expression(tokens: list[tuple[str, str]]) -> tuple[str, list[Any
         return "", []
 
     if expression_parts[-1] in {"ATOM", ")"}:
+        if open_groups > 0:
+            LogTokenizeWarning.fallback_used = True
         expression_parts.extend(")" for _ in range(open_groups))
 
     return " ".join(expression_parts), atoms

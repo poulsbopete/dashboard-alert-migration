@@ -1,6 +1,6 @@
 # External Report: Kibana Alert Migration Blockers For Grafana And Datadog
 
-Snapshot date: `2026-04-01`
+Snapshot date: `2026-04-02`
 
 ## Purpose
 
@@ -12,7 +12,7 @@ email thread without any internal repo references.
 
 ## Scope
 
-- This report is based on a curated validation suite containing `24` Grafana alert
+- This report is based on a curated validation suite containing `27` Grafana alert
   cases and `35` Datadog monitor cases.
 - It distinguishes between:
   exact automatic migration,
@@ -27,8 +27,8 @@ email thread without any internal repo references.
 
 | Source | Total cases | Exact automatic migration | Review before enablement | Manual handling still required |
 | --- | ---: | ---: | ---: | ---: |
-| Grafana | 24 | 6 | 3 | 15 |
-| Datadog | 35 | 10 | 4 | 21 |
+| Grafana | 27 | 6 | 5 | 16 |
+| Datadog | 35 | 11 | 4 | 20 |
 
 The highest-level findings are:
 
@@ -51,8 +51,8 @@ There is already a strong base of translatable alert content:
 - simple Grafana threshold alerts over native PromQL
 - a narrow exact subset of Grafana `topk()` / `bottomk()` alerts
 - warning-free Datadog metric and log threshold monitors
-- a strict exact subset of Datadog `as_count()` formulas and selected shifted
-  comparisons
+- a strict exact subset of Datadog `as_count()` formulas, aligned unshifted
+  gauge-arithmetic formulas, and selected shifted comparisons
 
 The remaining blockers are therefore not mostly "missing parser coverage". They
 are primarily product-parity and semantic-equivalence gaps.
@@ -61,15 +61,15 @@ are primarily product-parity and semantic-equivalence gaps.
 
 ### Summary
 
-Grafana currently has `15` cases that still require manual handling out of the
-`24` validated alert examples.
+Grafana currently has `16` cases that still require manual handling out of the
+`27` validated alert examples.
 
 The blockers group into three buckets:
 
 | Bucket | Cases | What is missing |
 | --- | ---: | --- |
 | Advanced PromQL semantics outside the current exact boundary | 13 | Source-faithful handling of selector-time modifiers, subqueries, vector matching, set operators, label-mutation functions, and certain comparison patterns |
-| Non-PromQL datasource alert families | 2 | A source-faithful alert-query path for Loki / LogQL and Graphite |
+| Non-PromQL datasource alert families | 3 | A source-faithful alert-query path for Loki / LogQL and Graphite |
 | Grafana-managed alert state semantics | cross-cutting | A generic Kibana equivalent for Grafana `No Data`, `Error`, and the related datasource alert behavior |
 
 ### 1. Advanced PromQL Semantics
@@ -140,6 +140,7 @@ The current curated non-PromQL blockers are:
 Concrete examples:
 
 - `Error log spike`
+- `High Error Rate in Logs`
 - `Graphite queue depth`
 
 These are blocked for a straightforward reason: the current target path is built
@@ -195,7 +196,7 @@ The clearest coverage unlocks for Grafana alert migration are:
 
 ### Summary
 
-Datadog currently has `21` cases that still require manual handling out of the
+Datadog currently has `20` cases that still require manual handling out of the
 `35` validated monitor examples.
 
 The blockers group into four buckets:
@@ -203,7 +204,7 @@ The blockers group into four buckets:
 | Bucket | Cases | What is missing |
 | --- | ---: | --- |
 | Query candidate exists, but exact semantics are still approximate | 4 | Exact equivalents for `as_rate()`, `rollup()`, `default_zero()`, and related wrapped shapes |
-| Formula and civil-time boundaries | 2 | A larger exact formula subset and DST-safe `calendar_shift()` equivalence |
+| Formula and civil-time boundaries | 1 | DST-safe `calendar_shift()` equivalence |
 | Algorithmic monitor families | 3 | Generic source-faithful equivalents for anomaly / forecast / outlier monitor behavior |
 | Product-specific monitor families | 12 | First-class parity for composite, service-check, and other product-level monitor types |
 
@@ -281,20 +282,9 @@ For these Datadog cases, the problem is not "we have no Kibana query". The
 problem is "we do have a query candidate, but it is still not source-faithful
 enough to claim exact automatic migration".
 
-## Datadog: Formula And Civil-Time Gaps
+## Datadog: Remaining Formula And Civil-Time Gap
 
-### 1. Broader Arithmetic Formulas
-
-Example:
-
-- `[Redis] High memory consumption`
-
-This family remains blocked because the current exact subset does not yet cover
-all Datadog arithmetic formula monitor shapes. The missing piece is not basic
-math itself, but exact monitor-time equivalence across source aggregation order,
-formula boundaries, and evaluation behavior.
-
-### 2. DST-Sensitive `calendar_shift()`
+### 1. DST-Sensitive `calendar_shift()`
 
 Example:
 
@@ -316,6 +306,9 @@ behavior for DST-observing or offset-changing IANA time zones.
 
 Current exact boundary:
 
+- strict arithmetic formulas over the supported `as_count()` subset
+- aligned unshifted gauge-arithmetic formulas with matching aggregation, scope,
+  and group-by
 - UTC `calendar_shift()`
 - stable-offset IANA time zones whose UTC offset does not change across the
   shifted comparison window
