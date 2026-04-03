@@ -7,6 +7,7 @@ POST/PUT /api/alerting/rule/{id} with stable ids workshop-grafana-<grafana_uid>.
 
 Env (after source ~/.bashrc on es3-api):
   KIBANA_URL, KIBANA_API_KEY or ES_API_KEY (or ES_USERNAME + ES_PASSWORD)
+  WORKSHOP_ALERT_PROMQL_INDEX — optional; default metrics-* (rewrites mig-to-kbn PROMQL index=metrics-prometheus-* for OTLP)
 
 Usage:
   python3 tools/publish_grafana_alert_drafts_kibana.py \\
@@ -15,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -69,20 +71,43 @@ def _rule_id_for_source(alert_id: str, fallback_name: str) -> str:
     return rid[:100]
 
 
+def _workshop_normalize_promql_index_in_params(params: dict[str, Any]) -> None:
+    """mig-to-kbn maps data_view metrics-* → PROMQL index=metrics-prometheus-*; OTLP workshop uses metrics-*."""
+    target = (os.environ.get("WORKSHOP_ALERT_PROMQL_INDEX") or "metrics-*").strip()
+    if not target:
+        return
+    esql_block = params.get("esqlQuery")
+    if not isinstance(esql_block, dict):
+        return
+    esql = esql_block.get("esql")
+    if not isinstance(esql, str) or "index=metrics-prometheus-*" not in esql:
+        return
+    esql_block["esql"] = esql.replace("index=metrics-prometheus-*", f"index={target}", 1)
+
+
 def _api_body(payload: dict[str, Any]) -> dict[str, Any]:
     sched = payload.get("schedule")
     if not isinstance(sched, dict) or not str((sched.get("interval") or "")).strip():
         sched = {"interval": "1m"}
+    raw_params = payload.get("params")
+    params = copy.deepcopy(raw_params) if isinstance(raw_params, dict) else {}
+    _workshop_normalize_promql_index_in_params(params)
     return {
         "rule_type_id": str(payload.get("rule_type_id") or ""),
         "name": str(payload.get("name") or "unnamed"),
         "consumer": str(payload.get("consumer") or "stackAlerts"),
         "schedule": sched,
-        "params": payload.get("params") if isinstance(payload.get("params"), dict) else {},
+        "params": params,
         "actions": payload.get("actions") if isinstance(payload.get("actions"), list) else [],
         "enabled": bool(payload.get("enabled", False)),
         "tags": payload.get("tags") if isinstance(payload.get("tags"), list) else [],
     }
+
+
+def _automated_alert_count(report: dict[str, Any]) -> int:
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    tiers = summary.get("by_automation_tier") if isinstance(summary.get("by_automation_tier"), dict) else {}
+    return int(tiers.get("automated", 0) or 0)
 
 
 def _post_or_put(
@@ -148,6 +173,14 @@ def main() -> int:
     report = json.loads(path.read_text(encoding="utf-8"))
     items = _collect_emitted(report)
     if not items:
+        auto_n = _automated_alert_count(report)
+        if auto_n:
+            print(
+                f"ERROR: {path} reports {auto_n} automated alert(s) but no rule payloads were collected. "
+                "Check vendored mig-to-kbn and collect_emitted_rule_payloads.",
+                file=sys.stderr,
+            )
+            return 1
         print(f"No emitted rule payloads in {path} (nothing to publish).")
         return 0
 
