@@ -36,7 +36,7 @@ source ~/.bashrc
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation). Artifacts: **`build/mig-grafana/`**. |
+| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation); **`publish_grafana_alert_drafts_kibana.py`** publishes **Rules** from **`alert_comparison_results.json`**. Artifacts: **`build/mig-grafana/`**. |
 | **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
 
 **Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
@@ -157,18 +157,19 @@ Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains 
 | `track.yml` / `config.yml` | Instruqt metadata + VM **`elastic/es3-api-v2`** (`es3-api` host) |
 | `track_scripts/` | `setup-es3-api`: create Serverless project, nginx → Kibana :8080, venv + **Grafana Alloy** + OTLP SDK emitters → mOTLP (optional legacy bulk seed if **`WORKSHOP_ALLOW_BULK_SEED=1`**) |
 | `mig-to-kbn/` | **elastic/mig-to-kbn** (obs-migrate); required for **`grafana-migrate`** / **`datadog-migrate`** |
-| `01-lab-01-grafana-to-elastic/` | Lab 1: **20** Grafana → **`build/mig-grafana/`** (YAML + `migration_report.json`) |
+| `01-lab-01-grafana-to-elastic/` | Lab 1: **20** Grafana dashboards + **2** unified alert rules → **`build/mig-grafana/`** (YAML, `migration_report.json`, alert artifacts) |
 | `02-lab-02-datadog-dashboards-alerts-to-elastic/` | Lab 2: **10** DD dashboards → **`build/mig-datadog/`**; **4** monitors → **`build/elastic-alerts/`** + Rules API |
-| `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`) |
+| `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`); **`alerts/`** — unified **`grafana_alert_rules.json`** + **`grafana_datasources.json`** for **`--fetch-alerts`** |
 | `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (**12** timeseries widgets each; regenerate with **`scripts/generate_datadog_dashboards.py`**) |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
-| `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
+| `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`publish_grafana_alert_drafts_kibana.py`** (Grafana **`alert_comparison_results.json`** → Rules API), **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
 | `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
 | `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (vendored tree, submodule, or standalone clone); optional **`--reinstall`** venv |
-| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (`--native-promql`, **`--upload`**; optional **`WORKSHOP_MIG_ES_VALIDATE=1`** for **`--es-url`** + validation) |
+| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--upload`**; optional **`WORKSHOP_MIG_ES_VALIDATE=1`** for **`--es-url`** + validation) → **`publish_grafana_alert_drafts_kibana.py`** |
 | `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** (optional **`WORKSHOP_MIG_ES_VALIDATE=1`**) + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
+| `tools/publish_grafana_alert_drafts_kibana.py` | POST/PUT emitted **`rule_payload`** rows from **`build/mig-grafana/alert_comparison_results.json`** |
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |
 | `tools/otel_workshop_fleet.py` | **Six** OTLP worker subprocesses (distinct **service.name** + **host.name**) + **`system.*`**-style utilization metrics → Alloy; plus **`datadog_otel_to_elastic.py`** (**shopist-checkout** on **`workshop-node-07`**) for **Applications / Infrastructure / Hosts** variety |
 | `tools/otel_workshop_emitter.py` | Legacy single-service OTLP emitter (not started by default; use fleet) |

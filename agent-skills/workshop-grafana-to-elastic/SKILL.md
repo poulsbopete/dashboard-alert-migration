@@ -14,7 +14,8 @@ metadata:
 ## When to use
 
 **Grafana → Elastic Serverless** migration practice: **Grafana** exports in `assets/grafana/` (**20** sample dashboards)
-→ **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → **`build/mig-grafana/`** + upload to **Kibana** on **Observability Serverless** (**`--native-promql`** for Serverless). **Telemetry:** **OpenTelemetry SDK** → **Grafana Alloy** → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**. Optional legacy **`tools/grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** still exist for comparison.
+and **`assets/grafana/alerts/`** (unified alert rules for **`--fetch-alerts`**)
+→ **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → **`build/mig-grafana/`** + upload to **Kibana** on **Observability Serverless** (**`--native-promql`** for Serverless), then **`tools/publish_grafana_alert_drafts_kibana.py`** for **Rules**. **Telemetry:** **OpenTelemetry SDK** → **Grafana Alloy** → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**. Optional legacy **`tools/grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** still exist for comparison.
 
 ## Prerequisites
 
@@ -28,7 +29,7 @@ cd /root/workshop && source ~/.bashrc
 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-migrate`** with **`--upload --ensure-data-views`** and **Kibana** credentials only by default (no **`--es-url`** / live ES|QL — avoids placeholder panels on empty clusters). Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add **`--es-url`**, **`--es-api-key`**, and pre-upload validation. Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**.
+Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-migrate`** with **`--upload --ensure-data-views --fetch-alerts`** and **Kibana** credentials only by default (no **`--es-url`** / live ES|QL — avoids placeholder panels on empty clusters). Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add **`--es-url`**, **`--es-api-key`**, and pre-upload validation. Then **`publish_grafana_alert_drafts_kibana.py`**. Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**, **`alert_comparison_results.json`**.
 
 ## Path B — Laptop + Cursor (same flow as Lab 1 assignment)
 

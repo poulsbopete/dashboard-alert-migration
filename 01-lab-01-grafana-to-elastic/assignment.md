@@ -88,9 +88,9 @@ source ~/.bashrc
 # Pre-upload live ES|QL validation against ES (optional): WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher).
+Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher). **Observability → Rules** lists **two** workshop rules (from **`assets/grafana/alerts/`** via **`--fetch-alerts`** and **`tools/publish_grafana_alert_drafts_kibana.py`**); they are created **disabled** until you enable them in the UI.
 
-**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** from **`~/.bashrc`** does not enable live validation (the **grafana-migrate** CLI otherwise defaults **`--es-url`** from that env var). **`--upload`** uses **Kibana** credentials only unless **`WORKSHOP_MIG_ES_VALIDATE=1`**. **`--esql-index`** is **`metrics-*`** with **`--data-view`**.
+**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** from **`~/.bashrc`** does not enable live validation (the **grafana-migrate** CLI otherwise defaults **`--es-url`** from that env var). **`--upload`** uses **Kibana** credentials only unless **`WORKSHOP_MIG_ES_VALIDATE=1`**. **`--esql-index`** is **`metrics-*`** with **`--data-view`**. **`--fetch-alerts`** reads **`assets/grafana/alerts/`** (see upstream file-mode [alert inputs](https://github.com/elastic/mig-to-kbn/blob/main/observability_migration/adapters/source/grafana/extract.py)); artifacts include **`build/mig-grafana/alert_comparison_results.json`**.
 
 *Charts empty after upload?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min, or optional **`setup_serverless_data.py`** (below). *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
 
@@ -108,7 +108,10 @@ export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
   --source files --input-dir assets/grafana --output-dir build/mig-grafana \
   --native-promql --data-view 'metrics-*' --esql-index 'metrics-*' --logs-index 'logs-*' \
   --upload \
-  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
+  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views \
+  --fetch-alerts
+
+python3 tools/publish_grafana_alert_drafts_kibana.py --comparison build/mig-grafana/alert_comparison_results.json
 ```
 
 Same as Path A default (no **`--es-url`** / **`--validate`**). To mirror **`WORKSHOP_MIG_ES_VALIDATE=1`**, add **`--es-url`** + **`--es-api-key`** before **`--upload`** (validation auto-enables with **`--upload`** + **`--es-url`**):
@@ -119,7 +122,10 @@ Same as Path A default (no **`--es-url`** / **`--validate`**). To mirror **`WORK
   --native-promql --data-view 'metrics-*' --esql-index 'metrics-*' --logs-index 'logs-*' \
   --es-url "$ES_URL" --es-api-key "$ES_API_KEY" \
   --upload \
-  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views
+  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" --ensure-data-views \
+  --fetch-alerts
+
+python3 tools/publish_grafana_alert_drafts_kibana.py --comparison build/mig-grafana/alert_comparison_results.json
 ```
 
 The sandbox **already runs Alloy + OTLP**. If charts look empty, on the VM run **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
@@ -142,4 +148,4 @@ Optional: **[Elastic Agent Skills](https://github.com/elastic/agent-skills)** **
 
 ## Done
 
-**Check** when **`build/mig-grafana/yaml/`** has **20** `*.yaml` files and **`build/mig-grafana/migration_report.json`** exists (Path A: **`/root/workshop/build/`**; Path B: your clone).
+**Check** when **`build/mig-grafana/yaml/`** has **20** `*.yaml` files, **`build/mig-grafana/migration_report.json`** exists, and **`build/mig-grafana/alert_comparison_results.json`** lists the workshop Grafana rules (Path A: **`/root/workshop/build/`**; Path B: your clone).
