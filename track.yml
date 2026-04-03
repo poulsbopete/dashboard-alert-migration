@@ -23,7 +23,9 @@ description: |
   proxies **Kibana** on port **8080**, and includes the workshop repo (Python venv + **assets/**) for the CLIs.
 
   **Telemetry diagram:** loading / wait slides include a **Mermaid + ASCII** workflow (**Python OTLP → Grafana Alloy → Elastic mOTLP → Serverless → Kibana**).
-  A dedicated wait slide embeds **[O11Y Survivors / Vampire Clone](https://poulsbopete.github.io/Vampire-Clone/)** (large iframe, ~82vh) while the sandbox provisions.
+
+  **Upstream engine:** **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the migration CLI and docs home for this track. File bugs, request features, or contribute fixes via
+  **[Issues](https://github.com/elastic/mig-to-kbn/issues)** and **[Pull requests](https://github.com/elastic/mig-to-kbn/pulls)**.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - elastic
