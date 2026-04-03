@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Status \u00d7 method",
+      "title": "Status snapshot (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_response_status_code, http_request_method) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

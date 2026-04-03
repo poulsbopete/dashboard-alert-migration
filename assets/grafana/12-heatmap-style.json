@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Method \u00d7 status** \u2014 two-dimensional request mix."
+        "content": "**Request mix** \u2014 entity volume plus method and status as **separate** single-label charts (see generator docstring)."
       }
     },
     {
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Method \u00d7 status",
+      "title": "Requests by entity",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (http_request_method, http_response_status_code) (rate(http_requests_total[5m]))",
+          "expr": "sum by (entity_id) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

@@ -9,6 +9,11 @@ aggregates are not supported by the ES PROMQL bridge — see mig-to-kbn panels.p
 **Label names** match the workshop OTLP fleet (``tools/otel_workshop_fleet.py`` semantic
 conventions as Prometheus-style labels in Elasticsearch): ``http_response_status_code`` (not
 ``status``), ``http_request_method`` (not ``method``), ``http_route`` (not ``path``).
+
+**Multi-label ``sum by (a, b, ...)``** is avoided for non-histogram panels: Kibana Lens with
+native **PROMQL** can error with ``unresolved_exception`` / ``?label`` when more than one
+breakdown column is expected (Elasticsearch 9.x). Use one grouping label per chart; compare
+dimensions across panels instead.
 """
 from __future__ import annotations
 
@@ -36,15 +41,15 @@ DASH_SPECS: list[tuple[str, str, str, str, str, str, str, str, str, str, str]] =
     (
         "02-request-rate.json",
         "Request rate by entity_id",
-        "**Entity throughput** — which synthetic entities drive load right now.",
+        "**Entity throughput** — entity rate plus **single-label** splits (route and status); multi-label ``sum by`` breaks native PROMQL in Lens.",
         "Requests/sec (all)",
         "sum(rate(http_requests_total[5m]))",
         "Rate by entity",
         "sum by (entity_id) (rate(http_requests_total[5m]))",
-        "By entity + path",
-        "sum by (entity_id, http_route) (rate(http_requests_total[5m]))",
-        "Entity × status (instant)",
-        "sum by (entity_id, http_response_status_code) (rate(http_requests_total[5m]))",
+        "Rate by route",
+        "sum by (http_route) (rate(http_requests_total[5m]))",
+        "By status code (instant)",
+        "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
     ),
     (
         "03-latency-p95.json",
@@ -80,8 +85,8 @@ DASH_SPECS: list[tuple[str, str, str, str, str, str, str, str, str, str, str]] =
         "sum(rate(operation_errors_total[5m]))",
         "By reason",
         "sum by (reason) (rate(operation_errors_total[5m]))",
-        "By reason + entity",
-        "sum by (reason, entity_id) (rate(operation_errors_total[5m]))",
+        "Errors by entity",
+        "sum by (entity_id) (rate(operation_errors_total[5m]))",
         "Reason snapshot",
         "sum by (reason) (rate(operation_errors_total[5m]))",
     ),
@@ -93,8 +98,8 @@ DASH_SPECS: list[tuple[str, str, str, str, str, str, str, str, str, str, str]] =
         "sum(rate(http_requests_total[5m]))",
         "Rate by entity_id",
         "sum by (entity_id) (rate(http_requests_total[5m]))",
-        "Entity × method",
-        "sum by (entity_id, http_request_method) (rate(http_requests_total[5m]))",
+        "Rate by HTTP method",
+        "sum by (http_request_method) (rate(http_requests_total[5m]))",
         "Entity snapshot (instant)",
         "sum by (entity_id) (rate(http_requests_total[5m]))",
     ),
@@ -134,8 +139,8 @@ DASH_SPECS: list[tuple[str, str, str, str, str, str, str, str, str, str, str]] =
         "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
         "By method",
         "sum by (http_request_method) (rate(http_requests_total[5m]))",
-        "Status × method",
-        "sum by (http_response_status_code, http_request_method) (rate(http_requests_total[5m]))",
+        "Status snapshot (instant)",
+        "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
     ),
     (
         "10-slo-burn.json",
@@ -166,11 +171,11 @@ DASH_SPECS: list[tuple[str, str, str, str, str, str, str, str, str, str, str]] =
     (
         "12-heatmap-style.json",
         "Request mix",
-        "**Method × status** — two-dimensional request mix.",
+        "**Request mix** — entity volume plus method and status as **separate** single-label charts (see generator docstring).",
         "Requests/sec",
         "sum(rate(http_requests_total[5m]))",
-        "Method × status",
-        "sum by (http_request_method, http_response_status_code) (rate(http_requests_total[5m]))",
+        "Requests by entity",
+        "sum by (entity_id) (rate(http_requests_total[5m]))",
         "By method",
         "sum by (http_request_method) (rate(http_requests_total[5m]))",
         "By status",

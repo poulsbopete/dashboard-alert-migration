@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Entity throughput** \u2014 which synthetic entities drive load right now."
+        "content": "**Entity throughput** \u2014 entity rate plus **single-label** splits (route and status); multi-label ``sum by`` breaks native PROMQL in Lens."
       }
     },
     {
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "By entity + path",
+      "title": "Rate by route",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id, http_route) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http_route) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "Entity \u00d7 status (instant)",
+      "title": "By status code (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id, http_response_status_code) (rate(http_requests_total[5m]))",
+          "expr": "sum by (http_response_status_code) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"

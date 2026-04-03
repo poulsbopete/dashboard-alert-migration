@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "By reason + entity",
+      "title": "Errors by entity",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason, entity_id) (rate(operation_errors_total[5m]))",
+          "expr": "sum by (entity_id) (rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
