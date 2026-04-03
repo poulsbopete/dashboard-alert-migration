@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Go GC** \u2014 pause time sum rate as a pressure signal."
+        "content": "**Why not real Go GC metrics here:** `go_gc_duration_seconds_*` histogram parts are often stored in Elasticsearch as **double** gauges, while ES|QL **RATE** only accepts **counter** fields \u2014 migrated panels then fail at query time. This board keeps the **GC / runtime pressure** story but uses the workshop fleet\u2019s **counter** metrics (`http_requests_total`, `operation_errors_total`) so native PromQL \u2192 ES|QL works on Serverless."
       }
     },
     {
       "type": "stat",
-      "title": "GC pause sum rate",
+      "title": "HTTP requests/sec",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(go_gc_duration_seconds_sum[5m]))",
+          "expr": "sum(rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "GC pause by instance",
+      "title": "Request burst by instance",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (instance) (rate(go_gc_duration_seconds_sum[5m]))",
+          "expr": "sum by (instance) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
     },
     {
       "type": "timeseries",
-      "title": "GC count rate",
+      "title": "Operation errors/sec",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(go_gc_duration_seconds_count[5m]))",
+          "expr": "sum(rate(operation_errors_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "GC by job",
+      "title": "Requests by job (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (job) (rate(go_gc_duration_seconds_sum[5m]))",
+          "expr": "sum by (job) (rate(http_requests_total[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"
