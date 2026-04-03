@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id, method) (rate(http_requests_total[5m]))",
+          "expr": "sum by (entity_id, http_request_method) (rate(http_requests_total[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (entity_id) (rate(http_requests_total{status=~\"5..\"}[5m]))",
+          "expr": "sum by (entity_id) (rate(http_requests_total{http_response_status_code=~\"5..\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }

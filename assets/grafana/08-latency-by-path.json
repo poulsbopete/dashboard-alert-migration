@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, path) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, http_route) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.90, sum by (le, path) (rate(http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.90, sum by (le, http_route) (rate(http_request_duration_seconds_bucket[5m])))",
           "legendFormat": "",
           "refId": "A"
         }

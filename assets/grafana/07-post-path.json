@@ -1,6 +1,6 @@
 {
   "uid": "07-post-path",
-  "title": "POST /v1/invoke volume",
+  "title": "POST /api/v1/orders volume",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -35,12 +35,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "**Invoke path** \u2014 focus on ``POST /v1/invoke`` vs overall POST traffic."
+        "content": "**Hot POST route** \u2014 ``POST /api/v1/orders`` (emitted by the fleet) vs all POST traffic."
       }
     },
     {
       "type": "stat",
-      "title": "POST /v1/invoke rps",
+      "title": "POST /api/v1/orders rps",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -53,7 +53,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{path=\"/v1/invoke\",method=\"POST\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{http_route=\"/api/v1/orders\",http_request_method=\"POST\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -81,7 +81,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Invoke path rate",
+      "title": "Orders POST rate",
       "gridPos": {
         "h": 8,
         "w": 18,
@@ -94,7 +94,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{path=\"/v1/invoke\",method=\"POST\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{http_route=\"/api/v1/orders\",http_request_method=\"POST\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -127,7 +127,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{method=\"POST\"}[5m]))",
+          "expr": "sum(rate(http_requests_total{http_request_method=\"POST\"}[5m]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -147,7 +147,7 @@
     },
     {
       "type": "table",
-      "title": "POST by path (instant)",
+      "title": "POST by route (instant)",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -160,7 +160,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (path) (rate(http_requests_total{method=\"POST\"}[5m]))",
+          "expr": "sum by (http_route) (rate(http_requests_total{http_request_method=\"POST\"}[5m]))",
           "format": "table",
           "instant": true,
           "refId": "A"
