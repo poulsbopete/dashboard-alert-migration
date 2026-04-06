@@ -67,118 +67,8 @@ until [ -f /opt/instruqt/bootstrap/host-bootstrap-completed ]; do
   fi
 done
 
-echo "Project type: ${PROJECT_TYPE:-observability}"
-echo "Regions: ${REGIONS:-aws-us-east-1}"
-
-PRODUCT_TIER="${PRODUCT_TIER:-complete}"
-python3 bin/es3-api.py \
-  --operation create \
-  --project-type "${PROJECT_TYPE:-observability}" \
-  --product-tier "$PRODUCT_TIER" \
-  --regions "${REGIONS:-aws-us-east-1}" \
-  --project-name "${INSTRUQT_TRACK_SLUG:-migration}-$INSTRUQT_PARTICIPANT_ID-$(date '+%s')" \
-  --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
-  --wait-for-ready
-
-timeout=120
-counter=0
-while [ $counter -lt $timeout ]; do
-  if [ -f /tmp/project_results.json ]; then
-    echo "project_results.json present"
-    break
-  fi
-  echo "Waiting for /tmp/project_results.json ($((counter + 1))/${timeout}s)"
-  sleep 1
-  counter=$((counter + 1))
-done
-
-if [ ! -f /tmp/project_results.json ]; then
-  echo "ERROR: /tmp/project_results.json not found"
-  exit 1
-fi
-
-REG="${REGIONS:-aws-us-east-1}"
-export KIBANA_URL
-KIBANA_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.kibana' /tmp/project_results.json)"
-export ELASTICSEARCH_PASSWORD
-ELASTICSEARCH_PASSWORD="$(jq -r --arg region "$REG" '.[$region].credentials.password' /tmp/project_results.json)"
-export ES_URL
-ES_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.elasticsearch' /tmp/project_results.json)"
-
-agent variable set ES_KIBANA_URL "$KIBANA_URL"
-agent variable set ES_URL "$ES_URL"
-agent variable set ES_USERNAME "$(jq -r --arg region "$REG" '.[$region].credentials.username' /tmp/project_results.json)"
-agent variable set ES_PASSWORD "$ELASTICSEARCH_PASSWORD"
-agent variable set ES_DEPLOYMENT_ID "$(jq -r --arg region "$REG" '.[$region].id' /tmp/project_results.json)"
-
-BASE64="$(echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64 -w0 2>/dev/null || echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64)"
-KIBANA_URL_WITHOUT_PROTOCOL="$(echo "$KIBANA_URL" | sed -e 's#http[s]\?://##g')"
-
-WORKSHOP_ES_API_KEY=""
-output="$(curl -X POST -s -u "admin:${ELASTICSEARCH_PASSWORD}" \
-  -w "\n%{http_code}" \
-  "$ES_URL/_security/api_key" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"workshop-migration"}' || true)"
-http_code="$(echo "$output" | tail -n1)"
-response_body="$(echo "$output" | sed '$d')"
-if [ "$http_code" = "200" ]; then
-  ELASTICSEARCH_API_KEY="$(echo "$response_body" | jq -r '.encoded // empty')"
-  if [ -n "$ELASTICSEARCH_API_KEY" ]; then
-    agent variable set ES_API_KEY "$ELASTICSEARCH_API_KEY"
-    agent variable set ELASTIC_API_KEY "$ELASTICSEARCH_API_KEY"
-    WORKSHOP_ES_API_KEY="$ELASTICSEARCH_API_KEY"
-  fi
-fi
-
-cat > /etc/nginx/conf.d/default.conf <<NGX
-server {
-  listen 8080 default_server;
-  server_name kibana;
-  location /nginx_status {
-    stub_status on;
-    allow 127.0.0.1;
-    deny all;
-  }
-  location / {
-    proxy_set_header Host ${KIBANA_URL_WITHOUT_PROTOCOL};
-    proxy_pass ${KIBANA_URL};
-    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
-    proxy_set_header Connection "keep-alive";
-    proxy_hide_header Content-Security-Policy;
-    proxy_hide_header X-Frame-Options;
-    proxy_hide_header X-Content-Type-Options;
-    proxy_hide_header Strict-Transport-Security;
-    proxy_set_header X-Scheme \$scheme;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Forwarded-Host \$host;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header Authorization "Basic ${BASE64}";
-    proxy_set_header Accept-Encoding "gzip, deflate, br";
-    proxy_set_header Accept "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
-    proxy_set_header Accept-Language "en-US,en;q=0.9";
-    proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
-    proxy_redirect off;
-    proxy_http_version 1.1;
-    client_max_body_size 20M;
-    proxy_read_timeout 600;
-    proxy_buffering off;
-    proxy_send_timeout 300;
-    send_timeout 300;
-    proxy_connect_timeout 300;
-  }
-}
-NGX
-
-systemctl restart nginx
-sleep 2
-if ! systemctl is-active --quiet nginx; then
-  echo "ERROR: nginx failed to start"
-  systemctl status nginx || true
-  exit 1
-fi
-
+# --- Phase 1: workshop tree + toolchain (symlink /root/workshop before Serverless provisioning) ---
+# So Terminal workdir /root/workshop exists while es3-api + nginx run (learners often open tabs early).
 # --- Workshop tree (CLI + assets) ---
 SCRIPT="${BASH_SOURCE[0]:-$0}"
 [[ "$SCRIPT" == /* ]] || SCRIPT="$(pwd)/$SCRIPT"
@@ -333,8 +223,8 @@ if [ ! -x /usr/local/bin/alloy ]; then
   rm -rf "$ADIR" /tmp/alloy-linux-amd64.zip
 fi
 
-mkdir -p /root/workshop/build/elastic-dashboards /root/workshop/build/elastic-datadog-dashboards \
-  /root/workshop/build/elastic-alerts /root/workshop/build/mig-grafana /root/workshop/build/mig-datadog
+mkdir -p "$TRACK_ROOT/build/elastic-dashboards" "$TRACK_ROOT/build/elastic-datadog-dashboards" \
+  "$TRACK_ROOT/build/elastic-alerts" "$TRACK_ROOT/build/mig-grafana" "$TRACK_ROOT/build/mig-datadog"
 
 # Lab 2 check expects 4 monitor-*-elastic.json under build/elastic-alerts; generate at track bootstrap so Check passes
 # even if learners only convert dashboards (matches migrate_datadog step 2).
@@ -342,8 +232,121 @@ for f in "$TRACK_ROOT"/assets/datadog/monitor-*.json; do
   [ -f "$f" ] || continue
   base="$(basename "$f" .json)"
   /opt/workshop-venv/bin/python3 "$TRACK_ROOT/tools/datadog_to_elastic_alert.py" "$f" \
-    -o "/root/workshop/build/elastic-alerts/${base}-elastic.json"
+    -o "$TRACK_ROOT/build/elastic-alerts/${base}-elastic.json"
 done
+
+# --- Phase 2: Observability Serverless project + Kibana proxy ---
+echo "Project type: ${PROJECT_TYPE:-observability}"
+echo "Regions: ${REGIONS:-aws-us-east-1}"
+
+PRODUCT_TIER="${PRODUCT_TIER:-complete}"
+python3 bin/es3-api.py \
+  --operation create \
+  --project-type "${PROJECT_TYPE:-observability}" \
+  --product-tier "$PRODUCT_TIER" \
+  --regions "${REGIONS:-aws-us-east-1}" \
+  --project-name "${INSTRUQT_TRACK_SLUG:-migration}-$INSTRUQT_PARTICIPANT_ID-$(date '+%s')" \
+  --api-key "${PME_CLOUD_INSTRUQT_API_KEY}" \
+  --wait-for-ready
+
+timeout=120
+counter=0
+while [ $counter -lt $timeout ]; do
+  if [ -f /tmp/project_results.json ]; then
+    echo "project_results.json present"
+    break
+  fi
+  echo "Waiting for /tmp/project_results.json ($((counter + 1))/${timeout}s)"
+  sleep 1
+  counter=$((counter + 1))
+done
+
+if [ ! -f /tmp/project_results.json ]; then
+  echo "ERROR: /tmp/project_results.json not found"
+  exit 1
+fi
+
+REG="${REGIONS:-aws-us-east-1}"
+export KIBANA_URL
+KIBANA_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.kibana' /tmp/project_results.json)"
+export ELASTICSEARCH_PASSWORD
+ELASTICSEARCH_PASSWORD="$(jq -r --arg region "$REG" '.[$region].credentials.password' /tmp/project_results.json)"
+export ES_URL
+ES_URL="$(jq -r --arg region "$REG" '.[$region].endpoints.elasticsearch' /tmp/project_results.json)"
+
+agent variable set ES_KIBANA_URL "$KIBANA_URL"
+agent variable set ES_URL "$ES_URL"
+agent variable set ES_USERNAME "$(jq -r --arg region "$REG" '.[$region].credentials.username' /tmp/project_results.json)"
+agent variable set ES_PASSWORD "$ELASTICSEARCH_PASSWORD"
+agent variable set ES_DEPLOYMENT_ID "$(jq -r --arg region "$REG" '.[$region].id' /tmp/project_results.json)"
+
+BASE64="$(echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64 -w0 2>/dev/null || echo -n "admin:${ELASTICSEARCH_PASSWORD}" | base64)"
+KIBANA_URL_WITHOUT_PROTOCOL="$(echo "$KIBANA_URL" | sed -e 's#http[s]\?://##g')"
+
+WORKSHOP_ES_API_KEY=""
+output="$(curl -X POST -s -u "admin:${ELASTICSEARCH_PASSWORD}" \
+  -w "\n%{http_code}" \
+  "$ES_URL/_security/api_key" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"workshop-migration"}' || true)"
+http_code="$(echo "$output" | tail -n1)"
+response_body="$(echo "$output" | sed '$d')"
+if [ "$http_code" = "200" ]; then
+  ELASTICSEARCH_API_KEY="$(echo "$response_body" | jq -r '.encoded // empty')"
+  if [ -n "$ELASTICSEARCH_API_KEY" ]; then
+    agent variable set ES_API_KEY "$ELASTICSEARCH_API_KEY"
+    agent variable set ELASTIC_API_KEY "$ELASTICSEARCH_API_KEY"
+    WORKSHOP_ES_API_KEY="$ELASTICSEARCH_API_KEY"
+  fi
+fi
+
+cat > /etc/nginx/conf.d/default.conf <<NGX
+server {
+  listen 8080 default_server;
+  server_name kibana;
+  location /nginx_status {
+    stub_status on;
+    allow 127.0.0.1;
+    deny all;
+  }
+  location / {
+    proxy_set_header Host ${KIBANA_URL_WITHOUT_PROTOCOL};
+    proxy_pass ${KIBANA_URL};
+    proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+    proxy_set_header Connection "keep-alive";
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header X-Content-Type-Options;
+    proxy_hide_header Strict-Transport-Security;
+    proxy_set_header X-Scheme \$scheme;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header Authorization "Basic ${BASE64}";
+    proxy_set_header Accept-Encoding "gzip, deflate, br";
+    proxy_set_header Accept "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    proxy_set_header Accept-Language "en-US,en;q=0.9";
+    proxy_set_header User-Agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36";
+    proxy_redirect off;
+    proxy_http_version 1.1;
+    client_max_body_size 20M;
+    proxy_read_timeout 600;
+    proxy_buffering off;
+    proxy_send_timeout 300;
+    send_timeout 300;
+    proxy_connect_timeout 300;
+  }
+}
+NGX
+
+systemctl restart nginx
+sleep 2
+if ! systemctl is-active --quiet nginx; then
+  echo "ERROR: nginx failed to start"
+  systemctl status nginx || true
+  exit 1
+fi
 
 # Managed OTLP base URL: project_results first, then same derivation as scripts/start_workshop_otel.sh
 MOTLP_FROM_API=""

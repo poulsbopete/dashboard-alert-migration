@@ -52,7 +52,7 @@ tabs:
   title: Terminal
   type: terminal
   hostname: es3-api
-  workdir: /root/workshop
+  workdir: /root
 - id: blxkp1sz0kzz
   title: Elastic Serverless
   type: service
@@ -80,6 +80,8 @@ Migration uses **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (
 Pick **Path A** or **Path B** (or both).
 
 ## Path A — dashboard migration (Instruqt)
+
+**`/root/workshop` missing?** Wait until the challenge has **fully loaded** (setup can take a few minutes). The track script creates **`/root/workshop`** early, then provisions Serverless and appends **`export KIBANA_URL=…`** to **`~/.bashrc`**. If the path is still missing or **`source ~/.bashrc`** has no Elastic vars, **Stop** the track and **Start** again (setup failed mid-way—often apt lock or Cloud API). Hosts: confirm **`ESS_CLOUD_API_KEY`** / **`PME_CLOUD_INSTRUQT_API_KEY`** in team secrets.
 
 ```bash
 cd /root/workshop

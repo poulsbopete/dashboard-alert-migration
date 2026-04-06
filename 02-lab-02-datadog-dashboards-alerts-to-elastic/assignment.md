@@ -52,7 +52,7 @@ tabs:
   title: Terminal
   type: terminal
   hostname: es3-api
-  workdir: /root/workshop
+  workdir: /root
 - id: v9ea7agmywny
   title: Elastic Serverless
   type: service
