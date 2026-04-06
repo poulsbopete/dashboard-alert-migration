@@ -81,24 +81,24 @@ Pick **Path A** or **Path B** (or both).
 
 ## Path A — dashboard migration (Instruqt)
 
-When the sandbox is ready, **paste this as one block** (Terminal’s default directory is **`/root`**, so the migrate step must run **after** `cd` in the **same** shell — a second line alone will fail with “No such file”):
+When the sandbox is ready, run (**absolute path** so it works no matter what directory you’re in — **`source ~/.bashrc` can change `$PWD`**, which breaks **`bash scripts/…`** even on one line):
 
 ```bash
-cd /root/workshop && source ~/.bashrc && { command -v ensure-workshop-tree >/dev/null 2>&1 && ensure-workshop-tree || true; } && bash scripts/migrate_grafana_dashboards_to_serverless.sh
+{ command -v ensure-workshop-tree >/dev/null 2>&1 && ensure-workshop-tree || true; } && bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-The **`ensure-workshop-tree`** step is a no-op on a healthy sandbox; if **`scripts/migrate_…` is missing**, it reclones into **`/opt/instruqt-workshop-track`** and repoints **`/root/workshop`**. **`bash scripts/…`** avoids “permission denied” when the execute bit is missing.
+The migrate script loads **`/root/.bashrc`** itself for **`KIBANA_URL`** / **`ES_API_KEY`**, so you do not need **`cd`** or **`source`** before it. **`ensure-workshop-tree`** is a no-op when the tree is healthy; otherwise it reclones into **`/opt/instruqt-workshop-track`** and repoints **`/root/workshop`**.
 
-That migrate script converts **20** Grafana JSON under **`assets/grafana/`**, uploads dashboards to Kibana, fetches workshop alerts, and runs the alert publisher. Optional: pre-upload ES|QL checks — `cd /root/workshop && WORKSHOP_MIG_ES_VALIDATE=1 bash scripts/migrate_grafana_dashboards_to_serverless.sh`.
+That migrate script converts **20** Grafana JSON under **`assets/grafana/`**, uploads dashboards to Kibana, fetches workshop alerts, and runs the alert publisher. Optional: pre-upload ES|QL checks — `WORKSHOP_MIG_ES_VALIDATE=1 bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`.
 
 **Check:** **Elastic Serverless** tab → **Dashboards** (titles should match the Grafana exports). **Observability → Rules** → two workshop rules (start **disabled**; enable in the UI if you want them live).
 
 **If something looks wrong**
 
 - **`cd /root/workshop` fails** — wait for the challenge to finish loading; if it persists, **Stop** → **Start** the track (hosts: **`ESS_CLOUD_API_KEY`** in Instruqt secrets).
-- **Empty charts** — `./scripts/check_workshop_otel_pipeline.sh` then `./scripts/start_workshop_otel.sh` and wait ~1 min; or `WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`.
+- **Empty charts** — `bash /root/workshop/scripts/check_workshop_otel_pipeline.sh` then `bash /root/workshop/scripts/start_workshop_otel.sh` and wait ~1 min; or `WORKSHOP_FORCE_OTEL_RESTART=1 bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`.
 - **Stale workshop files** — `./scripts/sync_workshop_from_git.sh`.
-- **`bash: scripts/migrate_…: No such file`** — you are usually in **`/root`** while the script lives under **`/root/workshop/scripts/`**. Run **`cd /root/workshop`** first, or **re-paste the full one-liner** above (all **`&&`** on one line). If **`ensure-workshop-tree`** said OK but migrate still fails, try **`bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`** after **`source ~/.bashrc`**. Otherwise **`Stop` → `Start`** the track.
+- **`bash: scripts/migrate_…: No such file`** — your shell left **`/root/workshop`** (e.g. after **`source ~/.bashrc`**). Use the **absolute** command above (**`bash /root/workshop/scripts/…`**) or **`cd /root/workshop`** immediately before **`bash scripts/…`**. If the tree is broken, **`Stop` → `Start`** the track.
 
 ### Path A — script defaults (optional)
 

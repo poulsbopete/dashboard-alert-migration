@@ -18,4 +18,4 @@ if [ "${legacy:-0}" -ge 20 ]; then
   exit 0
 fi
 
-fail-message "Expected mig-to-kbn output: 20+ *.yaml in build/mig-grafana/yaml/ and build/mig-grafana/migration_report.json (YAML count: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo missing)). Or legacy: 20 *-elastic-draft.json in build/elastic-dashboards (found: ${legacy:-0}). Run Path A: ./scripts/migrate_grafana_dashboards_to_serverless.sh (see assignment)."
+fail-message "Expected mig-to-kbn output: 20+ *.yaml in build/mig-grafana/yaml/ and build/mig-grafana/migration_report.json (YAML count: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo missing)). Or legacy: 20 *-elastic-draft.json in build/elastic-dashboards (found: ${legacy:-0}). Run Path A: bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh (see assignment)."

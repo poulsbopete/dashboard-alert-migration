@@ -67,7 +67,7 @@ elif [ "${WORKSHOP_FORCE_OTEL_RESTART:-0}" != "1" ] \
   && curl -sf --max-time 3 "http://127.0.0.1:12345/metrics" >/dev/null 2>&1 \
   && pgrep -f '[o]tel_workshop_fleet.py' >/dev/null 2>&1; then
   echo "==> [1/4] OTLP already running (Alloy + fleet). Skipping restart — same situation as Path B after bootstrap."
-  echo "    To force a full restart: WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
+  echo "    To force a full restart: WORKSHOP_FORCE_OTEL_RESTART=1 bash ${ROOT}/scripts/migrate_grafana_dashboards_to_serverless.sh"
   WAIT_OTLP=45
 else
   echo "==> [1/4] OpenTelemetry pipeline (Alloy → Elastic mOTLP + OTLP SDK emitters)..."
@@ -83,7 +83,7 @@ if [ "$WAIT_OTLP" -gt 0 ]; then
   sleep "$WAIT_OTLP"
 fi
 echo "    OTLP HTTP metrics use http_requests_total + http_request_duration_seconds_* (matches migrated Grafana PROMQL)."
-echo "    If you upgraded the workshop git copy, restart emitters: WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
+echo "    If you upgraded the workshop git copy, restart emitters: WORKSHOP_FORCE_OTEL_RESTART=1 bash ${ROOT}/scripts/migrate_grafana_dashboards_to_serverless.sh"
 
 # mig-to-kbn defaults --es-url from ES_URL in the environment (~/.bashrc). Empty strings on the CLI override that
 # so Kibana-only upload does not auto-enable live ES|QL validation (see datadog/grafana cli.py).

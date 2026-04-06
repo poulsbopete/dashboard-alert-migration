@@ -17,4 +17,4 @@ if [ "${legacy:-0}" -ge 10 ] && [ "${ac:-0}" -ge 4 ]; then
   exit 0
 fi
 
-fail-message "Expected mig-to-kbn: 10+ *.yaml in build/mig-datadog/yaml/, build/mig-datadog/migration_report.json, and 4 monitor-*-elastic.json in build/elastic-alerts/ (yaml: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo no), alerts: ${ac:-0}). Or legacy: 10 *-elastic-draft.json in build/elastic-datadog-dashboards. Run: ./scripts/migrate_datadog_dashboards_to_serverless.sh"
+fail-message "Expected mig-to-kbn: 10+ *.yaml in build/mig-datadog/yaml/, build/mig-datadog/migration_report.json, and 4 monitor-*-elastic.json in build/elastic-alerts/ (yaml: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo no), alerts: ${ac:-0}). Or legacy: 10 *-elastic-draft.json in build/elastic-datadog-dashboards. Run: bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh"

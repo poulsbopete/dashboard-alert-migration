@@ -48,7 +48,7 @@ done
 
 echo ""
 echo "==> 3) Optional: pre-upload ES|QL validation (same signals as grafana-migrate --validate)"
-echo "    WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh"
+echo "    WORKSHOP_MIG_ES_VALIDATE=1 bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh"
 
 echo ""
 echo "OK: If (1) shows docs > 0, OTLP metrics are landing. Native PROMQL on Serverless expects"

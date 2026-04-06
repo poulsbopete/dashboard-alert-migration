@@ -44,15 +44,16 @@ and **Cursor** / AI for refinement.
 ## Quick start on the workshop VM (`es3-api`)
 
 ```bash
-cd /root/workshop && source ~/.bashrc
+bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh
+# or Lab 2: bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
-Run migrate scripts as **`cd /root/workshop && ./scripts/…`** (one line). The Terminal tab often starts in **`/root`**, so a bare **`./scripts/migrate_…`** fails with “No such file”.
+Each migrate script sources **`/root/.bashrc`** and **`cd`s to the workshop root — use **`bash /root/workshop/scripts/…`** so **`$PWD`** does not matter (**`source ~/.bashrc`** alone can change directory and break **`./scripts/…`**).
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | `./scripts/migrate_grafana_dashboards_to_serverless.sh` → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation); **`publish_grafana_alert_drafts_kibana.py`** publishes **Rules** from **`alert_comparison_results.json`**. Artifacts: **`build/mig-grafana/`**. |
-| **Lab 2 — Datadog** | `./scripts/migrate_datadog_dashboards_to_serverless.sh` → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
+| **Lab 1 — Grafana** | **`bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`** → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation); **`publish_grafana_alert_drafts_kibana.py`** publishes **Rules** from **`alert_comparison_results.json`**. Artifacts: **`build/mig-grafana/`**. |
+| **Lab 2 — Datadog** | **`bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`** → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
 
 **Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
 
