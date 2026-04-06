@@ -10,6 +10,7 @@ REF="${WORKSHOP_GIT_REF:-main}"
 
 if [[ -f "/root/workshop/$MIG" ]]; then
   echo "OK: /root/workshop already contains migration scripts."
+  echo "    Run migrate from that directory (same shell as cd): cd /root/workshop && bash $MIG" >&2
   exit 0
 fi
 

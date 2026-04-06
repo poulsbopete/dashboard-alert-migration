@@ -82,11 +82,11 @@ Pick **Path A** or **Path B** (or both).
 ## Path A — one script (same idea as Lab 1)
 
 ```bash
-cd /root/workshop
-source ~/.bashrc
-./scripts/migrate_datadog_dashboards_to_serverless.sh
-# Optional strict validation: WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_datadog_dashboards_to_serverless.sh
+cd /root/workshop && source ~/.bashrc && ./scripts/migrate_datadog_dashboards_to_serverless.sh
+# Optional strict validation: cd /root/workshop && WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
+
+Paste as **one line** for the main command so you stay in **`/root/workshop`** (the Terminal tab defaults to **`/root`**).
 
 Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
 

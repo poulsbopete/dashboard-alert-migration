@@ -44,9 +44,10 @@ and **Cursor** / AI for refinement.
 ## Quick start on the workshop VM (`es3-api`)
 
 ```bash
-cd /root/workshop
-source ~/.bashrc
+cd /root/workshop && source ~/.bashrc
 ```
+
+Run migrate scripts as **`cd /root/workshop && ./scripts/…`** (one line). The Terminal tab often starts in **`/root`**, so a bare **`./scripts/migrate_…`** fails with “No such file”.
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
