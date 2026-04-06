@@ -97,21 +97,56 @@ _pick_root_from_requirements_file() {
   fi
 }
 
-# Full git clone when the mounted track path is missing scripts/ (common if lifecycle cwd makes CANDIDATE wrong).
+# Full workshop copy when the mounted track path is incomplete. Try git, then curl tarball (some sandboxes block git to GitHub).
 _clone_workshop_from_git() {
   export DEBIAN_FRONTEND=noninteractive
   _wait_for_dpkg_lock_optional
   _apt_get_with_retry update -y
-  _apt_get_with_retry install -y --no-install-recommends git ca-certificates
+  _apt_get_with_retry install -y --no-install-recommends git ca-certificates curl
   _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
   _ref="${WORKSHOP_GIT_REF:-main}"
-  rm -rf /opt/instruqt-workshop-track
-  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
-    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+  _tarball_fallback="${WORKSHOP_GIT_TARBALL_URL:-}"
+  if [[ -z "$_tarball_fallback" ]] && [[ "$_url" == *"github.com"* ]]; then
+    _ghpath="${_url#*github.com/}"
+    _ghpath="${_ghpath#*:}"
+    _ghpath="${_ghpath%.git}"
+    _owner_repo="$(printf '%s\n' "$_ghpath" | cut -d/ -f1-2)"
+    [[ -n "$_owner_repo" ]] && [[ "$_owner_repo" == *"/"* ]] && _tarball_fallback="https://github.com/${_owner_repo}/archive/refs/heads/${_ref}.tar.gz"
   fi
+  [[ -z "$_tarball_fallback" ]] && _tarball_fallback="https://github.com/poulsbopete/dashboard-alert-migration/archive/refs/heads/${_ref}.tar.gz"
+  rm -rf /opt/instruqt-workshop-track /opt/_workshop_unpack
+
+  set +e
+  echo "Workshop: cloning ${_url} (ref ${_ref}) ..." >&2
+  GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track
+  _ec=$?
+  if [[ $_ec -ne 0 ]]; then
+    echo "WARN: git clone with branch failed (exit $_ec); retrying default branch ..." >&2
+    rm -rf /opt/instruqt-workshop-track
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+    _ec=$?
+  fi
+  if [[ $_ec -ne 0 ]] || ! _track_root_ok "/opt/instruqt-workshop-track"; then
+    echo "WARN: git workshop copy missing or invalid (exit $_ec); trying tarball ..." >&2
+    rm -rf /opt/instruqt-workshop-track
+    mkdir -p /opt/_workshop_unpack
+    if curl -fsSL "$_tarball_fallback" | tar -xz -C /opt/_workshop_unpack; then
+      _d="$(find /opt/_workshop_unpack -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+      if [[ -n "$_d" ]]; then
+        mv "$_d" /opt/instruqt-workshop-track
+      fi
+    else
+      echo "WARN: tarball fetch failed (${_tarball_fallback})" >&2
+    fi
+    rm -rf /opt/_workshop_unpack
+  fi
+  set -euxo pipefail
+
   if _track_root_ok "/opt/instruqt-workshop-track"; then
-    cd /opt/instruqt-workshop-track && pwd
+    (cd /opt/instruqt-workshop-track && pwd)
   else
+    echo "ERROR: /opt/instruqt-workshop-track is not a valid workshop tree after git/tarball attempts." >&2
+    ls -la /opt/instruqt-workshop-track 2>/dev/null || echo "(directory missing)" >&2
     printf ''
   fi
 }
