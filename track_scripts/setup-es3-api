@@ -40,7 +40,9 @@ _wait_for_dpkg_lock_optional() {
 _apt_get_with_retry() {
   local max="${WORKSHOP_APT_RETRY_MAX:-36}" delay="${WORKSHOP_APT_RETRY_DELAY:-10}" n=1
   while true; do
-    if apt-get "$@"; then
+    # apt-get writes progress to stdout; when this helper runs inside $(...) (e.g. TRACK_ROOT="$(_clone_workshop_from_git)"),
+    # stdout would poison the captured value — send apt output to stderr so only the intended path is captured.
+    if apt-get "$@" >&2; then
       return 0
     fi
     local ec=$?
