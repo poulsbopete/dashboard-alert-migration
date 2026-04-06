@@ -97,6 +97,25 @@ _pick_root_from_requirements_file() {
   fi
 }
 
+# Full git clone when the mounted track path is missing scripts/ (common if lifecycle cwd makes CANDIDATE wrong).
+_clone_workshop_from_git() {
+  export DEBIAN_FRONTEND=noninteractive
+  _wait_for_dpkg_lock_optional
+  _apt_get_with_retry update -y
+  _apt_get_with_retry install -y --no-install-recommends git ca-certificates
+  _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
+  _ref="${WORKSHOP_GIT_REF:-main}"
+  rm -rf /opt/instruqt-workshop-track
+  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
+    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+  fi
+  if _track_root_ok "/opt/instruqt-workshop-track"; then
+    cd /opt/instruqt-workshop-track && pwd
+  else
+    printf ''
+  fi
+}
+
 TRACK_ROOT=""
 # Do not probe /root/workshop here: it may be a leftover directory from an old image; we set it via symlink below.
 for r in "${WORKSHOP_ROOT:-}" "${INSTRUQT_TRACK_DIR:-}" "$CANDIDATE" "$(pwd)"; do
@@ -122,31 +141,24 @@ if [[ -z "$TRACK_ROOT" ]]; then
     -type f -path '*/tools/requirements.txt' -print 2>/dev/null | head -32)
 fi
 
-if [[ -z "$TRACK_ROOT" ]]; then
-  export DEBIAN_FRONTEND=noninteractive
-  _wait_for_dpkg_lock_optional
-  _apt_get_with_retry update -y
-  _apt_get_with_retry install -y --no-install-recommends git ca-certificates
-  _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
-  _ref="${WORKSHOP_GIT_REF:-main}"
-  rm -rf /opt/instruqt-workshop-track
-  # Do not use --recurse-submodules here: if mig-to-kbn is unreachable, the whole clone fails (set -e) and the track
-  # never starts. Parent-only clone, then populate mig-to-kbn in the block below (submodule init or separate clone).
-  if ! git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track 2>/dev/null; then
-    git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+if [[ -z "$TRACK_ROOT" ]] || ! _track_root_ok "$TRACK_ROOT"; then
+  if [[ -n "$TRACK_ROOT" ]]; then
+    echo "WARN: workshop path '$TRACK_ROOT' failed validation (missing migrate script or assets); cloning from git..." >&2
   fi
-  if _track_root_ok "/opt/instruqt-workshop-track"; then
-    TRACK_ROOT="$(cd /opt/instruqt-workshop-track && pwd)"
-  fi
+  TRACK_ROOT="$(_clone_workshop_from_git)"
 fi
 
-if [[ -z "$TRACK_ROOT" ]]; then
-  echo "ERROR: Could not resolve workshop tree" >&2
+if [[ -z "$TRACK_ROOT" ]] || ! _track_root_ok "$TRACK_ROOT"; then
+  echo "ERROR: Could not resolve a valid workshop tree (need scripts/migrate_grafana_dashboards_to_serverless.sh and assets)" >&2
   exit 1
 fi
 
 export WORKSHOP_ROOT="${WORKSHOP_ROOT:-$TRACK_ROOT}"
 ln -sfn "$TRACK_ROOT" /root/workshop
+chmod +x "$TRACK_ROOT/scripts/"*.sh 2>/dev/null || true
+if [[ -f "$TRACK_ROOT/scripts/ensure_workshop_tree.sh" ]]; then
+  install -m 0755 "$TRACK_ROOT/scripts/ensure_workshop_tree.sh" /usr/local/bin/ensure-workshop-tree
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 _wait_for_dpkg_lock_optional
@@ -454,6 +466,7 @@ find "$TRACK_ROOT" -type f \( -name 'setup-es3-api' -o -name 'check-es3-api' -o 
 [[ -f "$TRACK_ROOT/scripts/send_datadog_otel.sh" ]] && chmod +x "$TRACK_ROOT/scripts/send_datadog_otel.sh"
 [[ -f "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh" ]] && chmod +x "$TRACK_ROOT/scripts/check_workshop_otel_pipeline.sh"
 [[ -f "$TRACK_ROOT/scripts/sync_workshop_from_git.sh" ]] && chmod +x "$TRACK_ROOT/scripts/sync_workshop_from_git.sh"
+[[ -f "$TRACK_ROOT/scripts/ensure_workshop_tree.sh" ]] && chmod +x "$TRACK_ROOT/scripts/ensure_workshop_tree.sh"
 [[ -f "$TRACK_ROOT/scripts/update_mig_to_kbn.sh" ]] && chmod +x "$TRACK_ROOT/scripts/update_mig_to_kbn.sh"
 [[ -f "$TRACK_ROOT/scripts/push_git_and_instruqt.sh" ]] && chmod +x "$TRACK_ROOT/scripts/push_git_and_instruqt.sh"
 

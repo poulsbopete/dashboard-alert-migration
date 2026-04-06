@@ -8,6 +8,23 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+# Incomplete track bundle (symlink points at a tree without scripts/): repair if helper exists.
+if [[ ! -f "$ROOT/scripts/ensure_mig_to_kbn_install.sh" ]]; then
+  if command -v ensure-workshop-tree >/dev/null 2>&1; then
+    ensure-workshop-tree
+  elif [[ -f "$ROOT/scripts/ensure_workshop_tree.sh" ]]; then
+    bash "$ROOT/scripts/ensure_workshop_tree.sh"
+  else
+    echo "ERROR: Workshop scripts are missing under $ROOT (no ensure_mig_to_kbn_install.sh)." >&2
+    echo "Re-provision the Instruqt track, or repair with:" >&2
+    echo "  ensure-workshop-tree" >&2
+    echo "  # or: bash scripts/ensure_workshop_tree.sh from a fresh git clone of this repo" >&2
+    exit 1
+  fi
+  cd "$ROOT"
+fi
+
 # shellcheck disable=SC1090
 [[ -f /root/.bashrc ]] && source /root/.bashrc
 

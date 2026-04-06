@@ -84,10 +84,13 @@ Pick **Path A** or **Path B** (or both).
 When the sandbox is ready, run:
 
 ```bash
-cd /root/workshop && source ~/.bashrc && ./scripts/migrate_grafana_dashboards_to_serverless.sh
+cd /root/workshop && source ~/.bashrc && { command -v ensure-workshop-tree >/dev/null 2>&1 && ensure-workshop-tree || true; }
+bash scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-That one script converts **20** Grafana JSON under **`assets/grafana/`**, uploads dashboards to Kibana, fetches workshop alerts, and runs the alert publisher. Optional: pre-upload ES|QL checks against Elasticsearch — `WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`.
+The first line is a no-op on a healthy sandbox; if **`scripts/migrate_…` is missing**, **`ensure-workshop-tree`** reclones the repo into **`/opt/instruqt-workshop-track`** and repoints **`/root/workshop`**. **`bash scripts/…`** avoids “permission denied” when the execute bit is missing.
+
+That migrate script converts **20** Grafana JSON under **`assets/grafana/`**, uploads dashboards to Kibana, fetches workshop alerts, and runs the alert publisher. Optional: pre-upload ES|QL checks — `WORKSHOP_MIG_ES_VALIDATE=1 bash scripts/migrate_grafana_dashboards_to_serverless.sh`.
 
 **Check:** **Elastic Serverless** tab → **Dashboards** (titles should match the Grafana exports). **Observability → Rules** → two workshop rules (start **disabled**; enable in the UI if you want them live).
 
@@ -96,6 +99,7 @@ That one script converts **20** Grafana JSON under **`assets/grafana/`**, upload
 - **`cd /root/workshop` fails** — wait for the challenge to finish loading; if it persists, **Stop** → **Start** the track (hosts: **`ESS_CLOUD_API_KEY`** in Instruqt secrets).
 - **Empty charts** — `./scripts/check_workshop_otel_pipeline.sh` then `./scripts/start_workshop_otel.sh` and wait ~1 min; or `WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`.
 - **Stale workshop files** — `./scripts/sync_workshop_from_git.sh`.
+- **`bash: scripts/migrate_…: No such file`** — run **`ensure-workshop-tree`** (track bootstrap installs it under **`/usr/local/bin`**), or **`Stop` → `Start`** the track so setup can reclone. On an air-gapped host, run **`bash scripts/ensure_workshop_tree.sh`** from any copy of this repo you can reach.
 
 ### Path A — script defaults (optional)
 
