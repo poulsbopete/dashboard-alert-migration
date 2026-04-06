@@ -10,7 +10,13 @@
 #   MIG_TO_KBN_DIR     default: <repo>/mig-to-kbn
 #   MIG_TO_KBN_REMOTE  default: origin
 #   MIG_TO_KBN_REF     default: main (branch or tag after fetch; must exist on remote)
-#   MIG_TO_KBN_GIT_URL optional: override clone URL for vendored refresh (default: https://github.com/elastic/mig-to-kbn.git)
+#   MIG_TO_KBN_GIT_URL optional: clone URL for vendored refresh (SSH or HTTPS with token). If unset:
+#     uses `gh repo clone elastic/mig-to-kbn` when `gh auth status` works (private repo OK), else HTTPS (may fail if private).
+#
+# Typical private-upstream flow (laptop — not on Instruqt VM):
+#   gh auth login
+#   ./scripts/update_mig_to_kbn.sh
+#   git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn" && git push
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -37,6 +43,39 @@ _is_submodule() {
   [ -f "${ROOT}/.gitmodules" ] && git config -f "${ROOT}/.gitmodules" --get submodule.mig-to-kbn.path >/dev/null 2>&1
 }
 
+# Fresh clone for vendored rsync: prefer explicit URL, then gh (private OK), then public HTTPS.
+_clone_upstream_mig_to_kbn() {
+  local dest="$1"
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
+  if [ -n "${MIG_TO_KBN_GIT_URL:-}" ]; then
+    echo "==> Cloning from MIG_TO_KBN_GIT_URL into ${dest}"
+    if git clone --depth 1 --branch "$REF" "${MIG_TO_KBN_GIT_URL}" "$dest" 2>/dev/null; then
+      return 0
+    fi
+    git clone --depth 1 "${MIG_TO_KBN_GIT_URL}" "$dest"
+    git -C "$dest" checkout "$REF" 2>/dev/null || true
+    return 0
+  fi
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    echo "==> Cloning via GitHub CLI: gh repo clone elastic/mig-to-kbn (works for private repos)"
+    if gh repo clone elastic/mig-to-kbn "$dest" -- --depth 1 -b "$REF" 2>/dev/null; then
+      return 0
+    fi
+    gh repo clone elastic/mig-to-kbn "$dest" -- --depth 1
+    git -C "$dest" checkout "$REF" 2>/dev/null || true
+    return 0
+  fi
+  echo "WARN: No MIG_TO_KBN_GIT_URL and gh not logged in; trying public HTTPS (fails if repo is private)." >&2
+  echo "     Fix: gh auth login   OR   export MIG_TO_KBN_GIT_URL='git@github.com:elastic/mig-to-kbn.git'" >&2
+  if git clone --depth 1 --branch "$REF" "https://github.com/elastic/mig-to-kbn.git" "$dest" 2>/dev/null; then
+    return 0
+  fi
+  git clone --depth 1 "https://github.com/elastic/mig-to-kbn.git" "$dest"
+  git -C "$dest" checkout "$REF" 2>/dev/null || true
+  return 0
+}
+
 update_via_submodule() {
   if ! _is_submodule; then
     return 1
@@ -59,14 +98,10 @@ update_via_vendored_tree() {
   if [ ! -f "${MIG}/pyproject.toml" ] || [ -e "${MIG}/.git" ]; then
     return 1
   fi
-  _url="${MIG_TO_KBN_GIT_URL:-https://github.com/elastic/mig-to-kbn.git}"
-  echo "==> mig-to-kbn: refresh vendored directory from ${_url} (${REF})"
+  echo "==> mig-to-kbn: refresh vendored directory (ref ${REF})"
   TDIR="$(mktemp -d)"
   UP="${TDIR}/upstream"
-  if ! git clone --depth 1 --branch "$REF" "$_url" "$UP" 2>/dev/null; then
-    git clone --depth 1 "$_url" "$UP"
-    git -C "$UP" checkout "$REF" 2>/dev/null || true
-  fi
+  _clone_upstream_mig_to_kbn "$UP"
   rsync -a --delete --exclude='.git' "${UP}/" "${MIG}/"
   rm -rf "${TDIR}"
   return 0

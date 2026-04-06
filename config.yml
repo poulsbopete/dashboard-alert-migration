@@ -8,6 +8,9 @@ virtualmachines:
       PRODUCT_TIER: complete
       PROJECT_TYPE: observability
       REGIONS: aws-us-east-1
+      # Optional: internal mig-to-kbn mirror if the workshop git tree omits mig-to-kbn/ (default: vendored in repo; no VM clone of elastic/mig-to-kbn).
+      # WORKSHOP_MIG_TO_KBN_GIT_URL: https://example.internal/mig-to-kbn.git
+      # WORKSHOP_MIG_TO_KBN_GIT_REF: main
     memory: 12288
     cpus: 4
     allow_external_ingress:

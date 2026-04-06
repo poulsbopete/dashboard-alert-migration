@@ -8,7 +8,8 @@ VENV="${MIG_TO_KBN_VENV:-/opt/mig-to-kbn-venv}"
 
 if [ ! -f "${MIG_ROOT}/pyproject.toml" ]; then
   echo "ERROR: mig-to-kbn missing at ${MIG_ROOT}" >&2
-  echo "       Clone https://github.com/elastic/mig-to-kbn into mig-to-kbn/ (private repo — gh auth)." >&2
+  echo "       This workshop vendors mig-to-kbn in git. On your machine: ./scripts/update_mig_to_kbn.sh (uses gh when logged in)," >&2
+  echo "       then commit and push mig-to-kbn/. Instruqt sandboxes do not clone elastic/mig-to-kbn by default." >&2
   exit 1
 fi
 

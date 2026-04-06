@@ -21,9 +21,8 @@ fi
 
 if [ ! -f "${ROOT}/mig-to-kbn/pyproject.toml" ]; then
   echo "ERROR: ${BIN} not found and mig-to-kbn is missing at ${ROOT}/mig-to-kbn." >&2
-  echo "       Clone https://github.com/elastic/mig-to-kbn into mig-to-kbn/, then run:" >&2
-  echo "         bash ${ROOT}/scripts/install_workshop_mig_to_kbn.sh" >&2
-  echo "       Upstream workshop vendors mig-to-kbn in git; sync from main or set WORKSHOP_MIG_TO_KBN_GIT_URL on the host." >&2
+  echo "       Vendor tree: run ./scripts/update_mig_to_kbn.sh on your laptop (gh auth login for private elastic/mig-to-kbn)," >&2
+  echo "       commit mig-to-kbn/, push, and refresh the track. Optional VM mirror: WORKSHOP_MIG_TO_KBN_GIT_URL." >&2
   exit 1
 fi
 
