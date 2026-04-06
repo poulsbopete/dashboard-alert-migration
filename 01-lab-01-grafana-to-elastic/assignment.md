@@ -81,20 +81,25 @@ Pick **Path A** or **Path B** (or both).
 
 ## Path A — dashboard migration (Instruqt)
 
-**`/root/workshop` missing?** Wait until the challenge has **fully loaded** (setup can take a few minutes). The track script creates **`/root/workshop`** early, then provisions Serverless and appends **`export KIBANA_URL=…`** to **`~/.bashrc`**. If the path is still missing or **`source ~/.bashrc`** has no Elastic vars, **Stop** the track and **Start** again (setup failed mid-way—often apt lock or Cloud API). Hosts: confirm **`ESS_CLOUD_API_KEY`** / **`PME_CLOUD_INSTRUQT_API_KEY`** in team secrets.
+When the sandbox is ready, run:
 
 ```bash
-cd /root/workshop
-source ~/.bashrc
-./scripts/migrate_grafana_dashboards_to_serverless.sh
-# Pre-upload live ES|QL validation against ES (optional): WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh
+cd /root/workshop && source ~/.bashrc && ./scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Open **Elastic Serverless → Dashboards** — titles match your **Grafana** exports (uploaded by **`grafana-migrate`**, not the legacy “`(Grafana import draft)`” publisher). **Observability → Rules** lists **two** workshop rules (from **`assets/grafana/alerts/`** via **`--fetch-alerts`** and **`tools/publish_grafana_alert_drafts_kibana.py`**); they are created **disabled** until you enable them in the UI.
+That one script converts **20** Grafana JSON under **`assets/grafana/`**, uploads dashboards to Kibana, fetches workshop alerts, and runs the alert publisher. Optional: pre-upload ES|QL checks against Elasticsearch — `WORKSHOP_MIG_ES_VALIDATE=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`.
 
-**Kibana-only upload (default Path A):** **`migrate_grafana_dashboards_to_serverless.sh`** passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** from **`~/.bashrc`** does not enable live validation (the **grafana-migrate** CLI otherwise defaults **`--es-url`** from that env var). **`--upload`** uses **Kibana** credentials only unless **`WORKSHOP_MIG_ES_VALIDATE=1`**. **`--esql-index`** is **`metrics-*`** with **`--data-view`**. **`--fetch-alerts`** reads **`assets/grafana/alerts/`** (see upstream file-mode [alert inputs](https://github.com/elastic/mig-to-kbn/blob/main/observability_migration/adapters/source/grafana/extract.py)); artifacts include **`build/mig-grafana/alert_comparison_results.json`**.
+**Check:** **Elastic Serverless** tab → **Dashboards** (titles should match the Grafana exports). **Observability → Rules** → two workshop rules (start **disabled**; enable in the UI if you want them live).
 
-*Charts empty after upload?* **`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**, wait ~1 min, or optional **`setup_serverless_data.py`** (below). *Force OTLP restart:* **`WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
+**If something looks wrong**
+
+- **`cd /root/workshop` fails** — wait for the challenge to finish loading; if it persists, **Stop** → **Start** the track (hosts: **`ESS_CLOUD_API_KEY`** in Instruqt secrets).
+- **Empty charts** — `./scripts/check_workshop_otel_pipeline.sh` then `./scripts/start_workshop_otel.sh` and wait ~1 min; or `WORKSHOP_FORCE_OTEL_RESTART=1 ./scripts/migrate_grafana_dashboards_to_serverless.sh`.
+- **Stale workshop files** — `./scripts/sync_workshop_from_git.sh`.
+
+### Path A — script defaults (optional)
+
+Upload is **Kibana-only** by default (no pre-upload ES validation): the wrapper clears **`--es-url`** / **`--es-api-key`** so **`ES_URL`** in **`~/.bashrc`** does not enable validation unless you set **`WORKSHOP_MIG_ES_VALIDATE=1`**. The pipeline uses **`--native-promql`**, **`metrics-*`**, **`--fetch-alerts`** on **`assets/grafana/alerts/`**, and writes **`build/mig-grafana/`** (e.g. **`alert_comparison_results.json`**). More context: [Grafana source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md), [alert inputs](https://github.com/elastic/mig-to-kbn/blob/main/observability_migration/adapters/source/grafana/extract.py). For optional synthetic metrics demos, see **`setup_serverless_data.py`** at the bottom of this lab.
 
 ## Path B — Cursor on your laptop
 
