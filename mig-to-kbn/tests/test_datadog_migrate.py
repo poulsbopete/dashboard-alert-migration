@@ -64,7 +64,6 @@ from observability_migration.adapters.source.datadog.field_map import (
     PASSTHROUGH_PROFILE,
     PROMETHEUS_PROFILE,
     load_profile,
-    metric_is_count_like,
 )
 from observability_migration.adapters.source.datadog.execution import build_source_execution_summary
 from observability_migration.adapters.source.datadog.manifest import build_migration_manifest
@@ -145,22 +144,6 @@ class TestMetricQueryParser(unittest.TestCase):
         mq = parse_metric_query("sum:http.requests{*}.as_rate()")
         self.assertTrue(mq.as_rate)
         self.assertFalse(mq.as_count)
-
-    def test_as_count_then_by_clause(self):
-        mq = parse_metric_query("sum:trace.http.request.errors{*}.as_count() by {service}")
-        self.assertTrue(mq.as_count)
-        self.assertEqual(mq.group_by, ["service"])
-        self.assertEqual(mq.metric, "trace.http.request.errors")
-
-    def test_as_rate_then_by_clause(self):
-        mq = parse_metric_query("sum:system.net.bytes_sent{*}.as_rate() by {interface}")
-        self.assertTrue(mq.as_rate)
-        self.assertEqual(mq.group_by, ["interface"])
-
-    def test_space_as_count_normalized(self):
-        mq = parse_metric_query("sum:trace.http.request.hits{*} as count() by {service}")
-        self.assertTrue(mq.as_count)
-        self.assertEqual(mq.group_by, ["service"])
 
     def test_query_with_chained_functions(self):
         mq = parse_metric_query(
@@ -563,33 +546,6 @@ class TestNormalization(unittest.TestCase):
         self.assertIsNotNone(mq)
         self.assertEqual(mq.functions[-1].name, "per_second")
 
-    def test_legacy_logs_rollups_q_becomes_log_query(self):
-        raw = {
-            "title": "Log TS",
-            "widgets": [
-                {
-                    "definition": {
-                        "type": "timeseries",
-                        "title": "Errors by svc",
-                        "requests": [
-                            {
-                                "q": 'logs("status:error").index("*").rollup("count").by("service")',
-                            }
-                        ],
-                    },
-                    "layout": {"x": 0, "y": 0, "width": 6, "height": 4},
-                }
-            ],
-        }
-        nd = normalize_dashboard(raw)
-        w = nd.widgets[0]
-        self.assertTrue(w.has_log_queries)
-        q0 = w.queries[0]
-        self.assertEqual(q0.data_source, "logs")
-        self.assertEqual(q0.query_type, "log")
-        self.assertEqual(q0.log_group_by, ["service"])
-        self.assertIsNotNone(q0.log_query)
-
     def test_event_stream_in_list_widget_stays_unsupported(self):
         raw = {
             "title": "Events",
@@ -790,7 +746,7 @@ class TestTranslation(unittest.TestCase):
         mq = parse_metric_query(query_str)
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query=query_str, metric_query=mq, query_type="metric")
         w = NormalizedWidget(id="1", widget_type=widget_type, title="Test", queries=[wq], **kwargs)
-        plan = plan_widget(w, OTEL_PROFILE)
+        plan = plan_widget(w)
         if force_esql and plan.backend == "lens":
             plan.backend = "esql"
         return translate_widget(w, plan, OTEL_PROFILE)
@@ -856,9 +812,7 @@ class TestTranslation(unittest.TestCase):
 
     def test_field_map_applied(self):
         result = self._translate_metric_widget("avg:system.cpu.user{*}", force_esql=True)
-        self.assertIn("system.cpu.utilization", result.esql_query)
-        self.assertIn("FROM metrics-generic.otel-*", result.esql_query)
-        self.assertIn('data_stream.dataset == "generic.otel"', result.esql_query)
+        self.assertIn("system_cpu_user", result.esql_query)
 
     def test_metric_trace_includes_planner_and_translator_rule_ids(self):
         query = "sum:http.requests{*}.as_rate()"
@@ -954,8 +908,7 @@ class TestTranslation(unittest.TestCase):
 
     def test_boolean_scope_or_is_translated_safely(self):
         result = self._translate_metric_widget(
-            "sum:istio.mesh.request.count.total{(response_code:2* OR response_code:3*) AND $cluster_name}.as_count()",
-            force_esql=True,
+            "sum:istio.mesh.request.count.total{(response_code:2* OR response_code:3*) AND $cluster_name}.as_count()"
         )
         self.assertIn("response_code LIKE \"2%\"", result.esql_query)
         self.assertIn("OR", result.esql_query)
@@ -1682,19 +1635,12 @@ class TestSemanticPipelineRoundTrip(unittest.TestCase):
 class TestFieldMap(unittest.TestCase):
 
     def test_otel_metric_map(self):
-        self.assertEqual(OTEL_PROFILE.map_metric("system.cpu.user"), "system.cpu.utilization")
-
-    def test_metric_is_count_like_uses_mapped_es_name(self):
-        self.assertTrue(metric_is_count_like("trace.http.request.hits", "http_requests_total"))
-        self.assertFalse(metric_is_count_like("trace.http.request.hits", "system.cpu.utilization"))
-        self.assertFalse(metric_is_count_like("system.cpu.user", "system.cpu.utilization"))
+        self.assertEqual(OTEL_PROFILE.map_metric("system.cpu.user"), "system_cpu_user")
 
     def test_otel_tag_map(self):
         self.assertEqual(OTEL_PROFILE.map_tag("host"), "host.name")
         self.assertEqual(OTEL_PROFILE.map_tag("env"), "deployment.environment")
         self.assertEqual(OTEL_PROFILE.map_tag("service"), "service.name")
-        self.assertEqual(OTEL_PROFILE.map_tag("container_name"), "service.name")
-        self.assertEqual(OTEL_PROFILE.map_tag("device"), "service.name")
 
     def test_passthrough_keeps_names(self):
         self.assertEqual(PASSTHROUGH_PROFILE.map_metric("system.cpu.user"), "system_cpu_user")
@@ -1707,7 +1653,7 @@ class TestFieldMap(unittest.TestCase):
     def test_load_builtin_profile_returns_independent_copy(self):
         profile = load_profile("otel")
         profile.metric_index = "custom-metrics-*"
-        self.assertEqual(load_profile("otel").metric_index, "metrics-generic.otel-*")
+        self.assertEqual(load_profile("otel").metric_index, "metrics-*")
 
     @patch("observability_migration.adapters.source.datadog.field_map.fetch_field_capabilities")
     def test_load_live_field_capabilities_separates_metric_and_log_contexts(self, mock_fetch):
@@ -1728,7 +1674,7 @@ class TestFieldMap(unittest.TestCase):
         self.assertEqual(log_cap.type, "keyword")
         self.assertTrue(profile.is_numeric_field("shared.field", context="metric"))
         self.assertFalse(profile.is_numeric_field("shared.field", context="log"))
-        self.assertEqual(mock_fetch.call_args_list[0].args, ("https://example.es", "metrics-generic.otel-*"))
+        self.assertEqual(mock_fetch.call_args_list[0].args, ("https://example.es", "metrics-*"))
         self.assertEqual(mock_fetch.call_args_list[1].args, ("https://example.es", "logs-*"))
         self.assertEqual(mock_fetch.call_args_list[0].kwargs, {"es_api_key": "secret"})
         self.assertEqual(mock_fetch.call_args_list[1].kwargs, {"es_api_key": "secret"})
@@ -2486,15 +2432,11 @@ class TestDashboardDatasetFilters(unittest.TestCase):
         )
         return yaml.safe_load(yaml_str)["dashboards"][0]
 
-    def test_otel_profile_metrics_include_managed_otlp_dataset_filter(self):
-        """OTEL_PROFILE targets metrics-generic.otel-* → YAML filter pins generic.otel."""
+    def test_otel_profile_metrics_no_filter_by_default(self):
+        """OTEL_PROFILE uses metrics-* so dataset is indeterminate → no filter."""
         widget = self._make_metric_widget("1", "CPU")
         rendered = self._translate_and_generate([widget])
-        self.assertIn("filters", rendered)
-        self.assertEqual(
-            rendered["filters"],
-            [{"field": "data_stream.dataset", "equals": "generic.otel"}],
-        )
+        self.assertNotIn("filters", rendered)
 
     def test_explicit_metrics_dataset_filter_emits_filter(self):
         widget = self._make_metric_widget("1", "CPU")

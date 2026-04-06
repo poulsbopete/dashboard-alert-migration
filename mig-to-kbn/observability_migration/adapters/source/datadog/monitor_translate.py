@@ -9,7 +9,7 @@ import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .field_map import FieldMapProfile, metric_is_count_like
+from .field_map import FieldMapProfile
 from .log_parser import log_ast_to_esql_where, log_ast_to_kql, parse_log_query_result
 from .models import (
     FormulaBinOp,
@@ -33,8 +33,8 @@ from .translate import (
     _esql_escape,
     _esql_identifier,
     _format_agg_expr,
+    _metric_is_count_like,
     _metric_scope_to_esql,
-    _metrics_dataset_predicate,
     _needs_rate,
     _resolve_agg,
 )
@@ -228,9 +228,6 @@ def _translate_metric_monitor(
     if exclude_null_clauses is None:
         return DatadogMonitorTranslation()
     where_clauses.extend(exclude_null_clauses)
-    ds_pred = _metrics_dataset_predicate(field_map)
-    if ds_pred:
-        where_clauses.append(ds_pred)
 
     if exact_rollup_supported:
         exact_rollup_query = _build_exact_rollup_metric_query(
@@ -262,7 +259,6 @@ def _translate_metric_monitor(
                 exact_rate=exact_rate_supported,
                 exact_rollup=exact_rollup_supported,
                 exact_default_zero=exact_default_zero_supported,
-                es_metric=metric_field,
             ),
         )
 
@@ -299,7 +295,6 @@ def _translate_metric_monitor(
             exact_rate=exact_rate_supported,
             exact_rollup=exact_rollup_supported,
             exact_default_zero=exact_default_zero_supported,
-            es_metric=metric_field,
         ),
     )
 
@@ -377,9 +372,6 @@ def _translate_formula_metric_monitor(
                 where_clauses.append(f"@timestamp < NOW() - {shift_span}")
         else:
             where_clauses.append(f"@timestamp >= NOW() - {window_span}")
-        ds_inner = _metrics_dataset_predicate(field_map)
-        if ds_inner:
-            where_clauses.append(ds_inner)
         stat_expr = f"{ref_name} = {agg_expr}"
         if where_clauses:
             stat_expr += f" WHERE {' AND '.join(where_clauses)}"
@@ -393,13 +385,9 @@ def _translate_formula_metric_monitor(
     if not value_expr:
         return DatadogMonitorTranslation()
 
-    outer_where = [f"@timestamp >= NOW() - {max_total_span}"]
-    ds_outer = _metrics_dataset_predicate(field_map)
-    if ds_outer:
-        outer_where.append(ds_outer)
     lines = [
         f"FROM {field_map.metric_index}",
-        f"| WHERE {' AND '.join(outer_where)}",
+        f"| WHERE @timestamp >= NOW() - {max_total_span}",
     ]
     stats_line = "| STATS " + ", ".join(stats_parts)
     if group_by:
@@ -477,9 +465,6 @@ def _translate_change_metric_monitor(
         if clause:
             where_clauses.append(clause)
     where_clauses.append(f"@timestamp >= NOW() - {total_span}")
-    ds_chg = _metrics_dataset_predicate(field_map)
-    if ds_chg:
-        where_clauses.append(ds_chg)
 
     group_by = [_esql_identifier(field_map.map_tag(tag, context="metric")) for tag in metric_query.group_by]
     previous_window_start = f"NOW() - {total_span}"
@@ -1054,12 +1039,11 @@ def _metric_monitor_warnings(
     exact_rate: bool = False,
     exact_rollup: bool = False,
     exact_default_zero: bool = False,
-    es_metric: str | None = None,
 ) -> list[str]:
     warnings: list[str] = []
     if (metric_query.as_rate or _needs_rate(metric_query)) and not exact_rate:
         warnings.append("rate semantics approximated with delta over observed bucket span")
-    if metric_query.as_count and not metric_is_count_like(metric_query.metric, es_metric):
+    if metric_query.as_count and not _metric_is_count_like(metric_query.metric):
         warnings.append("as_count semantics are approximated for non-count metrics")
     if metric_query.rollup and not exact_rollup:
         warnings.append("rollup interval is approximated in ES|QL")

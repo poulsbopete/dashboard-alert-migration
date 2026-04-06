@@ -373,45 +373,6 @@ def _build_esql_panel(
     return panel
 
 
-def _lens_metric_payload_for_kb_dashboard(aggregation: str, metric_field: str) -> dict[str, Any]:
-    """Map Datadog translator tokens (``DD_AGG_TO_ESQL``) to kb-dashboard Lens metric objects.
-
-    XY and metric panels use discriminated unions (e.g. ``XYLensOtherAggregatedMetric`` expects
-    ``aggregation: "average"``, not ``"AVG"`` or ``"avg"``). Raw ``PERCENTILE(%, 95)`` becomes
-    ``{"aggregation": "percentile", "field", "percentile": 95}``.
-    """
-    raw = (aggregation or "").strip()
-    compact = re.sub(r"\s+", "", raw.lower())
-    pm = re.match(r"percentile\(\%,(\d+)\)", compact)
-    if pm:
-        return {
-            "aggregation": "percentile",
-            "field": metric_field,
-            "percentile": int(pm.group(1)),
-        }
-    upper = raw.upper()
-    if upper == "AVG" or raw.lower() == "avg":
-        return {"aggregation": "average", "field": metric_field}
-    if upper == "SUM" or raw.lower() == "sum":
-        return {"aggregation": "sum", "field": metric_field}
-    if upper == "MIN" or raw.lower() == "min":
-        return {"aggregation": "min", "field": metric_field}
-    if upper == "MAX" or raw.lower() == "max":
-        return {"aggregation": "max", "field": metric_field}
-    if upper == "COUNT" or raw.lower() == "count":
-        return {"aggregation": "count", "field": metric_field}
-    if upper == "LAST" or raw.lower() == "last":
-        return {"aggregation": "last_value", "field": metric_field}
-    low = raw.lower()
-    if low == "median":
-        return {"aggregation": "median", "field": metric_field}
-    if low == "average":
-        return {"aggregation": "average", "field": metric_field}
-    if low == "standard_deviation":
-        return {"aggregation": "standard_deviation", "field": metric_field}
-    return {"aggregation": "average", "field": metric_field}
-
-
 def _build_lens_panel(
     widget: NormalizedWidget,
     result: TranslationResult,
@@ -434,31 +395,42 @@ def _build_lens_panel(
         "position": {"x": x, "y": y},
     }
 
+    _LENS_AGG_NAMES: dict[str, str] = {
+        "avg": "average", "AVG": "average", "average": "average",
+        "sum": "sum", "SUM": "sum",
+        "min": "min", "MIN": "min",
+        "max": "max", "MAX": "max",
+        "count": "count", "COUNT": "count",
+        "last": "last_value", "LAST": "last_value", "last_value": "last_value",
+        "median": "median",
+        "standard_deviation": "standard_deviation",
+        "unique_count": "unique_count",
+    }
     metric_field = lens_cfg.get("metric_field", "value")
     raw_agg = lens_cfg.get("aggregation", "avg")
-    metric_payload = _lens_metric_payload_for_kb_dashboard(str(raw_agg), str(metric_field))
+    aggregation = _LENS_AGG_NAMES.get(raw_agg, raw_agg.lower())
     dv = lens_cfg.get("data_view", data_view)
     group_by = lens_cfg.get("group_by", [])
 
     lens_block: dict[str, Any] = {"type": chart_type, "data_view": dv}
 
     if chart_type == "metric":
-        lens_block["primary"] = dict(metric_payload)
+        lens_block["primary"] = {"aggregation": aggregation, "field": metric_field}
     elif chart_type in ("line", "bar", "area"):
         lens_block["dimension"] = {"type": "date_histogram", "field": "@timestamp"}
-        lens_block["metrics"] = [dict(metric_payload)]
+        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
         if group_by:
             lens_block["breakdown"] = {"type": "values", "field": group_by[0]}
     elif chart_type == "pie":
-        lens_block["metrics"] = [dict(metric_payload)]
+        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
         if group_by:
             lens_block["breakdowns"] = [{"type": "values", "field": g} for g in group_by]
     elif chart_type == "datatable":
-        lens_block["metrics"] = [dict(metric_payload)]
+        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
         if group_by:
             lens_block["breakdowns"] = [{"type": "values", "field": g} for g in group_by]
     else:
-        lens_block["primary"] = dict(metric_payload)
+        lens_block["primary"] = {"aggregation": aggregation, "field": metric_field}
 
     panel["lens"] = lens_block
     return panel

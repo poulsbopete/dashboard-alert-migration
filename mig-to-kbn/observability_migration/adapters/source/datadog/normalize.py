@@ -19,39 +19,6 @@ from .models import (
 )
 from .query_parser import ParseError, parse_formula, parse_legacy_query, parse_metric_query
 
-# Datadog log timeseries: logs("search").index("*").rollup("count").by("facet")
-_LOGS_LEGACY_Q_RE = re.compile(
-    r"^logs\s*\(\s*\"([^\"]*)\"\s*\)"
-    r"(?:\s*\.\s*index\s*\(\s*\"[^\"]*\"\s*\))?"
-    r"(?:\s*\.\s*rollup\s*\(\s*\"[^\"]*\"\s*\))?"
-    r"(?:\s*\.\s*by\s*\(\s*\"([^\"]*)\"\s*\))?\s*$",
-    re.IGNORECASE,
-)
-
-
-def _try_parse_logs_rollups_legacy_q(
-    part: str,
-    name: str,
-    aggregator: str,
-) -> WidgetQuery | None:
-    m = _LOGS_LEGACY_Q_RE.match(part.strip())
-    if not m:
-        return None
-    search = m.group(1)
-    facet = m.group(2)
-    lq = parse_log_query(search)
-    wq = WidgetQuery(
-        name=name,
-        data_source="logs",
-        raw_query=part,
-        query_type="log",
-        log_query=lq,
-        aggregator=aggregator,
-    )
-    if facet:
-        wq.log_group_by = [facet]
-    return wq
-
 
 def normalize_dashboard(raw: dict[str, Any]) -> NormalizedDashboard:
     """Convert a raw Datadog dashboard dict into a NormalizedDashboard."""
@@ -282,19 +249,14 @@ def _extract_from_request(
                     mq.functions.extend(outer_fns)
                 wq.metric_query = mq
                 wq.query_type = "metric"
-                queries.append(wq)
             else:
-                log_wq = _try_parse_logs_rollups_legacy_q(part, name, legacy_aggregator)
-                if log_wq:
-                    queries.append(log_wq)
+                mq2 = _try_parse_bare_metric(part)
+                if mq2:
+                    wq.metric_query = mq2
+                    wq.query_type = "metric"
                 else:
-                    mq2 = _try_parse_bare_metric(part)
-                    if mq2:
-                        wq.metric_query = mq2
-                        wq.query_type = "metric"
-                    else:
-                        wq.query_type = "legacy_unparsed"
-                    queries.append(wq)
+                    wq.query_type = "legacy_unparsed"
+            queries.append(wq)
 
     log_q = req.get("log_query", req.get("search", {}))
     if isinstance(log_q, dict) and log_q.get("query") and not any(

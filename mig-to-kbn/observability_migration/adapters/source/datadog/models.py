@@ -273,8 +273,6 @@ class WidgetQuery:
     log_query: LogQuery | None = None
     aggregator: str = ""
     query_type: str = ""
-    #: Facets from Datadog ``logs(...).by("facet")`` on legacy ``q`` strings.
-    log_group_by: list[str] = field(default_factory=list)
 
 
 @dataclass

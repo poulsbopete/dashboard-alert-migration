@@ -61,9 +61,6 @@ def parse_metric_query(raw: str) -> MetricQuery:
     raw = raw.strip()
     if not raw:
         raise ParseError("empty metric query")
-    # Datadog UI sometimes omits the dot: `sum:metric{*} as count() by {svc}` → `.as_count()`.
-    raw = re.sub(r"\}\s+as\s+count\s*\(", "}.as_count(", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\}\s+as\s+rate\s*\(", "}.as_rate(", raw, flags=re.IGNORECASE)
 
     colon_pos = _find_aggregator_colon(raw)
     if colon_pos < 0:
@@ -93,31 +90,20 @@ def parse_metric_query(raw: str) -> MetricQuery:
     scope = _parse_scope(scope_str)
 
     group_by: list[str] = []
-    functions: list[FunctionCall] = []
-    as_rate = False
-    as_count = False
-    rest = rest.strip()
-    while rest:
-        by_match = re.match(r"^by\s*\{", rest, re.IGNORECASE)
-        if by_match:
-            if group_by:
-                raise ParseError("duplicate group by clause in metric query")
-            gb_brace = rest.index("{")
-            gb_close = _find_matching_brace(rest, gb_brace)
-            if gb_close < 0:
-                raise ParseError(f"unmatched {{ in group by: {rest}")
-            gb_str = rest[gb_brace + 1:gb_close].strip()
-            group_by = [t.strip() for t in gb_str.split(",") if t.strip()]
-            rest = rest[gb_close + 1:].strip()
-            continue
-        if rest.startswith("."):
-            fns, ar, ac, remainder = _parse_function_chain(rest)
-            functions.extend(fns)
-            as_rate = as_rate or ar
-            as_count = as_count or ac
-            rest = remainder.strip()
-            continue
-        raise ParseError(f"unexpected trailing tokens in metric query: {rest}")
+    by_match = re.match(r"by\s*\{", rest, re.IGNORECASE)
+    if by_match:
+        rest = rest[by_match.start():]
+        gb_brace = rest.index("{")
+        gb_close = _find_matching_brace(rest, gb_brace)
+        if gb_close < 0:
+            raise ParseError(f"unmatched {{ in group by: {rest}")
+        gb_str = rest[gb_brace + 1:gb_close].strip()
+        group_by = [t.strip() for t in gb_str.split(",") if t.strip()]
+        rest = rest[gb_close + 1:].strip()
+
+    functions, as_rate, as_count, remainder = _parse_function_chain(rest)
+    if remainder.strip():
+        raise ParseError(f"unexpected trailing tokens in metric query: {remainder}")
 
     return MetricQuery(
         raw=raw,

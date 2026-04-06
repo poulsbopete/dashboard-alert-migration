@@ -135,22 +135,6 @@ class FieldMapProfile:
         }
 
 
-def metric_is_count_like(dd_metric: str, es_metric: str | None = None) -> bool:
-    """True when ``as_count`` / counter SUM semantics fit the Datadog + mapped ES names.
-
-    Datadog metrics like ``trace.http.request.hits`` do not end in ``_total``, but the
-    workshop profile maps them to ``http_requests_total`` / ``operation_errors_total``.
-    """
-
-    for cand in ((es_metric or "").strip(), (dd_metric or "").strip()):
-        if not cand:
-            continue
-        lowered = cand.lower()
-        if lowered.endswith((".count", "_count", ".total", "_total")):
-            return True
-    return False
-
-
 # ---------------------------------------------------------------------------
 # Built-in profiles
 # ---------------------------------------------------------------------------
@@ -193,120 +177,12 @@ def _default_tag_map() -> dict[str, str]:
     }
 
 
-def _workshop_otel_tag_map() -> dict[str, str]:
-    """Extra tag mappings for the migration workshop OTLP fleet (tools/otel_workshop_fleet.py).
-
-    Logical hosts map to ``host.name``; there are no real disks/interfaces/containers, so
-    ``device`` / ``interface`` break down by ``service.name``.     Workshop logs: OTLP from ``tools/datadog_otel_to_elastic.py`` uses **http.route** (not
-    ``url.path``) on log attributes; bulk seed duplicates **http.route** for the same value.
-    """
-    return {
-        **_default_tag_map(),
-        "device": "service.name",
-        "interface": "service.name",
-        # Fleet runs on the host, not in k8s — treat "container" as logical service.
-        "container_name": "service.name",
-        "kube_namespace": "deployment.environment",
-        # Datadog @http.url_details.path / http.url facet → OTel-style route (exists in mOTLP logs).
-        "http.url": "http.route",
-        "@http.url_details.path": "http.route",
-        # APM-style facets → OTel workshop attributes on metrics.
-        "resource_name": "service.name",
-        "http.status_code": "http.response.status_code",
-    }
-
-
-# Datadog synthetic dashboards in assets/datadog/dashboards/05–10 target classic host/container
-# metrics. The workshop fleet only emits OTLP gauges and HTTP/error counters; map those names
-# so migrated Lens / ES|QL panels resolve to real ``metrics-*`` fields.
-_WORKSHOP_OTEL_METRIC_MAP: dict[str, str] = {
-    # --- Host CPU (05) ---
-    "system.cpu.user": "system.cpu.utilization",
-    "system.cpu.system": "system.cpu.utilization",
-    "system.cpu.idle": "system.cpu.utilization",
-    "system.cpu.iowait": "system.cpu.utilization",
-    "system.cpu.stolen": "system.cpu.utilization",
-    "system.cpu.nice": "system.cpu.utilization",
-    "system.cpu.guest": "system.cpu.utilization",
-    "system.load.1": "system.cpu.utilization",
-    "system.load.5": "system.cpu.utilization",
-    "system.load.15": "system.cpu.utilization",
-    "system.cpu.context_switches": "http_requests_total",
-    "system.cpu.interrupt": "http_requests_total",
-    # --- Host memory (06) ---
-    "system.mem.pct_usable": "system.memory.utilization",
-    "system.mem.used": "system.memory.utilization",
-    "system.mem.free": "system.memory.utilization",
-    "system.mem.slab": "system.memory.utilization",
-    "system.mem.buffered": "system.memory.utilization",
-    "system.mem.cached": "system.memory.utilization",
-    "system.mem.total": "system.memory.utilization",
-    "system.mem.usable": "system.memory.utilization",
-    "system.mem.commit_limit": "system.memory.utilization",
-    "system.swap.used": "system.memory.utilization",
-    "system.swap.pct_free": "system.memory.utilization",
-    "system.mem.page_faults": "http_requests_total",
-    # --- Disk I/O (07) ---
-    "system.disk.io": "system.cpu.utilization",
-    "system.disk.in_use": "system.memory.utilization",
-    "system.disk.read_bytes": "http_requests_total",
-    "system.disk.write_bytes": "http_requests_total",
-    "system.disk.read_time_pct": "system.cpu.utilization",
-    "system.disk.write_time_pct": "system.cpu.utilization",
-    "system.disk.queue_size": "system.memory.utilization",
-    "system.disk.read_ops": "http_requests_total",
-    "system.disk.write_ops": "http_requests_total",
-    "system.disk.free": "system.memory.utilization",
-    "system.io.util": "system.cpu.utilization",
-    # --- Network (08) ---
-    "system.net.bytes_sent": "http_requests_total",
-    "system.net.bytes_rcvd": "http_requests_total",
-    "system.net.tcp.retrans_segs": "operation_errors_total",
-    "system.net.udp.in_errors": "operation_errors_total",
-    "system.net.packets_in.count": "http_requests_total",
-    "system.net.packets_out.count": "http_requests_total",
-    "system.net.tcp.connections": "system.cpu.utilization",
-    "system.net.tcp.listen_overflows": "operation_errors_total",
-    "system.net.errors_in": "operation_errors_total",
-    "system.net.errors_out": "operation_errors_total",
-    "trace.http.request.hits": "http_requests_total",
-    "trace.servlet.request.hits": "http_requests_total",
-    "trace.http.client.errors": "operation_errors_total",
-    "trace.spans.finished": "http_requests_total",
-    "trace.dns.lookup.duration": "system.cpu.utilization",
-    "app.apdex.score": "system.cpu.utilization",
-    "app.apdex.satisfied": "http_requests_total",
-    "app.apdex.tolerating": "http_requests_total",
-    "app.apdex.frustrated": "operation_errors_total",
-    # --- Container (09) ---
-    "container.cpu.throttled": "system.cpu.utilization",
-    "container.cpu.usage": "system.cpu.utilization",
-    "container.cpu.user": "system.cpu.utilization",
-    "container.cpu.system": "system.cpu.utilization",
-    "container.cpu.shares": "system.cpu.utilization",
-    "container.memory.usage": "system.memory.utilization",
-    "container.memory.limit": "system.memory.utilization",
-    "container.net.rcvd": "http_requests_total",
-    "container.net.sent": "http_requests_total",
-    "container.restarts": "operation_errors_total",
-    "container.oom_events": "operation_errors_total",
-    "container.filesystem.usage": "system.memory.utilization",
-    # --- Log dashboard metric rows (10) ---
-    "trace.http.request.errors": "operation_errors_total",
-    "trace.http.request.duration": "system.memory.utilization",
-}
-
-
 OTEL_PROFILE = FieldMapProfile(
     name="otel",
-    # Narrow to managed OTLP metrics so the same counter name is not merged with
-    # metrics-prometheus-* (counter_double vs counter_long → ES|QL verification errors).
-    metric_index="metrics-generic.otel-*",
+    metric_index="metrics-*",
     logs_index="logs-*",
     timestamp_field="@timestamp",
-    metrics_dataset_filter="generic.otel",
-    tag_map=_workshop_otel_tag_map(),
-    metric_map=dict(_WORKSHOP_OTEL_METRIC_MAP),
+    tag_map=_default_tag_map(),
     metric_prefix="",
     metric_suffix="",
 )

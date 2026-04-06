@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
-from .field_map import FieldMapProfile, metric_is_count_like
+from .field_map import FieldMapProfile
 from .log_parser import log_ast_to_esql_where, log_ast_to_kql
 from .models import (
     FormulaBinOp,
@@ -454,9 +454,6 @@ def _build_metric_query_spec(
             raise ValueError(f"target group field `{raw_group_field}` is not aggregatable")
 
     where_clauses = [TIME_FILTER]
-    ds_pred = _metrics_dataset_predicate(field_map)
-    if ds_pred:
-        where_clauses.append(ds_pred)
     for filt in mq.scope:
         clause = _metric_scope_to_esql(filt, field_map, context="metric")
         if clause:
@@ -479,7 +476,7 @@ def _build_metric_query_spec(
             result,
             "rate semantics approximated with delta over observed bucket span",
         )
-    if mq.as_count and not metric_is_count_like(mq.metric, es_metric):
+    if mq.as_count and not _metric_is_count_like(mq.metric):
         _append_unique_warning(
             result,
             "as_count semantics are approximated for non-count metrics",
@@ -762,6 +759,11 @@ def _safe_alias(raw: str) -> str:
     if cleaned[0].isdigit():
         cleaned = f"f_{cleaned}"
     return cleaned
+
+
+def _metric_is_count_like(metric_name: str) -> bool:
+    lowered = metric_name.lower()
+    return lowered.endswith((".count", "_count", ".total", "_total"))
 
 
 # ---------------------------------------------------------------------------
@@ -1057,7 +1059,7 @@ def _format_agg_expr(agg: str, metric_field: str, mq: MetricQuery | None = None)
             expr = agg.replace("%", metric_expr)
         elif agg == "COUNT":
             expr = f"COUNT({metric_expr})"
-        elif mq and mq.as_count and not metric_is_count_like(mq.metric, metric_field):
+        elif mq and mq.as_count and not _metric_is_count_like(mq.metric):
             expr = f"SUM({metric_expr})"
         else:
             expr = f"{agg}({metric_expr})"
@@ -1200,8 +1202,6 @@ def _infer_log_group_by(widget: NormalizedWidget, field_map: FieldMapProfile) ->
     """Infer group-by fields from log widget queries or formulas."""
     group_by_keys = []
     for q in widget.queries:
-        if q.log_group_by:
-            group_by_keys.extend(q.log_group_by)
         if q.metric_query and q.metric_query.group_by:
             group_by_keys.extend(q.metric_query.group_by)
 
@@ -1268,15 +1268,6 @@ def _esql_identifier(field_name: str) -> str:
 
 def _esql_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _metrics_dataset_predicate(field_map: FieldMapProfile) -> str | None:
-    """When ``metrics_dataset_filter`` is set, pin ES|QL to one data stream dataset."""
-    ds = (field_map.metrics_dataset_filter or "").strip()
-    if not ds:
-        return None
-    field = _esql_identifier("data_stream.dataset")
-    return f'{field} == "{_esql_escape(ds)}"'
 
 
 # ---------------------------------------------------------------------------
