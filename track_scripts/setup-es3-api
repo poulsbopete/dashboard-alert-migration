@@ -89,6 +89,20 @@ _track_root_ok() {
     && -f "$1/scripts/migrate_grafana_dashboards_to_serverless.sh" \
     && -f "$1/tools/publish_grafana_drafts_kibana.py" ]]
 }
+
+# Log which required paths are missing (set -x only shows a fragment of the long [[ test).
+_track_root_diag() {
+  local r="$1"
+  echo "Workshop validation diagnostics for: ${r:-<empty>}" >&2
+  [[ -n "$r" ]] || return 1
+  [[ -d "$r" ]] || { echo "  NOT A DIRECTORY" >&2; return 1; }
+  [[ -f "$r/tools/requirements.txt" ]] || echo "  missing: tools/requirements.txt" >&2
+  [[ -d "$r/assets/grafana" ]] || echo "  missing: assets/grafana" >&2
+  [[ -d "$r/assets/datadog" ]] || echo "  missing: assets/datadog" >&2
+  [[ -f "$r/scripts/install_workshop_mig_to_kbn.sh" ]] || echo "  missing: scripts/install_workshop_mig_to_kbn.sh" >&2
+  [[ -f "$r/scripts/migrate_grafana_dashboards_to_serverless.sh" ]] || echo "  missing: scripts/migrate_grafana_dashboards_to_serverless.sh" >&2
+  [[ -f "$r/tools/publish_grafana_drafts_kibana.py" ]] || echo "  missing: tools/publish_grafana_drafts_kibana.py" >&2
+}
 _pick_root_from_requirements_file() {
   local _req="$1" _r
   _r="$(cd "$(dirname "$_req")/.." && pwd)"
@@ -97,7 +111,7 @@ _pick_root_from_requirements_file() {
   fi
 }
 
-# Full workshop copy when the mounted track path is incomplete. Try git, then curl tarball (some sandboxes block git to GitHub).
+# Full workshop copy when the mounted track path is incomplete. Try git (several branch names), then curl tarballs.
 _clone_workshop_from_git() {
   export DEBIAN_FRONTEND=noninteractive
   _wait_for_dpkg_lock_optional
@@ -105,40 +119,62 @@ _clone_workshop_from_git() {
   _apt_get_with_retry install -y --no-install-recommends git ca-certificates curl
   _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
   _ref="${WORKSHOP_GIT_REF:-main}"
-  _tarball_fallback="${WORKSHOP_GIT_TARBALL_URL:-}"
-  if [[ -z "$_tarball_fallback" ]] && [[ "$_url" == *"github.com"* ]]; then
-    _ghpath="${_url#*github.com/}"
-    _ghpath="${_ghpath#*:}"
-    _ghpath="${_ghpath%.git}"
-    _owner_repo="$(printf '%s\n' "$_ghpath" | cut -d/ -f1-2)"
-    [[ -n "$_owner_repo" ]] && [[ "$_owner_repo" == *"/"* ]] && _tarball_fallback="https://github.com/${_owner_repo}/archive/refs/heads/${_ref}.tar.gz"
-  fi
-  [[ -z "$_tarball_fallback" ]] && _tarball_fallback="https://github.com/poulsbopete/dashboard-alert-migration/archive/refs/heads/${_ref}.tar.gz"
+  _ghpath="${_url#*github.com/}"
+  _ghpath="${_ghpath#*:}"
+  _ghpath="${_ghpath%.git}"
+  _owner_repo="$(printf '%s\n' "$_ghpath" | cut -d/ -f1-2)"
+  [[ "$_owner_repo" != *"/"* ]] && _owner_repo="poulsbopete/dashboard-alert-migration"
+
   rm -rf /opt/instruqt-workshop-track /opt/_workshop_unpack
 
   set +e
-  echo "Workshop: cloning ${_url} (ref ${_ref}) ..." >&2
-  GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$_ref" "$_url" /opt/instruqt-workshop-track
-  _ec=$?
-  if [[ $_ec -ne 0 ]]; then
-    echo "WARN: git clone with branch failed (exit $_ec); retrying default branch ..." >&2
+  echo "Workshop: cloning ${_url} (try branches: ${_ref}, main, master) ..." >&2
+  _ec=1
+  for _br in "$_ref" main master; do
     rm -rf /opt/instruqt-workshop-track
-    GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$_url" /opt/instruqt-workshop-track
+    GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$_br" "$_url" /opt/instruqt-workshop-track
     _ec=$?
-  fi
-  if [[ $_ec -ne 0 ]] || ! _track_root_ok "/opt/instruqt-workshop-track"; then
-    echo "WARN: git workshop copy missing or invalid (exit $_ec); trying tarball ..." >&2
-    rm -rf /opt/instruqt-workshop-track
-    mkdir -p /opt/_workshop_unpack
-    if curl -fsSL "$_tarball_fallback" | tar -xz -C /opt/_workshop_unpack; then
-      _d="$(find /opt/_workshop_unpack -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
-      if [[ -n "$_d" ]]; then
-        mv "$_d" /opt/instruqt-workshop-track
-      fi
-    else
-      echo "WARN: tarball fetch failed (${_tarball_fallback})" >&2
+    if [[ $_ec -eq 0 ]] && _track_root_ok "/opt/instruqt-workshop-track"; then
+      echo "OK: git clone valid on branch ${_br}" >&2
+      break
     fi
-    rm -rf /opt/_workshop_unpack
+    if [[ $_ec -eq 0 ]] && ! _track_root_ok "/opt/instruqt-workshop-track"; then
+      echo "WARN: git clone on branch ${_br} is missing Path A files; trying next branch ..." >&2
+      _track_root_diag "/opt/instruqt-workshop-track"
+    fi
+  done
+  if [[ $_ec -ne 0 ]] || ! _track_root_ok "/opt/instruqt-workshop-track"; then
+    echo "WARN: git did not yield a valid tree; trying GitHub tarballs (refs/heads/<branch>) ..." >&2
+    rm -rf /opt/instruqt-workshop-track /opt/_workshop_unpack
+    _tb_ok=1
+    _tb_urls=()
+    if [[ -n "${WORKSHOP_GIT_TARBALL_URL:-}" ]]; then
+      _tb_urls+=("${WORKSHOP_GIT_TARBALL_URL}")
+    else
+      for _br in "$_ref" main master; do
+        _tb_urls+=("https://github.com/${_owner_repo}/archive/refs/heads/${_br}.tar.gz")
+      done
+    fi
+    for _tb in "${_tb_urls[@]}"; do
+      mkdir -p /opt/_workshop_unpack
+      if curl -fsSL "$_tb" | tar -xz -C /opt/_workshop_unpack; then
+        _d="$(find /opt/_workshop_unpack -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+        if [[ -n "$_d" ]] && _track_root_ok "$_d"; then
+          mv "$_d" /opt/instruqt-workshop-track
+          _tb_ok=0
+          echo "OK: tarball valid (${_tb})" >&2
+          rm -rf /opt/_workshop_unpack
+          break
+        fi
+        [[ -n "$_d" ]] && _track_root_diag "$_d"
+      else
+        echo "WARN: tarball failed (${_tb})" >&2
+      fi
+      rm -rf /opt/_workshop_unpack
+    done
+    if [[ $_tb_ok -ne 0 ]]; then
+      rm -rf /opt/instruqt-workshop-track
+    fi
   fi
   set -euxo pipefail
 
@@ -146,6 +182,7 @@ _clone_workshop_from_git() {
     (cd /opt/instruqt-workshop-track && pwd)
   else
     echo "ERROR: /opt/instruqt-workshop-track is not a valid workshop tree after git/tarball attempts." >&2
+    _track_root_diag "/opt/instruqt-workshop-track"
     ls -la /opt/instruqt-workshop-track 2>/dev/null || echo "(directory missing)" >&2
     printf ''
   fi
@@ -185,6 +222,7 @@ fi
 
 if [[ -z "$TRACK_ROOT" ]] || ! _track_root_ok "$TRACK_ROOT"; then
   echo "ERROR: Could not resolve a valid workshop tree (need scripts/migrate_grafana_dashboards_to_serverless.sh and assets)" >&2
+  _track_root_diag "${TRACK_ROOT:-/opt/instruqt-workshop-track}"
   exit 1
 fi
 
