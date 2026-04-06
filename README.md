@@ -22,6 +22,20 @@ stays on **`PATH`** via **`~/.bashrc`**. If **`mig-to-kbn/`** is missing, setup 
 
 The **`mig-to-kbn/`** directory in git is an **upstream snapshot** (aligned via the update script), not a second place to maintain migration logic.
 
+### When **elastic/mig-to-kbn** is updated (maintainer checklist)
+
+Do this on your **laptop** (or CI with credentials), **not** on the Instruqt VM — sandboxes do not clone private upstream.
+
+1. **Authenticate** (if the upstream repo is private): `gh auth login`
+2. **Refresh the vendored tree:** from repo root, run **`./scripts/update_mig_to_kbn.sh`**  
+   - Optional: **`MIG_TO_KBN_REF=main`** (default) or another branch/tag; **`MIG_TO_KBN_GIT_URL=…`** if you use SSH/HTTPS instead of `gh`.
+   - Optional: **`./scripts/update_mig_to_kbn.sh --reinstall`** to also reinstall the local/VM-style venv after the bump (needs a suitable machine).
+3. **Review** `git diff mig-to-kbn/` (release notes / breaking CLI changes upstream).
+4. **Commit and push:** `git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"` && **`git push origin main`**
+5. **Publish the workshop:** **`instruqt track validate`** then **`instruqt track push`** (or **`./scripts/push_git_and_instruqt.sh`** after your commit).
+
+After that, new Instruqt plays and **`sync_workshop_from_git.sh`** pick up the bumped **`mig-to-kbn/`** from this repo.
+
 **Instruqt** track (**two labs**) for a **high-volume migration spike**: **20** **Grafana** dashboards and **10**
 **Datadog-style** dashboards (plus **4** monitor JSON files) → Kibana on **Observability Serverless**, using
 **mig-to-kbn CLIs**, legacy **alert** publishers for workshop monitors, **[Elastic Agent Skills](https://github.com/elastic/agent-skills)**,
