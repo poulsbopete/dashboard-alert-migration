@@ -22,6 +22,39 @@ export PME_CLOUD_INSTRUQT_API_KEY
 
 set -euxo pipefail
 
+# Debian/GCE images often run unattended-upgrades at boot; parallel apt-get exits 100 (dpkg frontend lock).
+_wait_for_dpkg_lock_optional() {
+  local max="${WORKSHOP_DPKG_LOCK_WAIT_SEC:-600}" step=5 elapsed=0
+  while [ "$elapsed" -lt "$max" ]; do
+    if ! pgrep -f '/usr/bin/unattended-upgrade' >/dev/null 2>&1 \
+      && ! pgrep -f 'apt.systemd.daily' >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "Waiting for automatic apt maintenance (${elapsed}s / max ${max}s)..." >&2
+    sleep "$step"
+    elapsed=$((elapsed + step))
+  done
+  echo "WARN: timed out waiting for unattended-upgrades (${max}s); apt-get will retry on lock errors" >&2
+}
+
+_apt_get_with_retry() {
+  local max="${WORKSHOP_APT_RETRY_MAX:-36}" delay="${WORKSHOP_APT_RETRY_DELAY:-10}" n=1
+  while true; do
+    if apt-get "$@"; then
+      return 0
+    fi
+    local ec=$?
+    if [ "$n" -ge "$max" ]; then
+      echo "ERROR: apt-get failed after ${max} attempts (last exit ${ec}): apt-get $*" >&2
+      return "$ec"
+    fi
+    echo "WARN: apt-get $* failed (exit ${ec}); retry ${n}/${max} in ${delay}s" >&2
+    _wait_for_dpkg_lock_optional
+    sleep "$delay"
+    n=$((n + 1))
+  done
+}
+
 echo "Track setup on es3-api (elastic/es3-api-v2)"
 
 _n=0
@@ -201,8 +234,9 @@ fi
 
 if [[ -z "$TRACK_ROOT" ]]; then
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y --no-install-recommends git ca-certificates
+  _wait_for_dpkg_lock_optional
+  _apt_get_with_retry update -y
+  _apt_get_with_retry install -y --no-install-recommends git ca-certificates
   _url="${WORKSHOP_GIT_URL:-https://github.com/poulsbopete/dashboard-alert-migration.git}"
   _ref="${WORKSHOP_GIT_REF:-main}"
   rm -rf /opt/instruqt-workshop-track
@@ -225,8 +259,9 @@ export WORKSHOP_ROOT="${WORKSHOP_ROOT:-$TRACK_ROOT}"
 ln -sfn "$TRACK_ROOT" /root/workshop
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base git ca-certificates unzip
+_wait_for_dpkg_lock_optional
+_apt_get_with_retry update -y
+_apt_get_with_retry install -y --no-install-recommends python3-pip python3-venv jq curl gettext-base git ca-certificates unzip
 
 python3 -m venv /opt/workshop-venv
 /opt/workshop-venv/bin/pip install --upgrade pip
