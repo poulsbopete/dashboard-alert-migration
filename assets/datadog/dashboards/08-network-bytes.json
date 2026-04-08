@@ -8,7 +8,7 @@
         "title": "Bytes sent rate",
         "requests": [
           {
-            "q": "sum:system.net.bytes_sent{*}.as_rate() by {interface}",
+            "q": "sum:system.net.bytes_sent{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -26,7 +26,7 @@
         "title": "Bytes rcvd rate",
         "requests": [
           {
-            "q": "sum:system.net.bytes_rcvd{*}.as_rate() by {interface}",
+            "q": "sum:system.net.bytes_rcvd{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -44,7 +44,7 @@
         "title": "TCP retransmits",
         "requests": [
           {
-            "q": "sum:system.net.tcp.retrans_segs{*}.as_rate() by {host}",
+            "q": "sum:system.net.tcp.retrans_segs{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -62,7 +62,7 @@
         "title": "UDP errors",
         "requests": [
           {
-            "q": "sum:system.net.udp.in_errors{*}.as_rate() by {host}",
+            "q": "sum:system.net.udp.in_errors{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -80,7 +80,7 @@
         "title": "Packets in",
         "requests": [
           {
-            "q": "sum:system.net.packets_in.count{*}.as_rate() by {interface}",
+            "q": "sum:system.net.packets_in.count{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -98,7 +98,7 @@
         "title": "Packets out",
         "requests": [
           {
-            "q": "sum:system.net.packets_out.count{*}.as_rate() by {interface}",
+            "q": "sum:system.net.packets_out.count{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Listen overflows",
         "requests": [
           {
-            "q": "sum:system.net.tcp.listen_overflows{*}.as_rate() by {host}",
+            "q": "sum:system.net.tcp.listen_overflows{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -152,7 +152,7 @@
         "title": "HTTP traffic proxy",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.hits{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -188,7 +188,7 @@
         "title": "Net errors in",
         "requests": [
           {
-            "q": "sum:system.net.errors_in{*}.as_rate() by {interface}",
+            "q": "sum:system.net.errors_in{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -206,7 +206,7 @@
         "title": "Net errors out",
         "requests": [
           {
-            "q": "sum:system.net.errors_out{*}.as_rate() by {interface}",
+            "q": "sum:system.net.errors_out{*} by {interface}.as_rate()",
             "display_type": "line"
           }
         ]

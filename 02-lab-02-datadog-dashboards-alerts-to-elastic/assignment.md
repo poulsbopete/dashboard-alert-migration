@@ -96,7 +96,7 @@ Then **Dashboards** (migrated titles) and **Observability → Rules** in the Ela
 
 **If `latency_p95` fails at compile:** **`kb-dashboard-cli`** may reject some Lens XY shapes (formula vs aggregation). Other dashboards still upload; track **mig-to-kbn** / **kb-dashboard-cli** updates or re-run after **`./scripts/sync_workshop_from_git.sh`**.
 
-*Charts empty?* **`./scripts/check_workshop_otel_pipeline.sh`** then **`./scripts/start_workshop_otel.sh`**. *Old scripts?* **`./scripts/sync_workshop_from_git.sh`**.
+*Charts empty or “requires_manual” markdown panels?* Ensure OTLP is healthy (**`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**). After **`./scripts/sync_workshop_from_git.sh`**, re-run **`bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`** so Kibana gets dashboards rebuilt from the repo’s Datadog JSON (workshop fleet now emits **system_net_***, **trace_http_***, **system_cpu_***, etc., aligned with **`datadog-migrate --field-profile otel`**).
 
 **Optional — synthetic metrics from migrated Datadog YAML:** **`mig-to-kbn/scripts/setup_datadog_serverless_data.py`** discovers metrics from compiled dashboard YAML. Set **`DASHBOARD_YAML_DIR`** to **`/root/workshop/build/mig-datadog/yaml`** (Path B: **`$PWD/build/mig-datadog/yaml`**), plus **`ELASTICSEARCH_ENDPOINT`**, **`KEY`**, and optional **`DATA_HOURS`**, **`INTERVAL_SEC`**. See the script header and **`mig-to-kbn/docs/command-contract.md`**.
 

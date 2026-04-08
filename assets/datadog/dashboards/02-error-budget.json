@@ -44,7 +44,7 @@
         "title": "Errors by service",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.errors{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -62,7 +62,7 @@
         "title": "Errors by resource",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {resource_name}",
+            "q": "sum:trace.http.request.errors{*} by {resource_name}.as_count()",
             "display_type": "line"
           }
         ]
@@ -80,7 +80,7 @@
         "title": "5xx rate proxy",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {http.status_code}",
+            "q": "sum:trace.http.request.errors{*} by {http.status_code}.as_count()",
             "display_type": "line"
           }
         ]
@@ -98,7 +98,7 @@
         "title": "Client errors",
         "requests": [
           {
-            "q": "sum:trace.http.client.errors{*}.as_count() by {service}",
+            "q": "sum:trace.http.client.errors{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Error budget burn (hits)",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.hits{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -188,7 +188,7 @@
         "title": "Log-style error spike",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {host}",
+            "q": "sum:trace.http.request.errors{*} by {host}.as_count()",
             "display_type": "line"
           }
         ]
@@ -206,7 +206,7 @@
         "title": "Availability proxy \u2014 hits",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {host}",
+            "q": "sum:trace.http.request.hits{*} by {host}.as_count()",
             "display_type": "line"
           }
         ]

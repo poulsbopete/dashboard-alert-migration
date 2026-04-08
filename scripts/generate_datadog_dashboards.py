@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets" / "datadog" / "dashboards"
+
+# mig-to-kbn ``parse_metric_query`` expects ``by {tags}`` *before* ``.as_rate()`` / ``.as_count()``.
+# Datadog UI often shows ``.as_rate() by {host}``; that order yields ``legacy_unparsed`` → markdown placeholders.
+_DD_FN_THEN_BY = re.compile(
+    r"^(.+?\{[^}]*\})\.(as_rate|as_count)\(\)\s+by\s+(\{[^}]+\})\s*$"
+)
+
+
+def normalize_datadog_q_for_mig_parser(q: str) -> str:
+    """Rewrite ``{*}.as_rate() by {x}`` → ``{*} by {x}.as_rate()`` (same for as_count)."""
+    q = q.strip()
+    m = _DD_FN_THEN_BY.match(q)
+    if m:
+        return f"{m.group(1)} by {m.group(3)}.{m.group(2)}()"
+    return q
 
 # filename, dashboard title, list of (widget_title, query) — one timeseries per query for rich Kibana/Lens imports
 DASHBOARDS: list[tuple[str, str, list[tuple[str, str]]]] = [
@@ -194,6 +210,7 @@ DASHBOARDS: list[tuple[str, str, list[tuple[str, str]]]] = [
 
 
 def widget_timeseries(title: str, q: str) -> dict:
+    q = normalize_datadog_q_for_mig_parser(q)
     return {
         "definition": {
             "type": "timeseries",

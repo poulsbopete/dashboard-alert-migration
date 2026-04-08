@@ -26,7 +26,7 @@
         "title": "Satisfied count",
         "requests": [
           {
-            "q": "sum:app.apdex.satisfied{*}.as_count() by {service}",
+            "q": "sum:app.apdex.satisfied{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -44,7 +44,7 @@
         "title": "Tolerating",
         "requests": [
           {
-            "q": "sum:app.apdex.tolerating{*}.as_count() by {service}",
+            "q": "sum:app.apdex.tolerating{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -62,7 +62,7 @@
         "title": "Frustrated",
         "requests": [
           {
-            "q": "sum:app.apdex.frustrated{*}.as_count() by {service}",
+            "q": "sum:app.apdex.frustrated{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -98,7 +98,7 @@
         "title": "Hits for context",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.hits{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -116,7 +116,7 @@
         "title": "Errors vs satisfaction",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.errors{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -152,7 +152,7 @@
         "title": "Request rate",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_rate() by {service}",
+            "q": "sum:trace.http.request.hits{*} by {service}.as_rate()",
             "display_type": "line"
           }
         ]

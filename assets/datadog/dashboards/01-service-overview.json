@@ -80,7 +80,7 @@
         "title": "Hits by resource",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {resource_name}",
+            "q": "sum:trace.http.request.hits{*} by {resource_name}.as_count()",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Servlet hits",
         "requests": [
           {
-            "q": "sum:trace.servlet.request.hits{*}.as_count() by {service}",
+            "q": "sum:trace.servlet.request.hits{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]

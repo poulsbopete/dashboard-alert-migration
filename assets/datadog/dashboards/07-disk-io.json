@@ -44,7 +44,7 @@
         "title": "Read bytes",
         "requests": [
           {
-            "q": "sum:system.disk.read_bytes{*}.as_rate() by {device}",
+            "q": "sum:system.disk.read_bytes{*} by {device}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -62,7 +62,7 @@
         "title": "Write bytes",
         "requests": [
           {
-            "q": "sum:system.disk.write_bytes{*}.as_rate() by {device}",
+            "q": "sum:system.disk.write_bytes{*} by {device}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "IOPS read",
         "requests": [
           {
-            "q": "sum:system.disk.read_ops{*}.as_rate() by {device}",
+            "q": "sum:system.disk.read_ops{*} by {device}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -152,7 +152,7 @@
         "title": "IOPS write",
         "requests": [
           {
-            "q": "sum:system.disk.write_ops{*}.as_rate() by {device}",
+            "q": "sum:system.disk.write_ops{*} by {device}.as_rate()",
             "display_type": "line"
           }
         ]

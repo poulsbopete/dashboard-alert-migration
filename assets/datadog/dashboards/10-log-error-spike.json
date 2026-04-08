@@ -98,7 +98,7 @@
         "title": "Security proxy",
         "requests": [
           {
-            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"service\")",
+            "q": "logs(\"source:security\").index(\"*\").rollup(\"count\").by(\"service\")",
             "display_type": "line"
           }
         ]
@@ -116,7 +116,7 @@
         "title": "Apache errors",
         "requests": [
           {
-            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"host\")",
+            "q": "logs(\"source:apache\").index(\"*\").rollup(\"count\").by(\"host\")",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Nginx access proxy",
         "requests": [
           {
-            "q": "logs(\"*\").index(\"*\").rollup(\"count\").by(\"http.url\")",
+            "q": "logs(\"source:nginx\").index(\"*\").rollup(\"count\").by(\"http.url\")",
             "display_type": "line"
           }
         ]
@@ -152,7 +152,7 @@
         "title": "Trace errors",
         "requests": [
           {
-            "q": "sum:trace.http.request.errors{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.errors{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]
@@ -170,7 +170,7 @@
         "title": "HTTP hits context",
         "requests": [
           {
-            "q": "sum:trace.http.request.hits{*}.as_count() by {service}",
+            "q": "sum:trace.http.request.hits{*} by {service}.as_count()",
             "display_type": "line"
           }
         ]

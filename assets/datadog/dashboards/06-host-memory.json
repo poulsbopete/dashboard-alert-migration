@@ -116,7 +116,7 @@
         "title": "Page faults",
         "requests": [
           {
-            "q": "sum:system.mem.page_faults{*}.as_rate() by {host}",
+            "q": "sum:system.mem.page_faults{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]

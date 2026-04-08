@@ -188,7 +188,7 @@
         "title": "Context switches",
         "requests": [
           {
-            "q": "sum:system.cpu.context_switches{*}.as_rate() by {host}",
+            "q": "sum:system.cpu.context_switches{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -206,7 +206,7 @@
         "title": "Interrupts",
         "requests": [
           {
-            "q": "sum:system.cpu.interrupt{*}.as_rate() by {host}",
+            "q": "sum:system.cpu.interrupt{*} by {host}.as_rate()",
             "display_type": "line"
           }
         ]

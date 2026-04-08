@@ -116,7 +116,7 @@
         "title": "Network RX",
         "requests": [
           {
-            "q": "sum:container.net.rcvd{*}.as_rate() by {container_name}",
+            "q": "sum:container.net.rcvd{*} by {container_name}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -134,7 +134,7 @@
         "title": "Network TX",
         "requests": [
           {
-            "q": "sum:container.net.sent{*}.as_rate() by {container_name}",
+            "q": "sum:container.net.sent{*} by {container_name}.as_rate()",
             "display_type": "line"
           }
         ]
@@ -152,7 +152,7 @@
         "title": "Restarts",
         "requests": [
           {
-            "q": "sum:container.restarts{*}.as_count() by {container_name}",
+            "q": "sum:container.restarts{*} by {container_name}.as_count()",
             "display_type": "line"
           }
         ]
@@ -188,7 +188,7 @@
         "title": "OOM kills",
         "requests": [
           {
-            "q": "sum:container.oom_events{*}.as_count() by {container_name}",
+            "q": "sum:container.oom_events{*} by {container_name}.as_count()",
             "display_type": "line"
           }
         ]
