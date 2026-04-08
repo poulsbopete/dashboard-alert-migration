@@ -3,31 +3,12 @@ id: hs7ogfqktp5m
 title: Grafana & Datadog → Elastic Serverless (migration workshop)
 teaser: Practice moving Grafana and Datadog estates onto Elastic Observability Serverless—dashboards,
   alerts, OTLP ingest, and AI-assisted refinement at realistic volume.
-description: |
-  **Goal:** Build skills to **migrate customers from Grafana and Datadog** onto **Elastic Observability Serverless**—batch
-  conversion, publishing APIs, alert mapping, and **OpenTelemetry** ingest (Alloy → **managed OTLP**) so Kibana validates
-  against **live** Serverless data.
-
-  A **two-lab** spike sized like a real program: **20** Grafana dashboards, **2** Grafana **unified** alert rules (workshop
-  PromQL aligned to OTLP metrics), **10** Datadog-style **dashboard** JSON files, plus **4** Datadog **monitor**
-  samples—**30+** dashboard-class artifacts before you even count alert drafts.
-
-  **Lab 1** runs **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** (file mode, **`--native-promql`**, **`--fetch-alerts`**
-  for Serverless) per [Grafana source docs](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md); the migrate script then runs
-  **`publish_grafana_alert_drafts_kibana.py`** so Kibana **Rules** match the Datadog lab pattern. Learners use **Cursor** and
-  [Elastic Agent Skills](https://github.com/elastic/agent-skills) (**`kibana-dashboards`**) to refine in **Kibana**.
-
-  **Lab 2** uses **`datadog-migrate`** ([Datadog source docs](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md)) for dashboards;
-  workshop **rules** use `tools/datadog_to_elastic_alert.py` + **`publish_datadog_alert_drafts_kibana.py`**. Architecture overview:
-  [mig-to-kbn `docs/architecture.md`](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md). Same **OTLP** path into Elastic’s managed collector.
-
-  The sandbox is a single **elastic/es3-api-v2** host: it **creates** an Observability Serverless project at track start,
-  proxies **Kibana** on port **8080**, and includes the workshop repo (Python venv + **assets/**) for the CLIs.
-
-  **Telemetry diagram:** loading / wait slides include a **Mermaid + ASCII** workflow (**Python OTLP → Grafana Alloy → Elastic mOTLP → Serverless → Kibana**).
-
-  **Upstream engine:** **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the migration CLI and docs home for this track. File bugs, request features, or contribute fixes via
-  **[Issues](https://github.com/elastic/mig-to-kbn/issues)** and **[Pull requests](https://github.com/elastic/mig-to-kbn/pulls)**.
+# Instruqt public_description (invites) must be ≤400 characters—keep this block short.
+description: >
+  Hands-on Grafana & Datadog → Elastic Observability Serverless. Two labs: mig-to-kbn grafana-migrate
+  (dashboards, PromQL, alerts) and datadog-migrate (Datadog-style JSON + monitor samples), with Alloy →
+  managed OTLP into a live Serverless project and Kibana on :8080. See repo README for detail; upstream
+  elastic/mig-to-kbn.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - elastic
@@ -54,5 +35,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "4141606014011257283"
+checksum: "12662336891364511535"
 enhanced_loading: false
