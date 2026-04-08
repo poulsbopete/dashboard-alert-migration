@@ -113,6 +113,19 @@ Send requests to the **destination** Kibana base URL (for example `https://other
 
 If the POST assigns a new id, update any hard-coded links accordingly.
 
+## Dashboards API vs standalone Lens
+
+For automation, use **only** the Dashboards API:
+
+- **`POST` / `PUT /api/dashboards?apiVersion=1`** — create or replace a dashboard and its panels in one request.
+
+Do **not** use the **standalone Lens** paths for publishing workshop dashboards:
+
+- No **`POST /api/saved_objects/lens/...`** (often blocked on Serverless anyway).
+- No **`POST /api/saved_objects/_import`** of standalone **`type: lens`** rows when you can express the viz inline on the dashboard instead.
+
+**Important naming detail:** a Dashboards API payload may still contain panel objects with **`"type": "lens"`** and **`config.attributes`** (`metric`, `xy`, …). That is the **embeddable shape inside the dashboard document**, not a separate Lens API call. Kibana’s current publisher path for ES|QL charts uses this wrapper; a root-level **`"type": "metric"`** / **`"type": "xy"`** panel shape is a different schema tier and may not be accepted on all stacks—see `tools/publish_grafana_drafts_kibana.py` (`build_esql_xy_panels`).
+
 ## Supported panels (summary)
 
 Not every dashboard panel type is API-complete yet. Unsupported panels may be **dropped on GET** and listed under **`warnings`**.

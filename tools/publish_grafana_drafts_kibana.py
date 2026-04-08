@@ -1065,8 +1065,11 @@ def build_mixed_esql_panels(
 
 def build_esql_xy_panels(draft: dict[str, Any], *, esql_query: str) -> list[dict[str, Any]]:
     """
-    Inline Lens `xy` line panels for POST/PUT /api/dashboards — must use type ``lens`` + ``config.attributes``
-    (root ``type: xy`` is rejected / stripped; see kibana-dashboards skill examples).
+    Panels for POST/PUT ``/api/dashboards?apiVersion=1`` only (no standalone Lens saved-object API).
+
+    Use ``type: lens`` + ``config.attributes`` (``type: xy`` inside attributes). Kibana currently expects this
+    embeddable wrapper for ES|QL xy charts; a root-level ``type: xy`` panel is rejected/stripped on many stacks.
+    See ``docs/dashboards-api-getting-started.md`` (Dashboards API vs standalone Lens).
     """
     if (os.environ.get("WORKSHOP_DISABLE_LENS") or "").strip() in ("1", "true", "yes"):
         return []
