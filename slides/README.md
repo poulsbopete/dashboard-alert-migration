@@ -34,6 +34,20 @@ npm run preview
 
 The site URL is `https://<user>.github.io/<repo>/`.
 
+### Workshop overview video (first slide)
+
+The deck embeds **`slides/public/dashboard-alert-migration.mp4`**. Large files use **Git LFS** (see repo root `.gitattributes`). After cloning, run `git lfs pull` if the video is missing locally.
+
+The **Deploy slides** workflow checks out with **`lfs: true`** so GitHub Pages builds include the real MP4, not a pointer file.
+
+To replace the video:
+
+```bash
+cp /path/to/your-recording.mp4 slides/public/dashboard-alert-migration.mp4
+git add slides/public/dashboard-alert-migration.mp4
+git commit -m "Update workshop overview video"
+```
+
 ## Fresh shadcn-style app (if you start elsewhere)
 
 ```bash

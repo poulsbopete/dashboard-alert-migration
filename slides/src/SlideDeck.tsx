@@ -19,6 +19,11 @@ export type Slide = {
   /** Instruqt (or other) lab — opens in a new browser tab */
   workshopUrl?: string;
   workshopLinkLabel?: string;
+  /**
+   * File in `slides/public/` (copied to site root). Use with Git LFS for large MP4s.
+   * URL respects Vite `base` (GitHub Pages project path).
+   */
+  videoSrc?: string;
 };
 
 const INSTRUQT_INVITE = "https://play.instruqt.com/elastic/invite/fmt96ftdm41w";
@@ -48,6 +53,12 @@ const UPSTREAM_REPOS: {
 ];
 
 const SLIDES: Slide[] = [
+  {
+    title: "Workshop walkthrough",
+    subtitle:
+      "Quick tour of the Instruqt lab — Grafana & Datadog dashboards and alerts toward Elastic Observability Serverless.",
+    videoSrc: "dashboard-alert-migration.mp4",
+  },
   {
     title: "Try the guided experience",
     subtitle:
@@ -232,7 +243,7 @@ export function SlideDeck() {
               "w-full rounded-2xl px-6 py-8 md:px-10 md:py-12",
               "border border-white/15 bg-zinc-950/85 shadow-2xl backdrop-blur-md",
               "ring-1 ring-black/40",
-              slide.statCards?.length ? "max-w-6xl" : "max-w-4xl",
+              slide.statCards?.length ? "max-w-6xl" : slide.videoSrc ? "max-w-5xl" : "max-w-4xl",
             )}
           >
             <h1
@@ -245,6 +256,24 @@ export function SlideDeck() {
             </h1>
             {slide.subtitle ? (
               <p className="mx-auto mt-4 max-w-3xl text-lg text-zinc-200/95">{slide.subtitle}</p>
+            ) : null}
+            {slide.videoSrc ? (
+              <div className="mt-8 w-full">
+                <video
+                  className="mx-auto w-full max-h-[min(60vh,720px)] rounded-xl border border-white/15 bg-black/70 shadow-xl"
+                  controls
+                  playsInline
+                  preload="metadata"
+                  aria-label="Workshop overview video"
+                >
+                  <source
+                    src={`${import.meta.env.BASE_URL}${slide.videoSrc}`}
+                    type="video/mp4"
+                  />
+                  Your browser does not support embedded video — open the MP4 from the repository{" "}
+                  <code className="rounded bg-white/10 px-1 text-sm">slides/public/</code> or run the lab in Instruqt.
+                </video>
+              </div>
             ) : null}
             {slide.statCards?.length ? (
               <div className="mt-10 grid w-full gap-4 sm:grid-cols-2 xl:grid-cols-3">
