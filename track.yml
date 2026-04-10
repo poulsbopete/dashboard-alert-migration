@@ -1,14 +1,10 @@
 slug: elastic-serverless-migration-lab
 id: hs7ogfqktp5m
 title: Grafana & Datadog → Elastic Serverless (migration workshop)
-teaser: Practice moving Grafana and Datadog estates onto Elastic Observability Serverless—dashboards,
-  alerts, OTLP ingest, and AI-assisted refinement at realistic volume.
-# Instruqt public_description (invites) must be ≤400 characters—keep this block short.
-description: >
-  Hands-on Grafana & Datadog → Elastic Observability Serverless. Two labs: mig-to-kbn grafana-migrate
-  (dashboards, PromQL, alerts) and datadog-migrate (Datadog-style JSON + monitor samples), with Alloy →
-  managed OTLP into a live Serverless project and Kibana on :8080. See repo README for detail; upstream
-  elastic/mig-to-kbn.
+teaser: Grafana & Datadog → Elastic Serverless—dashboards, alerts, and OTLP in guided
+  labs.
+description: |
+  mig-to-kbn labs (grafana-migrate, datadog-migrate), Alloy→OTLP, Kibana on :8080. See the repo README for full setup; engine is upstream elastic/mig-to-kbn.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - elastic
@@ -19,6 +15,9 @@ tags:
 owner: elastic
 developers:
 - peter.simkins@elastic.co
+instructors:
+- peter.simkins@elastic.co
+- kyle.gorak@elastic.co
 show_timer: true
 skipping_enabled: true
 idle_timeout: 600
@@ -35,5 +34,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "12662336891364511535"
+checksum: "16151291543480706586"
 enhanced_loading: false
