@@ -11,6 +11,7 @@ tags:
 - opentelemetry
 - serverless
 - migration
+- mig-to-kbn
 - observability
 owner: elastic
 developers:
@@ -34,5 +35,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "16151291543480706586"
+checksum: "16319075016440163965"
 enhanced_loading: false
