@@ -400,6 +400,69 @@ def _run_worker(spec: dict[str, str]) -> int:
         "container_net_sent", unit="By", description="container.net.sent → container_net_sent"
     )
 
+    def container_cpu_user_obs(_options):
+        phase = (time.time() - t0) / 42.0 + (seed % 5)
+        for cname, scale in ((f"{service}-main", 1.0), (f"{service}-sidecar", 0.4)):
+            u = max(5.0, min(60.0, (0.22 + 0.38 * math.sin(phase)) * 100.0 * scale + rng.uniform(-2.0, 2.0)))
+            yield Observation(u, {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_cpu_user",
+        unit="%",
+        description="Datadog container.cpu.user → container_cpu_user (per container)",
+        callbacks=[container_cpu_user_obs],
+    )
+
+    def container_cpu_system_obs(_options):
+        phase = (time.time() - t0) / 42.0 + (seed % 5)
+        for cname, scale in ((f"{service}-main", 1.0), (f"{service}-sidecar", 0.4)):
+            u = max(0.08, min(0.88, 0.22 + 0.38 * math.sin(phase)))
+            sys_f = max(1.0, min(20.0, (1.0 - u) * 0.28 * 100.0 * scale + rng.uniform(-0.5, 0.5)))
+            yield Observation(sys_f, {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_cpu_system",
+        unit="%",
+        description="Datadog container.cpu.system → container_cpu_system (per container)",
+        callbacks=[container_cpu_system_obs],
+    )
+
+    def container_cpu_shares_obs(_options):
+        yield Observation(512.0, {"container.name": f"{service}-main"})
+        yield Observation(256.0, {"container.name": f"{service}-sidecar"})
+
+    meter.create_observable_gauge(
+        "container_cpu_shares",
+        unit="1",
+        description="Datadog container.cpu.shares → container_cpu_shares",
+        callbacks=[container_cpu_shares_obs],
+    )
+
+    def container_fs_usage_obs(_options):
+        phase = (time.time() - t0) / 120.0 + (seed % 3) * 0.7
+        for cname, base in ((f"{service}-main", 4e9), (f"{service}-sidecar", 1.5e9)):
+            v = base + 2e9 * (0.5 + 0.5 * math.sin(phase)) + rng.uniform(-1e8, 1e8)
+            yield Observation(max(0.5e9, v), {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_filesystem_usage",
+        unit="By",
+        description="Datadog container.fs.usage → container_filesystem_usage (per container)",
+        callbacks=[container_fs_usage_obs],
+    )
+
+    # K8s-semantic proxy — no real pod lifecycle behind these; included so migrated panels render data
+    container_restarts = meter.create_counter(
+        "container_restarts",
+        unit="1",
+        description="Datadog kubernetes.containers.restarts → container_restarts (K8s-semantic proxy)",
+    )
+    container_oom = meter.create_counter(
+        "container_oom_events",
+        unit="1",
+        description="Datadog kubernetes.containers.oom_killed → container_oom_events (K8s-semantic proxy)",
+    )
+
     routes = ["/health", "/api/v1/orders", "/api/v1/users", "/api/v1/cart", "/readyz"]
     interval = float((os.environ.get("WORKSHOP_EMIT_INTERVAL_SEC") or "5").strip() or "5")
     try:
@@ -480,6 +543,10 @@ def _run_worker(spec: dict[str, str]) -> int:
         for cname in (f"{service}-main", f"{service}-sidecar"):
             container_net_rcvd.add(int(rng.uniform(8_000, 420_000)), {"container.name": cname})
             container_net_sent.add(int(rng.uniform(9_000, 480_000)), {"container.name": cname})
+            if rng.random() < 0.05:
+                container_restarts.add(1, {"container.name": cname})
+            if rng.random() < 0.02:
+                container_oom.add(1, {"container.name": cname})
 
         if status >= 500 or rng.random() < err_prob:
             reason = (
