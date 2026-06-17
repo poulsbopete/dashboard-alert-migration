@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Canonical alerting IR — shared envelope for alerts and monitors.
 
 Wraps both Grafana legacy alerts and Datadog monitors under one
@@ -7,9 +10,9 @@ operational envelope without faking a universal condition AST.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone as dt_timezone
 from dataclasses import asdict, dataclass, field
-from functools import lru_cache
+from datetime import UTC, datetime
+from functools import cache
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -312,7 +315,7 @@ def _datadog_calendar_shift_seconds(raw_shift: str, raw_timezone: str) -> int:
     return 0
 
 
-@lru_cache(maxsize=None)
+@cache
 def _datadog_calendar_shift_timezone_is_exact(timezone_name: str) -> bool:
     normalized = str(timezone_name or "").strip()
     if not normalized:
@@ -324,9 +327,9 @@ def _datadog_calendar_shift_timezone_is_exact(timezone_name: str) -> bool:
     except ZoneInfoNotFoundError:
         return False
 
-    current_year = datetime.now(dt_timezone.utc).year
+    current_year = datetime.now(UTC).year
     offsets = {
-        datetime(year, month, 15, 12, 0, tzinfo=dt_timezone.utc).astimezone(tzinfo).utcoffset()
+        datetime(year, month, 15, 12, 0, tzinfo=UTC).astimezone(tzinfo).utcoffset()
         for year in range(current_year - 1, current_year + 11)
         for month in range(1, 13)
     }

@@ -39,7 +39,7 @@ Datadog-specific field/filter handling.
 | Template variables | Kibana dashboard controls emitted; query-level semantics still approximate |
 | Events / markers | Preserved in normalization, not emitted as first-class target assets |
 | Links / drilldowns | Not yet first-class |
-| Compilation | Optional via `--compile` |
+| Compilation | Always performed by unified `obs-migrate migrate`; explicit `--compile` on the dedicated CLI |
 | Preflight | Capability-aware field safety checks with live `_field_caps` |
 | Upload | First-class `--upload` or shared `obs-migrate upload` |
 | Validation / smoke | First-class `--validate --es-url` and post-upload `--smoke` |
@@ -54,10 +54,11 @@ Live extraction is available through `--source api` on the dedicated CLI and
 
 The current API path:
 - pulls dashboard objects from the Datadog Dashboards API
-- can also pull monitor objects from the Datadog Monitors API when `--fetch-monitors` is used
+- can also pull monitor objects from the Datadog Monitors API when
+  `--assets alerts` or `--assets all` is selected (`--fetch-monitors` remains
+  the deprecated dedicated alias)
 - requires the optional `datadog-api-client` dependency (`.venv/bin/pip install -e ".[datadog]"`)
-- supports `--env-file` and optional `--dashboard-ids` on the dedicated CLI
-- in unified mode, also exposes `--env-file`, but still does not expose the dedicated Datadog `--dashboard-ids` selector
+- supports `--env-file` and optional `--dashboard-ids` on both the dedicated CLI and unified `obs-migrate migrate`
 - uses the dashboard list returned by the Datadog API when no dashboard ID list is supplied
 
 Widgets, formulas, and event-marker details are normalized from the dashboard
@@ -97,7 +98,7 @@ field profile setup
 | Capability discovery | `field_map.py` | Optionally load live target `_field_caps` from Elasticsearch when `--es-url` is present |
 | Extract | `extract.py` | Read dashboards from files or Datadog API |
 | Normalize | `normalize.py` | Convert raw Datadog JSON into `NormalizedDashboard` / `NormalizedWidget` |
-| Optional preflight | `preflight.py` | Check mapped fields and capability risks before translation; may also run automatically when live capabilities are available |
+| Optional preflight | `preflight.py` | Check mapped fields and capability risks before translation when `--preflight` is requested |
 | Plan | `planner.py` | Choose `lens`, `esql`, `esql_with_kql`, `markdown`, `group`, or `blocked` for each widget |
 | Translate | `translate.py` | Translate metric, log, and formula queries according to the widget plan |
 | Emit YAML | `generate.py` | Build Kibana YAML, dashboard controls, and output files |
@@ -268,42 +269,71 @@ Elasticsearch. This enables type-aware translation decisions and preflight
 checks — the translator can verify whether a mapped field actually exists,
 is numeric and aggregatable, or has conflicting types across indices.
 
+The dashboard pipeline also writes
+`<output-dir>/dashboards/schema_change_report.md`,
+`<output-dir>/dashboards/telemetry_contract.json`, and
+`<output-dir>/dashboards/target_readiness_contract.json`. The schema report is
+the per-panel source-field -> target-field table. The readiness contract records
+the active `field_profile`, metric/log index patterns, source fields, resolved
+target fields, and field `status` (`confirmed`, `missing`, or `unknown`).
+`unknown` means live field caps were unavailable; it is not proof that a field
+exists.
+
+`--data-view` is an explicit override. When omitted, the selected field profile
+keeps its own metric index (for example, `prometheus` keeps
+`metrics-prometheus-*` instead of being overwritten by the OTel default
+`metrics-*`).
+
 ## Command Coverage
 
-Datadog command examples are centralized in `docs/command-contract.md` to avoid drift.
+Datadog command examples and the canonical shared migration contract are
+centralized in `docs/command-contract.md` to avoid drift.
 
 Use that doc for:
 - dedicated Datadog migration flows (`datadog-migrate`)
 - the curated demo wrapper (`scripts/run_datadog_demo.sh`) for local or serverless smoke validation with small generated data
 - unified `obs-migrate migrate --source datadog`
+- the asset scope contract (`--assets {dashboards,alerts,all}` plus the
+  deprecated `--fetch-monitors` / unified `--fetch-alerts` aliases)
 - shared compile/upload/cluster commands
 - extension catalog and template commands
 
-## High-Value Flags
+## Datadog-Specific Notes
 
-- `--field-profile`: choose a built-in mapping profile or pass a custom YAML profile.
-- `obs-migrate extensions --source datadog --template-out ...`: emit a validated starter field-profile template.
-- `--data-view`: Elasticsearch index pattern for metrics data (default `metrics-*`).
-- `--logs-index`: override the logs index pattern from the selected profile.
-- `--dataset-filter`: explicit `data_stream.dataset` value for the dashboard-level metrics filter. When omitted, the tool auto-derives the value from the `--data-view` pattern (e.g. `metrics-otel-default` → `otel`). Set to an empty string to suppress the filter entirely.
-- `--logs-dataset-filter`: explicit `data_stream.dataset` value for the dashboard-level logs filter. Auto-derived from `--logs-index` when omitted.
-- `--es-url`: enable live target `_field_caps` discovery so Datadog translation can type-check metric and log fields against the real cluster.
-- `--es-api-key`: authenticate live field-capability discovery; defaults to `ES_API_KEY` or `KEY`.
-- `--preflight`: run the Datadog preflight stage explicitly before translation; when live field capabilities are loaded, capability-aware field checks are also surfaced automatically in the report.
-- `--validate`: validate emitted ES|QL against Elasticsearch, apply shared safe fixes when possible, and downgrade broken widgets to placeholders before compile/upload.
-- `--env-file`: loads Datadog API credentials for API extraction and for live metric source execution during verification.
-- `--source api --dashboard-ids ...`: pull dashboard objects directly from Datadog with explicit dashboard scoping on the dedicated CLI.
-- `--fetch-monitors`: extract monitor objects and write `monitor_migration_results.json`, `monitor_comparison_results.json`, and `monitor_verification_results.json`. In file mode, keep the monitor JSON under `<input-dir>/monitors/` and include at least one dashboard JSON in the same tree because the CLI loads dashboards before monitor extraction.
-- unified `--input-mode api`: pull dashboards through the same API path and forward `--env-file`, but explicit dashboard scoping via `--dashboard-ids` remains a dedicated-CLI feature.
-- `obs-migrate extensions --source datadog`: print the shared extension catalog, including current field-profile surfaces and the planned plugin contract.
-- `examples/cue/datadog-field-profile.cue`: optional CUE authoring example for composing profiles before exporting back to YAML.
-- `--compile`: compile generated YAML to NDJSON through the shared Kibana target runtime.
-- `--upload --kibana-url ...`: auto-run the compile step, and auto-enable `--validate` when `--es-url` is also present, then upload successfully compiled dashboards to Kibana.
-- `--smoke`: auto-enable upload, inspect the uploaded dashboards in Kibana, and write `uploaded_dashboard_smoke_report.json` unless `--smoke-output` overrides the path.
-- `--browser-audit`: with `--smoke`, run a browser-visible error scan over uploaded dashboards and save HTML artifacts under `<output-dir>/browser_qa`.
-- `--capture-screenshots`: with `--smoke`, capture dashboard screenshots for audit artifacts under `<output-dir>/dashboard_qa`.
-- `scripts/run_datadog_demo.sh`: one-command curated smoke flow for `local` or `serverless`; browser extras are opt-in because serverless Chrome audits can be materially slower than the core validation path.
-- `obs-migrate migrate --source datadog` forwards the same first-class `--validate`, `--upload`, and `--smoke` flags as the dedicated CLI.
+- `--assets {dashboards,alerts,all}` is the canonical selector on both the
+  dedicated and unified migration surfaces. `--fetch-monitors` remains only as
+  a deprecated compatibility alias on the dedicated CLI, while unified
+  `--fetch-alerts` forwards to the same alert pipeline. Using either alias
+  always emits a deprecation warning; if the requested asset selection is
+  `dashboards`, including explicit `--assets dashboards`, runtime normalization
+  upgrades the run to `--assets all`.
+- Dashboard artifacts are written under `<output-dir>/dashboards`; alert
+  artifacts are written under `<output-dir>/alerts`; Datadog also writes a root
+  `run_summary.json`.
+- `--field-profile` selects a built-in mapping profile or a custom YAML profile.
+- `--env-file` loads Datadog API credentials for API extraction and live metric
+  source execution during verification.
+- `--ca-cert <path>` (env `OBS_MIGRATE_CA_CERT`) and `--insecure` (env
+  `OBS_MIGRATE_INSECURE`) control TLS verification for all outbound connections
+  (Elasticsearch, Kibana, and the Node upload step). Prefer `--ca-cert` for
+  private CAs; `--insecure` disables verification for testing only.
+- `--source api --dashboard-ids ...` scopes live Datadog dashboard extraction
+  on the dedicated CLI; unified `obs-migrate migrate --source datadog
+  --input-mode api --dashboard-ids ...` exposes the same scoping.
+- `--monitor-ids` and `--monitor-query` scope monitor extraction during
+  alert-capable runs.
+- In file mode, keep monitor JSON under `<input-dir>/monitors/`. When
+  `--assets alerts` is selected, dashboard JSON files are not required because
+  dashboard extraction is skipped.
+- `--create-alert-rules` runs after an alert-capable asset selection and writes
+  `<output-dir>/alerts/monitor_rule_upload_results.json`.
+- `--compile` is opt-in on the dedicated `datadog-migrate` CLI; unified
+  `obs-migrate migrate --source datadog` compiles dashboard output by default
+  when the dashboard pipeline runs.
+- `obs-migrate extensions --source datadog --template-out ...` emits a
+  validated starter field-profile template, and
+  `examples/cue/datadog-field-profile.cue` remains the optional CUE authoring
+  example.
 
 ## Per-Widget Planning And Translation
 
@@ -314,6 +344,21 @@ The Datadog path is now organized around executable stages:
 3. `preflight.py`: resolve mapped target fields and surface capability risks before translation.
 4. `translate.py`: run registry-backed metric, log, and Lens translation rules.
 5. `generate.py`: emit kb-dashboard YAML and hand off to report/compile steps.
+
+### Formula Translation Specifics
+
+The translator handles Datadog formulas at three layers:
+
+- **Pointwise functions** (`abs`, `ceil`, `floor`, `round`, `default_zero`, `exclude_null`, `per_second`, `per_minute`, `per_hour`) map directly to ES|QL expressions in the `EVAL` stage.
+- **Derivative functions** (`rate`, `diff`, `monotonic_diff`) take one of two paths depending on the target field's live `_field_caps`:
+  - **TS|QL path (preferred, counter-typed targets)**: when `time_series_metric_kind == "counter"` or `type ∈ {counter_long, counter_integer, counter_double}`, the translator emits `TS index | STATS rate_alias = RATE(metric, 5 minute) BY TBUCKET(5 minute)` (or `INCREASE(...)` for `diff`/`monotonic_diff`). This is the native ES|QL time-series aggregation — same pattern the Grafana adapter uses for PromQL `rate()`. Mirrors Datadog counter-rate semantics directly.
+  - **FROM + FIRST/LAST path (fallback, gauges)**: when no counter capability is detected, the `STATS` clause emits `FIRST(metric, @timestamp)` and `LAST(metric, @timestamp)` alongside the standard aggregation, and `EVAL` computes `(last − first) / bucket_span_seconds` for `rate()` or `(last − first)` for `diff()`. A per-aggregation `WHERE metric IS NOT NULL` guard skips rows where the target column is null (needed when multiple metrics share the index).
+- **Multi-query formulas with different filters** (e.g. `count:x{direction:in} / count:x{direction:out}`) translate via per-aggregation `WHERE` clauses inside `STATS`: each query's tag filters are attached to its own aggregation expression. The outer `WHERE` becomes the `TIME_FILTER` plus an `OR` of the spec filters. Different groupings are still surfaced as `requires_manual` because the resolution between divergent group sets is semantically ambiguous.
+- **`top(query, N, agg, order)`** parses (the formula tokenizer accepts string-literal arguments) and unwraps to the query reference with a warning that top-N filtering relies on panel-level sort/limit.
+
+### Parity Harness
+
+`parity-rig/datadog/` contains an end-to-end correctness harness (`scripts/run_datadog_parity.sh`) that seeds deterministic synthetic data into both Datadog and Elasticsearch and diffs the values returned by source DD queries vs translated ES|QL. See `parity-rig/datadog/README.md` for verdicts and the default test cases.
 
 ## Executable Rule Catalog
 
@@ -341,7 +386,8 @@ Preflight is already executable and reported, but it is not yet exposed through 
 - Verification can now execute simple Datadog metric queries live for measured source-vs-target comparison, but logs and multi-query metric widgets still fall back to target/runtime evidence.
 - Datadog monitors are first-class extraction inputs, but the main Datadog migration command currently stops at emitted/validated Kibana rule payloads for monitor shapes we can parse faithfully and verify against the configured field profile plus live target `_field_caps`.
 - Broader Datadog product surfaces such as drilldowns, APM, RUM, network, security, and CI are still not first-class migration inputs.
-- Unified `obs-migrate migrate --input-mode api` forwards `--env-file`, but it still does not expose the dedicated Datadog `--dashboard-ids` flag.
+- Unified `obs-migrate migrate --source datadog --input-mode api` forwards
+  `--env-file` and `--dashboard-ids` for scoped live dashboard extraction.
 
 ## Adapter Location
 

@@ -1,10 +1,12 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import json
 import re
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
-
 
 _OLLAMA_TAG_CACHE: dict[str, set[str]] = {}
 

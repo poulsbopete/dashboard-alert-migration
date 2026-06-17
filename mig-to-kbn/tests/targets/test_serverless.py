@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Unit tests for the Serverless Kibana API helpers."""
 
 from __future__ import annotations
@@ -76,7 +79,8 @@ class TestDeleteDashboards(unittest.TestCase):
         result = delete_dashboards("https://kb.test", ["dash-1", "dash-2"])
         self.assertEqual(len(result["cleared"]), 2)
         self.assertEqual(len(result["failed"]), 0)
-        self.assertIn("does not support DELETE", result["note"])
+        self.assertIn("Cleared dashboards have been overwritten", result["note"])
+        self.assertNotIn("Serverless Kibana", result["note"])
 
     @patch("observability_migration.targets.kibana.serverless.import_saved_objects")
     def test_reports_import_failures(self, mock_import):
@@ -150,6 +154,27 @@ class TestEnsureDataView(unittest.TestCase):
         result = ensure_data_view("https://kb.test", title="metrics-*")
         self.assertEqual(result["id"], "new")
         mock_create.assert_called_once()
+
+    @patch("observability_migration.targets.kibana.serverless.create_data_view")
+    @patch("observability_migration.targets.kibana.serverless.list_data_views")
+    def test_wildcard_title_lets_kibana_generate_data_view_id(self, mock_list, mock_create):
+        mock_list.return_value = []
+        mock_create.return_value = {"id": "generated-id", "title": "metrics-*"}
+
+        result = ensure_data_view("https://kb.test", title="metrics-*")
+
+        self.assertEqual(result["id"], "generated-id")
+        mock_create.assert_called_once_with(
+            "https://kb.test",
+            title="metrics-*",
+            name="metrics-*",
+            view_id="",
+            time_field="@timestamp",
+            api_key="",
+            space_id="",
+            timeout=30,
+            verify=True,
+        )
 
 
 class TestDetectServerless(unittest.TestCase):

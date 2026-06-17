@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Focused validation tests for extension inputs."""
 
 from __future__ import annotations
@@ -53,6 +56,45 @@ class TestExtensionValidation(unittest.TestCase):
         self.assertEqual(rule_pack.default_rate_window, "10m")
         self.assertEqual(rule_pack.label_rewrites["cluster"], "service.name")
         self.assertIn("origin_prometheus", rule_pack.ignored_labels)
+
+    def test_grafana_rule_pack_loads_metric_kinds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rule-pack.yaml"
+            path.write_text(
+                yaml.safe_dump(
+                    {
+                        "query": {
+                            "metric_kinds": {
+                                "kube_pod_container_resource_requests": "gauge",
+                                "my_events_total": "counter",
+                            }
+                        }
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            rule_pack = load_rule_pack_files([str(path)])
+
+        self.assertEqual(
+            rule_pack.metric_kinds["kube_pod_container_resource_requests"], "gauge"
+        )
+        self.assertEqual(rule_pack.metric_kinds["my_events_total"], "counter")
+
+    def test_grafana_rule_pack_rejects_invalid_metric_kind(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "rule-pack.yaml"
+            path.write_text(
+                yaml.safe_dump(
+                    {"query": {"metric_kinds": {"foo": "histogram"}}},
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Invalid Grafana rule pack"):
+                load_rule_pack_files([str(path)])
 
     def test_datadog_profile_rejects_unknown_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:

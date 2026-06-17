@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Shared target field capability model and helper predicates."""
 
 from __future__ import annotations
@@ -183,6 +186,7 @@ def fetch_field_capabilities(
     index_pattern: str,
     es_api_key: str = "",
     timeout: int = 10,
+    verify: bool | str = True,
 ) -> dict[str, FieldCapability]:
     """Fetch and normalize Elasticsearch _field_caps for an index pattern."""
     if not es_url or not index_pattern:
@@ -193,6 +197,7 @@ def fetch_field_capabilities(
         params={"fields": "*"},
         headers=_build_es_headers(es_api_key),
         timeout=timeout,
+        verify=verify,
     )
     response.raise_for_status()
     fields = response.json().get("fields", {}) or {}
@@ -293,14 +298,14 @@ def assess_field_usage(
 
 __all__ = [
     "DATE_FIELD_TYPES",
-    "FieldCapability",
-    "FieldUsageAssessment",
     "KEYWORD_FIELD_TYPES",
     "NUMERIC_FIELD_TYPES",
     "TEXT_FIELD_TYPES",
+    "FieldCapability",
+    "FieldUsageAssessment",
     "assess_field_usage",
-    "field_capability_from_es_field_caps",
     "fetch_field_capabilities",
+    "field_capability_from_es_field_caps",
     "has_conflicting_types",
     "infer_type_family",
     "is_aggregatable_field",

@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """CLI entry point for the Datadog → Kibana migration tool.
 
 Usage:
@@ -12,10 +15,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import requests
 
@@ -26,72 +31,105 @@ from observability_migration.adapters.source.grafana.esql_validate import (
     validate_query_with_fixes,
 )
 from observability_migration.adapters.source.grafana.rules import _append_unique
-from observability_migration.core.interfaces.registries import target_registry
-from observability_migration.targets.kibana.alerting import (
-    run_alerting_preflight,
-    validate_rule_payload,
+from observability_migration.core.cli_contract import (
+    ASSET_CHOICES,
+    alert_output_dir,
+    dashboard_output_dir,
+    normalize_requested_assets,
 )
+from observability_migration.core.http import resolve_tls
+from observability_migration.core.interfaces.registries import target_registry
+from observability_migration.core.interfaces.target_adapter import TargetAdapter
+from observability_migration.core.reporting.summary_md import save_markdown_summary
+from observability_migration.core.selection import (
+    add_selection_arguments,
+    apply_cli_selection,
+    criteria_from_args,
+)
+from observability_migration.core.telemetry_contract import write_schema_report_artifacts
+from observability_migration.targets.kibana.compile import validate_compiled_layout
 from observability_migration.targets.kibana.smoke_integration import merge_smoke_into_results
 
 from .extract import (
     extract_dashboards_from_api,
     extract_dashboards_from_files,
     load_credentials_from_env,
+    selection_metadata_from_datadog_dashboard,
 )
-from .field_map import load_profile
+from .field_map import FieldMapProfile, load_profile
 from .generate import generate_dashboard_yaml
 from .manifest import save_migration_manifest
 from .models import DashboardResult, NormalizedWidget, TranslationResult
 from .normalize import normalize_dashboard
 from .planner import plan_widget
-from .preflight import PreflightResult, run_preflight
-from .report import (
-    build_monitor_comparison_results,
-    build_monitor_migration_results,
-    print_report,
-    save_detailed_report,
+from .preflight import (
+    PreflightResult,
+    build_target_readiness_contract,
+    run_preflight,
+    save_target_readiness_contract,
 )
+from .report import build_summary_view, print_report, save_detailed_report
 from .rollout import build_rollout_plan, generate_review_queue, save_rollout_plan
 from .translate import translate_widget
-from .verification import (
-    annotate_results_with_verification,
-    build_monitor_verification_lookup,
-    save_verification_packets,
-    validate_monitor_queries,
-)
+from .verification import annotate_results_with_verification, save_verification_packets
+
+
+def _env_truthy_default(name: str) -> bool:
+    return str(os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_tls_from_args(args: argparse.Namespace) -> bool | str:
+    return resolve_tls(
+        ca_cert=getattr(args, "ca_cert", "") or "",
+        insecure=bool(getattr(args, "insecure", False)),
+    )
+
+
+def _selection_criteria_or_exit(args: argparse.Namespace) -> Any:
+    """Build SelectionCriteria from args, exiting 1 on an unparseable date."""
+    try:
+        return criteria_from_args(args)
+    except ValueError as exc:
+        print(f"  ERROR: invalid --select-updated-* value: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    verify = _resolve_tls_from_args(args)
+    selection = normalize_requested_assets(
+        assets=args.assets,
+        fetch_alerts=False,
+        fetch_monitors=getattr(args, "fetch_monitors", False),
+    )
     auto_enabled_upload = False
-    auto_enabled_validate = False
-    target_adapter = target_registry.get("kibana")()
-    dd_creds = load_credentials_from_env(args.env_file)
 
     if args.list_dashboards:
-        _handle_list_dashboards(args, target_adapter)
+        target_adapter = target_registry.get("kibana")()
+        _handle_list_dashboards(args, target_adapter, verify=verify)
         return
     if args.delete_dashboards:
-        _handle_delete_dashboards(args, target_adapter)
+        target_adapter = target_registry.get("kibana")()
+        _handle_delete_dashboards(args, target_adapter, verify=verify)
         return
 
-    if (args.browser_audit or args.capture_screenshots) and not args.smoke:
-        print("  ERROR: --browser-audit and --capture-screenshots require --smoke")
-        sys.exit(2)
-    if args.smoke and not args.upload:
-        args.upload = True
-        auto_enabled_upload = True
-    compile_requested = args.compile or args.upload
+    compile_requested = False
+    if selection.dashboards:
+        if (args.browser_audit or args.capture_screenshots) and not args.smoke:
+            print("  ERROR: --browser-audit and --capture-screenshots require --smoke")
+            sys.exit(2)
+        if args.smoke and not args.upload:
+            args.upload = True
+            auto_enabled_upload = True
+        compile_requested = args.compile or args.upload
 
-    if args.upload and not args.kibana_url:
-        print("  ERROR: --kibana-url is required when --upload is set")
-        sys.exit(2)
-    if args.smoke and not args.es_url:
-        print("  ERROR: --es-url is required when --smoke is set")
-        sys.exit(2)
-    if args.upload and args.es_url and not args.validate:
-        args.validate = True
-        auto_enabled_validate = True
+        if args.upload and not args.kibana_url:
+            print("  ERROR: --kibana-url is required when --upload is set")
+            sys.exit(2)
+        if args.smoke and not args.es_url:
+            print("  ERROR: --es-url is required when --smoke is set")
+            sys.exit(2)
+    dd_creds = load_credentials_from_env(args.env_file)
 
     print("\n  Datadog → Kibana Migration Tool v0.1.0")
     print(f"  Source: {args.source}")
@@ -99,11 +137,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"  Output: {args.output_dir}\n")
     if auto_enabled_upload:
         print("  Smoke requested: auto-enabling upload step\n")
-    if args.upload and not args.compile:
+    if selection.dashboards and args.upload and not args.compile:
         print("  Upload requested: auto-enabling compile step\n")
-    if auto_enabled_validate:
-        print("  Upload requested with --es-url: auto-enabling validate step\n")
-
     try:
         field_map = load_profile(args.field_profile)
     except ValueError as exc:
@@ -123,31 +158,117 @@ def main(argv: list[str] | None = None) -> None:
     if not field_map.logs_dataset_filter:
         from .field_map import derive_dataset_from_index
         field_map.logs_dataset_filter = derive_dataset_from_index(field_map.logs_index)
-    _load_live_field_capabilities(field_map, args)
+    _load_live_field_capabilities(field_map, args, verify=verify)
+    base_dir = Path(args.output_dir)
+    dashboards_dir = dashboard_output_dir(base_dir)
+    alerts_dir = alert_output_dir(base_dir)
 
+    dashboard_summary: dict[str, Any] | None = None
+    if selection.dashboards:
+        target_adapter = target_registry.get("kibana")()
+        dashboard_summary = _run_dashboard_pipeline(
+            args=args,
+            field_map=field_map,
+            output_dir=dashboards_dir,
+            dd_creds=dd_creds,
+            target_adapter=target_adapter,
+            compile_requested=compile_requested,
+            verify=verify,
+        )
+
+    alert_summary: dict[str, Any] | None = None
+    if selection.alerts:
+        print("\n  Extracting Datadog monitors...")
+        from .alert_pipeline import run_alert_pipeline
+
+        alert_summary = run_alert_pipeline(
+            args,
+            field_map=field_map,
+            output_dir=alerts_dir,
+            dd_creds=dd_creds,
+        )
+
+    _write_run_summary(
+        base_dir,
+        requested_assets=selection.label,
+        dashboard_summary=dashboard_summary,
+        alert_summary=alert_summary,
+    )
+
+
+def _clear_dashboard_artifacts(yaml_dir: Path, compiled_dir: Path) -> int:
+    removed = 0
+    if yaml_dir.exists():
+        for yaml_file in yaml_dir.glob("*.yaml"):
+            yaml_file.unlink()
+            removed += 1
+    if compiled_dir.exists():
+        for child in compiled_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            removed += 1
+    return removed
+
+
+def _run_dashboard_pipeline(
+    *,
+    args: argparse.Namespace,
+    field_map: Any,
+    output_dir: Path,
+    dd_creds: dict[str, str],
+    target_adapter: Any,
+    compile_requested: bool,
+    verify: bool | str = True,
+) -> dict[str, Any]:
     raw_dashboards = _extract(args)
     if not raw_dashboards:
-        print("  ERROR: no dashboards found")
+        print(
+            f"  ERROR: no Datadog dashboards found under {args.input_dir}. "
+            "Point --input-dir at a directory of Datadog dashboard JSON "
+            "exports (each with a top-level 'widgets' key).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    criteria = _selection_criteria_or_exit(args)
+    raw_dashboards = apply_cli_selection(
+        raw_dashboards,
+        selection_metadata_from_datadog_dashboard,
+        criteria,
+        label="datadog dashboard",
+        kind="dashboard(s)",
+    )
+    if not criteria.is_empty and not raw_dashboards:
+        print(
+            "  ERROR: no Datadog dashboards matched the --select-* criteria.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print(f"  Found {len(raw_dashboards)} dashboard(s)\n")
 
-    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     yaml_dir = output_dir / "yaml"
     yaml_dir.mkdir(parents=True, exist_ok=True)
+    removed_stale_artifacts = _clear_dashboard_artifacts(yaml_dir, output_dir / "compiled")
+    if removed_stale_artifacts:
+        print(f"  Removed {removed_stale_artifacts} stale dashboard artifact(s) from {output_dir}")
 
     all_results: list[DashboardResult] = []
     dashboard_outputs: list[tuple[DashboardResult, Any]] = []
+    used_yaml_stems: set[str] = set()
 
     for raw in raw_dashboards:
         dashboard = normalize_dashboard(raw)
         print(f"  Processing: {dashboard.title} ({len(dashboard.widgets)} widgets)")
 
         total_count = len(dashboard.widgets)
-        for w in dashboard.widgets:
-            total_count += len(w.children)
+        for widget in dashboard.widgets:
+            total_count += len(widget.children)
 
-        dr = DashboardResult(
+        dashboard_result = DashboardResult(
             dashboard_id=dashboard.id,
             dashboard_title=dashboard.title,
             source_file=dashboard.source_file,
@@ -155,41 +276,44 @@ def main(argv: list[str] | None = None) -> None:
         )
         preflight_result = _run_dashboard_preflight(dashboard, field_map, args)
         if preflight_result is not None:
-            dr.preflight_passed = preflight_result.passed
-            dr.preflight_issues = [_preflight_issue_to_dict(issue) for issue in preflight_result.issues]
+            dashboard_result.preflight_passed = preflight_result.passed
+            dashboard_result.preflight_issues = [
+                _preflight_issue_to_dict(issue) for issue in preflight_result.issues
+            ]
             _print_preflight_summary(preflight_result)
 
         panel_results: list[TranslationResult] = []
-
         for widget in dashboard.widgets:
-            result = _translate_widget(widget, field_map, args)
-            panel_results.append(result)
-
+            panel_results.append(_translate_widget(widget, field_map, args))
             if widget.children:
                 for child in widget.children:
-                    child_result = _translate_widget(child, field_map, args)
-                    panel_results.append(child_result)
+                    panel_results.append(_translate_widget(child, field_map, args))
 
-        dr.panel_results = panel_results
-
+        dashboard_result.panel_results = panel_results
         dashboard_yaml = generate_dashboard_yaml(
-            dashboard, panel_results, data_view=field_map.metric_index,
+            dashboard,
+            panel_results,
+            data_view=field_map.metric_index,
             metrics_dataset_filter=field_map.metrics_dataset_filter,
             logs_dataset_filter=field_map.logs_dataset_filter,
             logs_index=field_map.logs_index,
             field_map=field_map,
         )
 
-        stem = _safe_filename(dashboard.title)
+        stem = _allocate_yaml_stem(
+            title=dashboard.title,
+            dashboard_id=dashboard.id,
+            used_stems=used_yaml_stems,
+        )
         yaml_path = yaml_dir / f"{stem}.yaml"
         yaml_path.write_text(dashboard_yaml, encoding="utf-8")
-        dr.yaml_path = str(yaml_path)
+        dashboard_result.yaml_path = str(yaml_path)
 
         print(f"    YAML written: {yaml_path}")
 
-        dr.recompute_counts()
-        all_results.append(dr)
-        dashboard_outputs.append((dr, dashboard))
+        dashboard_result.recompute_counts()
+        all_results.append(dashboard_result)
+        dashboard_outputs.append((dashboard_result, dashboard))
 
     validation_records: list[dict[str, Any]] = []
     validation_summary: dict[str, Any] = {}
@@ -198,6 +322,7 @@ def main(argv: list[str] | None = None) -> None:
             dashboard_outputs,
             field_map,
             args,
+            verify=verify,
         )
     elif args.validate:
         print("  Validation: skipped (pass --es-url to enable)")
@@ -205,163 +330,64 @@ def main(argv: list[str] | None = None) -> None:
     if compile_requested:
         _compile_all_dashboards(all_results, output_dir, target_adapter)
     if args.upload and args.ensure_data_views:
-        _ensure_data_views(args, target_adapter, field_map)
+        _ensure_data_views(args, target_adapter, field_map, verify=verify)
     if args.upload:
-        _upload_all_dashboards(all_results, output_dir, args, target_adapter)
+        _upload_all_dashboards(all_results, output_dir, args, target_adapter, verify=verify)
 
     smoke_payload: dict[str, Any] = {}
     if args.smoke:
-        smoke_payload = _smoke_uploaded_dashboards(all_results, output_dir, args, target_adapter)
+        smoke_payload = _smoke_uploaded_dashboards(
+            all_results,
+            output_dir,
+            args,
+            target_adapter,
+            verify=verify,
+        )
 
+    # Source-side execution hits the live Datadog API per panel. Keep it
+    # strictly opt-in (--source-execution): otherwise translation must stay
+    # fully offline, even when DD_API_KEY/DD_APP_KEY happen to be in the
+    # environment. Forwarding creds unconditionally makes large offline/
+    # corpus runs block on api.datadoghq.com.
+    source_execution_enabled = getattr(args, "source_execution", False)
     verification_payload = annotate_results_with_verification(
         all_results,
         validation_records,
-        datadog_api_key=dd_creds.get("api_key", ""),
-        datadog_app_key=dd_creds.get("app_key", ""),
+        datadog_api_key=dd_creds.get("api_key", "") if source_execution_enabled else "",
+        datadog_app_key=dd_creds.get("app_key", "") if source_execution_enabled else "",
         datadog_site=dd_creds.get("site", "datadoghq.com"),
+        verify=verify,
     )
-    for result in all_results:
-        result.verification_summary = {
-            "green": sum(1 for pr in result.panel_results if (pr.verification_packet or {}).get("semantic_gate") == "Green"),
-            "yellow": sum(1 for pr in result.panel_results if (pr.verification_packet or {}).get("semantic_gate") == "Yellow"),
-            "red": sum(1 for pr in result.panel_results if (pr.verification_packet or {}).get("semantic_gate") == "Red"),
+    for dashboard_result in all_results:
+        dashboard_result.verification_summary = {
+            "green": sum(
+                1
+                for panel_result in dashboard_result.panel_results
+                if (panel_result.verification_packet or {}).get("semantic_gate") == "Green"
+            ),
+            "yellow": sum(
+                1
+                for panel_result in dashboard_result.panel_results
+                if (panel_result.verification_packet or {}).get("semantic_gate") == "Yellow"
+            ),
+            "red": sum(
+                1
+                for panel_result in dashboard_result.panel_results
+                if (panel_result.verification_packet or {}).get("semantic_gate") == "Red"
+            ),
         }
-
-    if getattr(args, "fetch_monitors", False):
-        print("\n  Extracting Datadog monitors...")
-        from observability_migration.adapters.source.datadog.extract import (
-            extract_monitors_from_api,
-            extract_monitors_from_files,
-        )
-        from observability_migration.core.assets.alerting import build_alerting_ir_from_datadog
-        from observability_migration.core.mapping import map_alerts_batch
-        import json as _mon_json
-
-        raw_monitors: list[dict[str, Any]] = []
-        if args.source == "api":
-            if not dd_creds.get("api_key") or not dd_creds.get("app_key"):
-                print("    WARNING: DD_API_KEY and DD_APP_KEY required for monitor extraction")
-            else:
-                mon_ids = [m.strip() for m in args.monitor_ids.split(",") if m.strip()] if args.monitor_ids else None
-                mon_query = getattr(args, "monitor_query", "") or ""
-                raw_monitors = extract_monitors_from_api(
-                    api_key=dd_creds["api_key"],
-                    app_key=dd_creds["app_key"],
-                    site=dd_creds.get("site", "datadoghq.com"),
-                    monitor_ids=mon_ids,
-                    monitor_query=mon_query,
-                )
-        else:
-            monitor_dir = Path(args.input_dir) / "monitors"
-            if monitor_dir.is_dir():
-                raw_monitors = extract_monitors_from_files(str(monitor_dir))
-            else:
-                print(f"    No monitors directory at {monitor_dir}")
-
-        if raw_monitors:
-            raw_dir = output_dir / "raw_monitors"
-            raw_dir.mkdir(parents=True, exist_ok=True)
-            raw_path = raw_dir / "datadog_monitors.json"
-            with raw_path.open("w") as fh:
-                _mon_json.dump(raw_monitors, fh, indent=2)
-            print(f"    Raw monitors saved: {raw_path} ({len(raw_monitors)} monitors)")
-
-            monitor_irs = []
-            for mon in raw_monitors:
-                ir = build_alerting_ir_from_datadog(mon, field_map=field_map)
-                monitor_irs.append(ir)
-
-            mapping_batch = map_alerts_batch(
-                monitor_irs,
-                data_view=getattr(args, "data_view", "metrics-*"),
-            )
-            monitor_validation_records = validate_monitor_queries(
-                monitor_irs,
-                es_url=args.es_url if getattr(args, "validate", False) else "",
-                es_api_key=getattr(args, "es_api_key", "") or "",
-            )
-            monitor_verification_lookup = build_monitor_verification_lookup(
-                monitor_irs,
-                monitor_validation_records,
-            )
-            payload_validation_by_alert_id: dict[str, Any] = {}
-            if getattr(args, "kibana_url", ""):
-                payload_preflight = run_alerting_preflight(
-                    args.kibana_url,
-                    api_key=getattr(args, "kibana_api_key", "") or "",
-                    space_id=getattr(args, "space_id", "") or "",
-                )
-                for item in mapping_batch.get("results", []):
-                    payload = item.get("mapping", {}).get("rule_payload", {})
-                    if not payload:
-                        continue
-                    payload_validation_by_alert_id[str(item.get("alert_id", "") or "")] = validate_rule_payload(
-                        payload.get("rule_type_id", ""),
-                        payload.get("params", {}),
-                        payload_preflight,
-                    )
-            monitor_comparison = build_monitor_comparison_results(
-                raw_monitors,
-                monitor_irs,
-                mapping_batch,
-                payload_validation_by_alert_id=payload_validation_by_alert_id,
-                verification_by_alert_id=monitor_verification_lookup,
-            )
-
-            by_tier = mapping_batch["summary"]["by_automation_tier"]
-            by_kind: dict[str, int] = {}
-            for ir in monitor_irs:
-                by_kind[ir.kind] = by_kind.get(ir.kind, 0) + 1
-
-            monitor_results_path = output_dir / "monitor_migration_results.json"
-            with monitor_results_path.open("w") as fh:
-                _mon_json.dump(build_monitor_migration_results(monitor_irs), fh, indent=2)
-            print(f"    Monitor migration results: {monitor_results_path}")
-
-            monitor_comparison_path = output_dir / "monitor_comparison_results.json"
-            with monitor_comparison_path.open("w") as fh:
-                _mon_json.dump(monitor_comparison, fh, indent=2)
-            print(f"    Monitor comparison results: {monitor_comparison_path}")
-
-            monitor_verification_path = output_dir / "monitor_verification_results.json"
-            monitor_validation_summary: dict[str, int] = {}
-            for record in monitor_validation_records:
-                status = str(record.get("status", "not_run") or "not_run")
-                monitor_validation_summary[status] = monitor_validation_summary.get(status, 0) + 1
-            with monitor_verification_path.open("w") as fh:
-                _mon_json.dump(
-                    {
-                        "total": len(monitor_validation_records),
-                        "by_status": monitor_validation_summary,
-                        "records": monitor_validation_records,
-                        "by_alert_id": monitor_verification_lookup,
-                    },
-                    fh,
-                    indent=2,
-                )
-            print(f"    Monitor verification results: {monitor_verification_path}")
-            print(f"    Total: {len(monitor_irs)}")
-            print(f"    By tier: {by_tier}")
-            print(f"    By kind: {by_kind}")
-
-            for result in all_results:
-                result.alert_results = [ir.to_dict() for ir in monitor_irs]
-                result.alert_summary = {
-                    "total": len(monitor_irs),
-                    "automated": by_tier.get("automated", 0),
-                    "draft_review": by_tier.get("draft_requires_review", 0),
-                    "manual_required": by_tier.get("manual_required", 0),
-                    "by_kind": dict(by_kind),
-                }
-        else:
-            print("    No monitors found")
 
     print_report(all_results)
 
     report_path = output_dir / "migration_report.json"
     manifest_path = output_dir / "migration_manifest.json"
     verification_path = output_dir / "verification_packets.json"
+    readiness_contract_path = output_dir / "target_readiness_contract.json"
     rollout_path = output_dir / "rollout_plan.json"
+    readiness_contract = build_target_readiness_contract(
+        [dashboard for _, dashboard in dashboard_outputs],
+        field_map,
+    )
     save_detailed_report(
         all_results,
         str(report_path),
@@ -372,14 +398,28 @@ def main(argv: list[str] | None = None) -> None:
     )
     save_migration_manifest(all_results, manifest_path)
     save_verification_packets(verification_payload, verification_path)
+    save_target_readiness_contract(readiness_contract, readiness_contract_path)
+    try:
+        schema_artifacts = write_schema_report_artifacts(output_dir)
+    except Exception as exc:  # best-effort: never fail a migration on derived reports
+        schema_artifacts = {}
+        print(f"  Schema report: skipped ({exc})")
     rollout_plan = build_rollout_plan(
         all_results,
         target_space=args.space_id or "",
         output_dir=str(output_dir),
-        smoke_report_path=(args.smoke_output or str(output_dir / "uploaded_dashboard_smoke_report.json")) if args.smoke else "",
+        smoke_report_path=(
+            args.smoke_output or str(output_dir / "uploaded_dashboard_smoke_report.json")
+        )
+        if args.smoke
+        else "",
     )
     save_rollout_plan(rollout_plan, rollout_path)
     print(f"  Verification packets saved: {verification_path}")
+    print(f"  Target readiness contract saved: {readiness_contract_path}")
+    if schema_artifacts:
+        print(f"  Schema change report saved: {schema_artifacts['schema_report']}")
+        print(f"  Telemetry contract saved: {schema_artifacts['telemetry_contract']}")
     print(f"  Migration manifest saved: {manifest_path}")
     print(f"  Rollout plan saved: {rollout_path}")
     review_queue = generate_review_queue(rollout_plan)
@@ -392,6 +432,54 @@ def main(argv: list[str] | None = None) -> None:
                 f"    {item['dashboard']}: risk={item['risk_score']} "
                 f"(G:{gates['green']} Y:{gates['yellow']} R:{gates['red']})"
             )
+
+    try:
+        rollout_run_id = (
+            rollout_plan.get("run_id", "")
+            if isinstance(rollout_plan, dict)
+            else getattr(rollout_plan, "run_id", "")
+        )
+        summary_view = build_summary_view(
+            all_results,
+            review_queue=review_queue,
+            run_id=rollout_run_id,
+        )
+        summary_md_path = output_dir / "migration_summary.md"
+        save_markdown_summary(summary_view, summary_md_path)
+        print(f"  Migration summary saved: {summary_md_path}")
+    except Exception as exc:  # best-effort: never fail a migration on the summary
+        print(f"  Migration summary: skipped ({exc})")
+
+    return {
+        "total": len(all_results),
+        "artifacts_dir": str(output_dir),
+        "validation_summary": validation_summary,
+    }
+
+
+def _write_run_summary(
+    base_dir: Path,
+    *,
+    requested_assets: str,
+    dashboard_summary: dict[str, Any] | None,
+    alert_summary: dict[str, Any] | None,
+) -> None:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    run_summary = {
+        "requested_assets": requested_assets,
+        "ran": {
+            "dashboards": dashboard_summary is not None,
+            "alerts": alert_summary is not None,
+        },
+    }
+    if dashboard_summary is not None:
+        run_summary["dashboards"] = dashboard_summary
+    if alert_summary is not None:
+        run_summary["alerts"] = alert_summary
+
+    summary_path = base_dir / "run_summary.json"
+    summary_path.write_text(json.dumps(run_summary, indent=2), encoding="utf-8")
+    print(f"  Run summary saved: {summary_path}")
 
 
 def _translate_widget(
@@ -407,7 +495,16 @@ def _translate_widget(
 def _extract(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Extract dashboards based on source type."""
     if args.source == "files":
-        return extract_dashboards_from_files(args.input_dir)
+        try:
+            return extract_dashboards_from_files(args.input_dir)
+        except FileNotFoundError:
+            print(
+                f"  ERROR: no Datadog dashboards found under {args.input_dir}. "
+                "Point --input-dir at a directory of Datadog dashboard JSON "
+                "exports (each with a top-level 'widgets' key).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if args.source == "api":
         creds = load_credentials_from_env(args.env_file)
@@ -420,19 +517,30 @@ def _extract(args: argparse.Namespace) -> list[dict[str, Any]]:
             app_key=creds["app_key"],
             site=creds["site"],
             dashboard_ids=dashboard_ids,
+            verify=_resolve_tls_from_args(args),
         )
 
     print(f"  ERROR: unknown source: {args.source}")
     sys.exit(1)
 
 
-def _load_live_field_capabilities(field_map: Any, args: argparse.Namespace) -> None:
+def _load_live_field_capabilities(
+    field_map: Any,
+    args: argparse.Namespace,
+    *,
+    verify: bool | str | None = None,
+) -> None:
     """Populate live target field capabilities when Elasticsearch access is configured."""
     if not args.es_url:
         print("  Target field capabilities: offline mode (pass --es-url to enable)")
         return
+    verify = _resolve_tls_from_args(args) if verify is None else verify
     try:
-        counts = field_map.load_live_field_capabilities(args.es_url, es_api_key=args.es_api_key)
+        counts = field_map.load_live_field_capabilities(
+            args.es_url,
+            es_api_key=args.es_api_key,
+            verify=verify,
+        )
     except Exception as exc:
         print(f"  WARNING: target field capability discovery failed: {exc}")
         return
@@ -449,13 +557,13 @@ def _run_dashboard_preflight(
     field_map: Any,
     args: argparse.Namespace,
 ) -> PreflightResult | None:
-    """Run Datadog preflight when capability data is available or explicitly requested."""
+    """Run Datadog preflight only when explicitly requested."""
     has_capabilities = bool(
         getattr(field_map, "field_caps", {})
         or getattr(field_map, "metric_field_caps", {})
         or getattr(field_map, "log_field_caps", {})
     )
-    if not (args.preflight or has_capabilities):
+    if not args.preflight:
         return None
     result = run_preflight(dashboard, field_map=field_map)
     if args.preflight and not has_capabilities and not result.issues:
@@ -508,6 +616,14 @@ def _compile_all_dashboards(
             dr.compiled = True
             dr.compiled_path = str(out_dir)
             print(f"    Compiled: {stem}")
+            layout_ok, layout_output = validate_compiled_layout(out_dir)
+            dr.layout_checked = True
+            if layout_ok:
+                dr.layout_error = ""
+                print(f"    Layout validated: {stem}")
+            else:
+                dr.layout_error = layout_output[:500]
+                print(f"    LAYOUT FAILED: {stem}: {layout_output[:200]}")
         else:
             dr.compile_error = output[:500]
             print(f"    COMPILE FAILED: {stem}: {output[:200]}")
@@ -518,16 +634,18 @@ class _DatadogValidationResolver:
 
     def __init__(
         self,
-        field_map: Any,
+        field_map: FieldMapProfile,
         index_pattern: str,
         *,
         es_url: str = "",
         es_api_key: str = "",
+        verify: bool | str = True,
     ) -> None:
         self._field_map = field_map
         self._index_pattern = index_pattern or field_map.metric_index
         self._es_url = es_url
         self._es_api_key = es_api_key
+        self._verify = verify
         self._concrete_index_cache: list[str] | None = None
 
     def _context(self) -> str:
@@ -540,10 +658,10 @@ class _DatadogValidationResolver:
     def _caps(self) -> dict[str, Any]:
         context = self._context()
         if context == "log":
-            return self._field_map.log_field_caps or self._field_map.field_caps
+            return cast(dict[str, Any], self._field_map.log_field_caps or self._field_map.field_caps)
         if context == "metric":
-            return self._field_map.metric_field_caps or self._field_map.field_caps
-        return self._field_map.field_caps
+            return cast(dict[str, Any], self._field_map.metric_field_caps or self._field_map.field_caps)
+        return cast(dict[str, Any], self._field_map.field_caps)
 
     def _candidate_fields(self, label: str) -> list[str]:
         candidates: list[str] = []
@@ -592,6 +710,7 @@ class _DatadogValidationResolver:
                 f"{self._es_url}/_resolve/index/{self._index_pattern}",
                 headers=self._es_headers(),
                 timeout=10,
+                verify=self._verify,
             )
             if resp.status_code != 200:
                 return []
@@ -684,6 +803,8 @@ def _validate_all_dashboards(
     dashboard_outputs: list[tuple[DashboardResult, Any]],
     field_map: Any,
     args: argparse.Namespace,
+    *,
+    verify: bool | str = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Validate emitted Datadog ES|QL queries against Elasticsearch."""
     print("\n  Validating ES|QL queries against Elasticsearch...")
@@ -694,6 +815,7 @@ def _validate_all_dashboards(
     fixed_empty = 0
     failed = 0
     skipped = 0
+    resolver_cache: dict[str, _DatadogValidationResolver] = {}
 
     for result, dashboard in dashboard_outputs:
         per_dashboard_counts: dict[str, int] = {}
@@ -703,17 +825,23 @@ def _validate_all_dashboards(
                 continue
             total_queries += 1
             _source_cmd, index_pattern = _query_source_and_index(panel_result.esql_query)
-            resolver = _DatadogValidationResolver(
-                field_map,
-                index_pattern or field_map.metric_index,
-                es_url=args.es_url,
-                es_api_key=args.es_api_key or "",
-            )
+            cache_key = index_pattern or field_map.metric_index
+            resolver = resolver_cache.get(cache_key)
+            if resolver is None:
+                resolver = _DatadogValidationResolver(
+                    field_map,
+                    cache_key,
+                    es_url=args.es_url,
+                    es_api_key=args.es_api_key or "",
+                    verify=verify,
+                )
+                resolver_cache[cache_key] = resolver
             validation_result = validate_query_with_fixes(
                 panel_result.esql_query,
                 args.es_url,
                 resolver,
                 es_api_key=args.es_api_key or None,
+                verify=verify,
             )
             status = validation_result["status"]
             per_dashboard_counts[status] = per_dashboard_counts.get(status, 0) + 1
@@ -774,14 +902,21 @@ def _validate_all_dashboards(
     return validation_records, validation_summary
 
 
-def _handle_list_dashboards(args: argparse.Namespace, target_adapter: Any) -> None:
+def _handle_list_dashboards(
+    args: argparse.Namespace,
+    target_adapter: Any,
+    *,
+    verify: bool | str | None = None,
+) -> None:
     if not args.kibana_url:
         print("  ERROR: --kibana-url is required for --list-dashboards")
         sys.exit(2)
+    verify = _resolve_tls_from_args(args) if verify is None else verify
     dashboards = target_adapter.list_dashboards(
         args.kibana_url,
         api_key=args.kibana_api_key,
         space_id=args.space_id,
+        verify=verify,
     )
     print(f"\n  Found {len(dashboards)} dashboard(s) in Kibana:\n")
     for d in dashboards:
@@ -789,7 +924,12 @@ def _handle_list_dashboards(args: argparse.Namespace, target_adapter: Any) -> No
         print(f"    {d.get('id', '???'):40s}  {title}")
 
 
-def _handle_delete_dashboards(args: argparse.Namespace, target_adapter: Any) -> None:
+def _handle_delete_dashboards(
+    args: argparse.Namespace,
+    target_adapter: Any,
+    *,
+    verify: bool | str | None = None,
+) -> None:
     if not args.kibana_url:
         print("  ERROR: --kibana-url is required for --delete-dashboards")
         sys.exit(2)
@@ -797,11 +937,13 @@ def _handle_delete_dashboards(args: argparse.Namespace, target_adapter: Any) -> 
     if not ids:
         print("  ERROR: provide comma-separated dashboard IDs")
         sys.exit(2)
+    verify = _resolve_tls_from_args(args) if verify is None else verify
     result = target_adapter.delete_dashboards(
         args.kibana_url,
         ids,
         api_key=args.kibana_api_key,
         space_id=args.space_id,
+        verify=verify,
     )
     print(f"\n  Cleared {len(result['cleared'])} dashboard(s)")
     if result["failed"]:
@@ -810,7 +952,13 @@ def _handle_delete_dashboards(args: argparse.Namespace, target_adapter: Any) -> 
     print(f"\n  Note: {result['note']}")
 
 
-def _ensure_data_views(args: argparse.Namespace, target_adapter: Any, field_map: Any) -> None:
+def _ensure_data_views(
+    args: argparse.Namespace,
+    target_adapter: Any,
+    field_map: Any,
+    *,
+    verify: bool | str | None = None,
+) -> None:
     patterns: list[str] = []
     if field_map.metric_index:
         patterns.append(field_map.metric_index)
@@ -819,12 +967,14 @@ def _ensure_data_views(args: argparse.Namespace, target_adapter: Any, field_map:
     if not patterns:
         patterns = ["metrics-*"]
     print(f"\n  Ensuring data views: {', '.join(patterns)}")
+    verify = _resolve_tls_from_args(args) if verify is None else verify
     try:
         created = target_adapter.ensure_data_views(
             args.kibana_url,
             data_view_patterns=patterns,
             api_key=args.kibana_api_key,
             space_id=args.space_id,
+            verify=verify,
         )
         for dv in created:
             print(f"    OK: {dv.get('title', '???')} (id={dv.get('id', '???')})")
@@ -837,6 +987,8 @@ def _upload_all_dashboards(
     output_dir: Path,
     args: argparse.Namespace,
     target_adapter: Any,
+    *,
+    verify: bool | str | None = None,
 ) -> None:
     """Upload compiled dashboards to Kibana via the shared target runtime."""
     from observability_migration.targets.kibana.compile import (
@@ -846,6 +998,7 @@ def _upload_all_dashboards(
 
     compiled_dir = output_dir / "compiled"
     compiled_dir.mkdir(parents=True, exist_ok=True)
+    verify = _resolve_tls_from_args(args) if verify is None else verify
     target_space = detect_space_id_from_kibana_url(args.kibana_url) or "default"
     upload_space = args.space_id or ""
     upload_kibana_url = kibana_url_for_space(args.kibana_url, upload_space)
@@ -869,6 +1022,11 @@ def _upload_all_dashboards(
             )
             print(f"    UPLOAD SKIPPED: {stem}: {dr.upload_error}")
             continue
+        if dr.layout_error:
+            dr.uploaded = False
+            dr.upload_error = f"Upload skipped because compiled layout validation failed: {dr.layout_error}"
+            print(f"    UPLOAD SKIPPED: {stem}: {dr.upload_error[:200]}")
+            continue
 
         out_dir = compiled_dir / Path(dr.yaml_path).stem
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -878,6 +1036,7 @@ def _upload_all_dashboards(
             kibana_url=args.kibana_url,
             space_id=upload_space,
             kibana_api_key=args.kibana_api_key,
+            verify=verify,
         )
         dr.uploaded = upload_result["success"]
         dr.upload_error = "" if upload_result["success"] else upload_result["output"][:500]
@@ -951,9 +1110,24 @@ def _apply_smoke_dashboard_state(
         result.smoke_error = f"{len(smoke_dashboard.get('empty_panels', []) or [])} empty panel(s)"
     elif status == "has_runtime_gaps":
         result.smoke_status = "not_runtime_checked"
-        result.smoke_error = (
-            f"{len(smoke_dashboard.get('not_runtime_checked_panels', []) or [])} panel(s) not runtime-checked"
-        )
+        total_gaps = len(smoke_dashboard.get("not_runtime_checked_panels", []) or [])
+        lens_by_design = len(smoke_dashboard.get("lens_by_design_panels", []) or [])
+        unexpected_gaps = len(smoke_dashboard.get("unexpected_runtime_gap_panels", []) or [])
+        if not lens_by_design and not unexpected_gaps:
+            for panel in smoke_dashboard.get("not_runtime_checked_panels", []) or []:
+                if panel.get("coverage_reason") == "lens_by_design":
+                    lens_by_design += 1
+                else:
+                    unexpected_gaps += 1
+        if lens_by_design and not unexpected_gaps:
+            result.smoke_error = f"{lens_by_design} panel(s) still Lens by design"
+        elif unexpected_gaps and not lens_by_design:
+            result.smoke_error = f"{unexpected_gaps} unexpected runtime coverage gap panel(s)"
+        else:
+            result.smoke_error = (
+                f"{total_gaps} panel(s) not runtime-checked "
+                f"({lens_by_design} still Lens by design, {unexpected_gaps} unexpected gap(s))"
+            )
     else:
         result.smoke_status = "not_run"
         result.smoke_error = ""
@@ -976,7 +1150,9 @@ def _smoke_uploaded_dashboards(
     results: list[DashboardResult],
     output_dir: Path,
     args: argparse.Namespace,
-    target_adapter: Any,
+    target_adapter: TargetAdapter,
+    *,
+    verify: bool | str | None = None,
 ) -> dict[str, Any]:
     uploaded_results = [result for result in results if result.uploaded]
     if not uploaded_results:
@@ -985,6 +1161,7 @@ def _smoke_uploaded_dashboards(
 
     smoke_output = Path(args.smoke_output) if args.smoke_output else output_dir / "uploaded_dashboard_smoke_report.json"
     dashboard_titles = [result.dashboard_title for result in uploaded_results if result.dashboard_title]
+    verify = _resolve_tls_from_args(args) if verify is None else verify
 
     print(f"\n  Smoke validating uploaded dashboards ({len(uploaded_results)})...")
     try:
@@ -1002,6 +1179,7 @@ def _smoke_uploaded_dashboards(
             browser_audit=args.browser_audit,
             capture_screenshots=args.capture_screenshots,
             chrome_binary=args.chrome_binary,
+            verify=verify,
         )
     except Exception as exc:
         message = str(exc)
@@ -1040,11 +1218,20 @@ def _smoke_uploaded_dashboards(
         )
 
     summary = smoke_payload.get("summary", {}) or {}
+    lens_by_design = summary.get("lens_by_design_panels", 0)
+    unexpected_runtime_gaps = summary.get("unexpected_runtime_gap_panels", 0)
+    runtime_gap_suffix = ""
+    if summary.get("not_runtime_checked_panels", 0):
+        runtime_gap_suffix = (
+            f" ({lens_by_design} still Lens by design, "
+            f"{unexpected_runtime_gaps} unexpected gap(s))"
+        )
     print(
         "    Smoke summary: "
         f"{summary.get('runtime_error_panels', 0)} runtime error panel(s), "
         f"{summary.get('empty_panels', 0)} empty panel(s), "
-        f"{summary.get('not_runtime_checked_panels', 0)} not runtime-checked panel(s), "
+        f"{summary.get('not_runtime_checked_panels', 0)} not runtime-checked panel(s)"
+        f"{runtime_gap_suffix}, "
         f"{summary.get('dashboards_with_layout_issues', 0)} dashboard(s) with layout issues"
     )
     if args.browser_audit:
@@ -1060,7 +1247,7 @@ def _smoke_uploaded_dashboards(
             f"{merge_summary.get('empty_result', 0)} empty_result, "
             f"{merge_summary.get('not_runtime_checked', 0)} not_runtime_checked"
         )
-    return smoke_payload
+    return cast(dict[str, Any], smoke_payload)
 
 
 def _safe_filename(title: str) -> str:
@@ -1071,6 +1258,34 @@ def _safe_filename(title: str) -> str:
     return name[:80] or "untitled"
 
 
+def _allocate_yaml_stem(
+    title: str,
+    dashboard_id: str | None,
+    used_stems: set[str],
+) -> str:
+    """Allocate a unique YAML stem to avoid filename collisions."""
+    base = _safe_filename(title)
+    if base not in used_stems:
+        used_stems.add(base)
+        return base
+
+    raw_dashboard_id = str(dashboard_id or "").strip()
+    if raw_dashboard_id:
+        id_suffix = _safe_filename(raw_dashboard_id)
+        id_candidate = f"{base}_{id_suffix[:24]}"
+        if id_candidate not in used_stems:
+            used_stems.add(id_candidate)
+            return id_candidate
+
+    index = 2
+    while True:
+        candidate = f"{base}_{index}"
+        if candidate not in used_stems:
+            used_stems.add(candidate)
+            return candidate
+        index += 1
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Migrate Datadog dashboards to Kibana",
@@ -1078,8 +1293,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--source", choices=["files", "api"], default="files",
-        help="Dashboard source: 'files' (JSON exports) or 'api' (Datadog API)",
+        "--source",
+        dest="source",
+        choices=["files", "api"],
+        default=None,
+        help="Input mode alias: 'files' (JSON exports) or 'api' (Datadog API). Prefer --input-mode.",
+    )
+    parser.add_argument(
+        "--input-mode",
+        dest="input_mode",
+        choices=["files", "api"],
+        default=None,
+        help="Input mode: 'files' (JSON exports) or 'api' (Datadog API).",
     )
     parser.add_argument(
         "--input-dir", default="infra/datadog/dashboards",
@@ -1090,12 +1315,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Output directory for generated YAML and reports",
     )
     parser.add_argument(
+        "--assets",
+        choices=ASSET_CHOICES,
+        default="dashboards",
+        help="Asset family to migrate: dashboards only, alerts only, or both",
+    )
+    parser.add_argument(
         "--field-profile", default="otel",
         help="Field mapping profile: otel, elastic_agent, prometheus, passthrough, or path to YAML",
     )
     parser.add_argument(
-        "--data-view", default="metrics-*",
-        help="Elasticsearch index pattern for metrics data",
+        "--data-view",
+        default=None,
+        help="Elasticsearch index pattern for metrics data (defaults from --field-profile)",
     )
     parser.add_argument(
         "--logs-index", default="",
@@ -1120,12 +1352,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Comma-separated Datadog dashboard IDs to fetch (API mode)",
     )
     parser.add_argument(
-        "--compile", action="store_true",
-        help="Compile YAML to NDJSON using kb-dashboard-cli",
+        "--compile",
+        dest="compile",
+        action="store_true",
+        default=True,
+        help="Compile YAML to NDJSON using kb-dashboard-cli (default)",
+    )
+    parser.add_argument(
+        "--no-compile",
+        dest="compile",
+        action="store_false",
+        help="Skip dashboard YAML compilation unless upload is requested",
     )
     parser.add_argument(
         "--validate", action="store_true",
         help="Validate emitted ES|QL against Elasticsearch before compile/upload",
+    )
+    parser.add_argument(
+        "--source-execution", action="store_true",
+        help=(
+            "Execute each panel's source query against the live Datadog API "
+            "to build source/target comparison verification packets. Requires "
+            "DD_API_KEY/DD_APP_KEY (env or --env-file). Off by default: "
+            "translation stays fully offline and never calls the Datadog API."
+        ),
     )
     parser.add_argument(
         "--upload", action="store_true",
@@ -1197,7 +1447,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--fetch-monitors", action="store_true",
-        help="Extract Datadog monitors and produce alert migration artifacts",
+        help=(
+            "Deprecated compatibility alias for alert-capable runs; prefer "
+            "--assets alerts or --assets all."
+        ),
+    )
+    parser.add_argument(
+        "--create-alert-rules", action="store_true",
+        help=(
+            "Create emitted Kibana alerting rules for alert-capable asset "
+            "selection (--assets alerts, --assets all, or the deprecated "
+            "--fetch-monitors alias). Rules are created disabled by default "
+            "and tagged 'obs-migration'. Requires alert-capable asset "
+            "selection, --kibana-url, and --kibana-api-key."
+        ),
     )
     parser.add_argument(
         "--monitor-ids", default="",
@@ -1207,8 +1470,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--monitor-query", default="",
         help="Datadog monitor search query for filtered discovery",
     )
+    parser.add_argument(
+        "--ca-cert", default=os.getenv("OBS_MIGRATE_CA_CERT", ""),
+        help=(
+            "Path to a custom CA certificate (bundle) used to verify TLS for all "
+            "outbound connections (Datadog, Elasticsearch, Kibana). "
+            "Defaults to OBS_MIGRATE_CA_CERT env var."
+        ),
+    )
+    parser.add_argument(
+        "--insecure", action="store_true",
+        default=_env_truthy_default("OBS_MIGRATE_INSECURE"),
+        help=(
+            "Disable TLS certificate verification for all outbound connections. "
+            "Insecure — for testing or trusted migration environments only. "
+            "Defaults to OBS_MIGRATE_INSECURE env var."
+        ),
+    )
+    add_selection_arguments(parser)
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.source and args.input_mode and args.source != args.input_mode:
+        parser.error("--source and --input-mode must match when both are provided")
+    input_mode = args.input_mode or args.source or "files"
+    args.input_mode = input_mode
+    args.source = input_mode
+    return args
 
 
 if __name__ == "__main__":

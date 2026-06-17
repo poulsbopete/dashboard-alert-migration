@@ -1,8 +1,12 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Property-based parser checks for Datadog query syntaxes."""
 
 from __future__ import annotations
 
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from observability_migration.adapters.source.datadog.log_parser import (
     log_ast_to_esql_where,

@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Migration reporting: console output and JSON report generation."""
 
 from __future__ import annotations
@@ -5,6 +8,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+
+from observability_migration.core.reporting.summary_md import (
+    AttentionItem,
+    DashboardRow,
+    GapSummary,
+    SummaryTotals,
+    SummaryView,
+)
 
 from .models import DashboardResult
 
@@ -161,9 +172,40 @@ def build_monitor_comparison_results(
     }
 
 
+_STRUCTURAL_WIDGET_TYPES = frozenset({"group", "powerpack"})
+
+
+def _group_count(dr: DashboardResult) -> int:
+    """Number of structural group/powerpack widgets on a dashboard.
+
+    These are Datadog's structural containers (analogous to Grafana row
+    containers): laid-out parents that hold real widgets. The translator marks
+    them ``status == "skipped"`` and they don't become Kibana panels.
+    """
+    return sum(
+        1
+        for pr in dr.panel_results
+        if pr.dd_widget_type in _STRUCTURAL_WIDGET_TYPES
+    )
+
+
+def _elements_phrase(widgets: int, groups: int) -> str:
+    """Render ``N total (X widgets [+ Y groups])`` with correct pluralisation."""
+    total = widgets + groups
+    widget_word = "widget" if widgets == 1 else "widgets"
+    if groups:
+        group_word = "group" if groups == 1 else "groups"
+        breakdown = f"{widgets} {widget_word} + {groups} {group_word}"
+    else:
+        breakdown = f"{widgets} {widget_word}"
+    return f"{total} total ({breakdown})"
+
+
 def print_report(results: list[DashboardResult]) -> None:
     """Print a human-readable migration report to stdout."""
+    total_elements = 0
     total_widgets = 0
+    total_groups = 0
     total_ok = 0
     total_warning = 0
     total_manual = 0
@@ -177,20 +219,31 @@ def print_report(results: list[DashboardResult]) -> None:
 
     for dr in results:
         dr.recompute_counts()
-        total_widgets += dr.total_widgets
+        groups = _group_count(dr)
+        renderable_widgets = dr.total_widgets - groups
+        # r.skipped includes the structural groups (they're status="skipped"
+        # in the model); pull them out so the widget-level Skip count reflects
+        # only genuine widget skips.
+        widget_skip = max(dr.skipped - groups, 0)
+        total_elements += dr.total_widgets
+        total_widgets += renderable_widgets
+        total_groups += groups
         total_ok += dr.migrated
         total_warning += dr.migrated_with_warnings
         total_manual += dr.requires_manual
         total_nf += dr.not_feasible
-        total_skipped += dr.skipped
+        total_skipped += widget_skip
         total_blocked += dr.blocked
 
         print(f"\n  Dashboard: {dr.dashboard_title}")
         print(f"    Source:  {dr.source_file}")
-        print(f"    Panels:  {dr.total_widgets}")
-        print(f"    OK:      {dr.migrated}  Warning: {dr.migrated_with_warnings}  "
+        print(f"    Elements: {_elements_phrase(renderable_widgets, groups)}")
+        print(f"    Renderable widgets: {renderable_widgets}")
+        print(f"    OK: {dr.migrated}  Warning: {dr.migrated_with_warnings}  "
               f"Manual: {dr.requires_manual}  NF: {dr.not_feasible}  "
-              f"Skip: {dr.skipped}  Blocked: {dr.blocked}")
+              f"Skip: {widget_skip}  Blocked: {dr.blocked}")
+        if groups:
+            print(f"    Groups: {groups} (structural, not migrated)")
 
         if dr.compile_error:
             print(f"    COMPILE ERROR: {dr.compile_error}")
@@ -235,10 +288,15 @@ def print_report(results: list[DashboardResult]) -> None:
                 print(f"      ... and {len(nf_panels) - 5} more")
 
     print(f"\n{'=' * 70}")
-    print(f"TOTALS: {len(results)} dashboards, {total_widgets} widgets")
+    print(
+        f"TOTALS: {len(results)} dashboards, "
+        f"{_elements_phrase(total_widgets, total_groups).replace('total', 'elements', 1)}"
+    )
     print(f"  OK: {total_ok}  Warning: {total_warning}  Manual: {total_manual}  "
           f"NF: {total_nf}  Skip: {total_skipped}  Blocked: {total_blocked}")
 
+    # Success rate is panel-quality, so it's relative to renderable widgets
+    # (groups can't fail or succeed — they're structural).
     if total_widgets > 0:
         success_rate = (total_ok + total_warning) / total_widgets * 100
         print(f"  Success rate: {success_rate:.1f}%")
@@ -403,3 +461,108 @@ def save_detailed_report(
         encoding="utf-8",
     )
     print(f"  Detailed report saved: {output_path}")
+
+
+def build_summary_view(results, *, review_queue=None, run_id: str = "") -> SummaryView:
+    """Build a normalized SummaryView from a Datadog DashboardResult list."""
+    import time as _time
+
+    review_queue = review_queue or []
+
+    def _renderable(dr):
+        return [pr for pr in dr.panel_results if pr.kibana_type != "group"]
+
+    def _gate(pr, name):
+        return (pr.verification_packet or {}).get("semantic_gate") == name
+
+    for dr in results:
+        dr.recompute_counts()
+
+    elements_total = sum(len(_renderable(dr)) for dr in results)
+    groups_total = sum(1 for dr in results for pr in dr.panel_results if pr.kibana_type == "group")
+    totals = SummaryTotals(
+        dashboards=len(results),
+        elements_total=elements_total,
+        migrated=sum(dr.migrated for dr in results),
+        warnings=sum(dr.migrated_with_warnings for dr in results),
+        manual=sum(dr.requires_manual for dr in results),
+        not_feasible=sum(dr.not_feasible for dr in results),
+        skipped=max(sum(dr.skipped for dr in results) - groups_total, 0),
+        green=sum(1 for dr in results for pr in _renderable(dr) if _gate(pr, "Green")),
+        yellow=sum(1 for dr in results for pr in _renderable(dr) if _gate(pr, "Yellow")),
+        red=sum(1 for dr in results for pr in _renderable(dr) if _gate(pr, "Red")),
+        compiled_ok=sum(1 for dr in results if dr.compiled),
+        compiled_total=len(results),
+        uploaded_ok=sum(1 for dr in results if dr.uploaded),
+        upload_attempted=sum(1 for dr in results if dr.upload_attempted),
+    )
+
+    risk_by_title = {item.get("dashboard"): item.get("risk_score") for item in review_queue}
+
+    dashboards: list[DashboardRow] = []
+    attention: list[AttentionItem] = []
+    warning_items: list[AttentionItem] = []
+    for dr in results:
+        renderable = _renderable(dr)
+        dashboards.append(
+            DashboardRow(
+                title=dr.dashboard_title,
+                elements=len(renderable),
+                migrated=dr.migrated,
+                warnings=dr.migrated_with_warnings,
+                manual=dr.requires_manual,
+                not_feasible=dr.not_feasible,
+                compiled=dr.compiled,
+                compile_error=dr.compile_error,
+                risk_score=risk_by_title.get(dr.dashboard_title),
+                rollout_state="",
+            )
+        )
+        seen: set = set()
+        for pr in renderable:
+            query = "; ".join(pr.source_queries) if pr.source_queries else ""
+            if pr.status in ("not_feasible", "requires_manual", "blocked"):
+                attention.append(
+                    AttentionItem(
+                        dashboard=dr.dashboard_title,
+                        panel=pr.title,
+                        status=pr.status,
+                        reasons=list(pr.reasons),
+                        source_query=query,
+                    )
+                )
+                seen.add(pr.title)
+            elif pr.status == "warning" or (pr.status == "ok" and pr.warnings):
+                warning_items.append(
+                    AttentionItem(
+                        dashboard=dr.dashboard_title,
+                        panel=pr.title,
+                        status="warning",
+                        reasons=list(pr.reasons) or list(pr.warnings),
+                    )
+                )
+        for pr in renderable:
+            if _gate(pr, "Red") and pr.title not in seen:
+                query = "; ".join(pr.source_queries) if pr.source_queries else ""
+                attention.append(
+                    AttentionItem(
+                        dashboard=dr.dashboard_title,
+                        panel=pr.title,
+                        status="red",
+                        reasons=list(pr.reasons),
+                        source_query=query,
+                    )
+                )
+                seen.add(pr.title)
+
+    return SummaryView(
+        source="datadog",
+        element_noun="widget",
+        run_id=run_id,
+        timestamp=_time.time(),
+        totals=totals,
+        dashboards=dashboards,
+        attention=attention,
+        warnings=warning_items,
+        gaps=GapSummary(),
+    )

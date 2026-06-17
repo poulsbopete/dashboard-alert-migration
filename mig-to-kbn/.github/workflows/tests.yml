@@ -1,0 +1,258 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    name: Ruff
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync locked Python dependency environment
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-ruff \
+            uv sync --locked --python 3.11 --all-extras
+
+      - name: Check source license headers
+        run: .venv-ruff/bin/python scripts/check_source_headers.py
+
+      - name: Run ruff
+        run: .venv-ruff/bin/python -m ruff check .
+
+  mypy:
+    name: Mypy (targeted)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync locked Python dependency environment
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-mypy \
+            uv sync --locked --python 3.11 --all-extras
+
+      - name: Run targeted mypy
+        run: .venv-mypy/bin/python -m mypy
+
+  cli-smoke:
+    name: CLI smoke
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync locked Python dependency environment
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-cli \
+            uv sync --locked --python 3.11 --all-extras
+
+      - name: Run CLI smoke commands
+        run: |
+          .venv-cli/bin/obs-migrate --help >/dev/null
+          .venv-cli/bin/obs-migrate migrate --help >/dev/null
+
+  pytest:
+    name: Pytest (${{ matrix.python-version }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+
+      - name: Sync locked Python dependency environment
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-tests \
+            uv sync --locked --python "${{ matrix.python-version }}" --all-extras
+
+      - name: Run pytest (3.12, 3.13)
+        if: matrix.python-version != '3.11'
+        run: .venv-tests/bin/python -m pytest tests/ --ignore=tests/e2e/ -x -q
+
+      - name: Run pytest with coverage (3.11)
+        if: matrix.python-version == '3.11'
+        run: |
+          .venv-tests/bin/python -m pytest tests/ --ignore=tests/e2e/ -x -q \
+            --cov=observability_migration \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=75
+
+      - name: Upload coverage report
+        if: matrix.python-version == '3.11' && (success() || failure())
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 30
+
+  pytest-e2e:
+    name: E2E pytest suite
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync locked Python dependency environment
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-e2e \
+            uv sync --locked --python 3.11 --all-extras
+
+      - name: Run e2e pytest suite
+        run: .venv-e2e/bin/python -m pytest tests/e2e/ -x -q
+
+  build-and-smoke:
+    name: Build and packaging smoke
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - name: Install wheel in isolated environment and smoke test
+        run: |
+          uv venv .venv-wheel --python 3.11
+          uv pip install --python .venv-wheel dist/*.whl
+          .venv-wheel/bin/obs-migrate --help >/dev/null
+          .venv-wheel/bin/obs-migrate migrate --help >/dev/null
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  package-smoke:
+    name: Clean-install package smoke (${{ matrix.python-version }})
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.11"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel --outdir dist
+
+      - name: Install wheel into a clean venv
+        run: |
+          python -m venv /tmp/cleanenv
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            /tmp/cleanenv/bin/pip install "$(ls dist/*.whl)[all]"
+          else
+            # 3.11: kb tools require 3.12, so install base + rely on uvx fallback
+            /tmp/cleanenv/bin/pip install "$(ls dist/*.whl)[grafana,datadog]"
+          fi
+
+      - name: Grafana end-to-end (offline) produces NDJSON
+        run: |
+          mkdir -p /tmp/gin && cp infra/grafana/dashboards/home.json /tmp/gin/
+          /tmp/cleanenv/bin/grafana-migrate --source files --input-dir /tmp/gin \
+            --output-dir /tmp/gout --assets dashboards
+          test -f "$(find /tmp/gout -name compiled_dashboards.ndjson | head -1)"
+
+      - name: Datadog end-to-end (offline) produces NDJSON
+        run: |
+          mkdir -p /tmp/ddin && cp infra/datadog/dashboards/sample_dashboard.json /tmp/ddin/
+          /tmp/cleanenv/bin/datadog-migrate --input-dir /tmp/ddin \
+            --output-dir /tmp/ddout --compile
+          test -f "$(find /tmp/ddout -name compiled_dashboards.ndjson | head -1)"

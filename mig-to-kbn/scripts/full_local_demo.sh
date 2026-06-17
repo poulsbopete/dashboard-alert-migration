@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 set -euo pipefail
 
@@ -10,6 +13,7 @@ KIBANA_URL="${KIBANA_URL:-http://localhost:${LOCAL_KIBANA_PORT:-15601}}"
 DATA_VIEW="${DATA_VIEW:-metrics-*}"
 ESQL_INDEX="${ESQL_INDEX:-metrics-*}"
 LOGS_INDEX="${LOGS_INDEX:-logs-*}"
+DATASET_FILTER="${DATASET_FILTER:-prometheusreceiver.otel}"
 INPUT_DIR="${INPUT_DIR:-$ROOT/infra/grafana/dashboards}"
 OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/validation/full_local_demo_run}"
 TIME_FROM="${TIME_FROM:-now-1h}"
@@ -25,15 +29,15 @@ RUN_LABEL="full bundled dashboard set"
 TEMP_INPUT_DIR=""
 
 BUNDLED_SAMPLE_FILES=(
-  "otel-collector-dashboard.json"
   "node-exporter-full.json"
-  "loki-dashboard.json"
+  "k8s-views-global.json"
+  "diverse-panels-test.json"
 )
 
 BUNDLED_SAMPLE_TITLES=(
-  "AWS OpenTelemetry Collector"
   "Node Exporter Full"
-  "Loki Dashboard quick search"
+  "Kubernetes / Views / Global"
+  "Diverse Panel Types Test"
 )
 
 usage() {
@@ -42,7 +46,7 @@ Usage: bash scripts/full_local_demo.sh [options]
 
 Runs the local OTLP validation flow against the repo's bundled dashboards.
 By default this runs the full dashboard set from infra/grafana/dashboards.
-Use --sample-set bundled to run the former three-dashboard sample flow.
+Use --sample-set bundled to run the curated three-dashboard sample flow.
 
 The script:
 1. Ensures the local lab is running.
@@ -208,6 +212,9 @@ else
   RUN_INPUT_DIR="$INPUT_DIR"
 fi
 
+DASHBOARD_YAML_DIR="$OUTPUT_DIR/dashboards/yaml"
+RUN_SUMMARY="$OUTPUT_DIR/run_summary.json"
+
 check_command docker
 check_command curl
 check_command uvx
@@ -273,9 +280,11 @@ grafana_cmd=(
   --source files
   --input-dir "$RUN_INPUT_DIR"
   --output-dir "$OUTPUT_DIR"
+  --assets dashboards
   --data-view "$DATA_VIEW"
   --esql-index "$ESQL_INDEX"
   --logs-index "$LOGS_INDEX"
+  --dataset-filter "$DATASET_FILTER"
   --es-url "$ES_URL"
   --kibana-url "$KIBANA_URL"
   --smoke
@@ -301,6 +310,8 @@ Full local demo completed.
 
 Artifacts:
   Migration output: $OUTPUT_DIR
+  Dashboard YAML:   $DASHBOARD_YAML_DIR
+  Run summary:      $RUN_SUMMARY
   Smoke report:     $OUTPUT_DIR/upload_smoke_report.json
   Browser audit:    $OUTPUT_DIR/browser_qa
 EOF

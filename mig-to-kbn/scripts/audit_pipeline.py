@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Audit and trace the migration pipeline for all available dashboards.
 
 Captures every intermediate layer for semantic review and can generate
@@ -15,7 +18,7 @@ Usage:
     python scripts/audit_pipeline.py --source datadog --format markdown
 
     # Specific dashboard files
-    python scripts/audit_pipeline.py --files infra/grafana/dashboards/loki-dashboard.json
+    python scripts/audit_pipeline.py --files infra/grafana/dashboards/node-exporter-full.json
 
     # Update docs — writes all three trace docs:
     #   docs/pipeline-trace.md  (shared)
@@ -30,11 +33,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import tempfile
-import textwrap
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -272,11 +273,11 @@ def _audit_grafana_dashboard(dashboard_path: Path, data_view: str) -> DashboardA
 # ---------------------------------------------------------------------------
 
 def _audit_datadog_dashboard(dashboard_path: Path, data_view: str) -> DashboardAudit:
+    from observability_migration.adapters.source.datadog.field_map import OTEL_PROFILE
+    from observability_migration.adapters.source.datadog.generate import generate_dashboard_yaml
     from observability_migration.adapters.source.datadog.normalize import normalize_dashboard
     from observability_migration.adapters.source.datadog.planner import plan_widget
     from observability_migration.adapters.source.datadog.translate import translate_widget
-    from observability_migration.adapters.source.datadog.generate import generate_dashboard_yaml
-    from observability_migration.adapters.source.datadog.field_map import OTEL_PROFILE
 
     raw = json.loads(dashboard_path.read_text())
     try:
@@ -401,7 +402,7 @@ def _audit_datadog_dashboard(dashboard_path: Path, data_view: str) -> DashboardA
         file_name=dashboard_path.name,
         dashboard_title=dashboard.title,
         dashboard_id=dashboard.id,
-        total_panels=len(dashboard.widgets),
+        total_panels=len(panels_audit),
         status_counts=status_counts,
         panels=panels_audit,
         yaml_content=yaml_str,
@@ -538,20 +539,26 @@ def generate_pipeline_trace_md(audits: list[DashboardAudit]) -> str:
     lines.append("real dashboards through every layer of the migration pipeline.\n")
     lines.append("Each panel shows: source query → translation trace → translated query → verdict.\n")
 
-    # Summary table
+    # Summary table — rows (type=="row") are structural containers, not panels,
+    # so the Panels column and the Skipped column both exclude them. A separate
+    # ``Rows`` column surfaces the count without conflating it with skipped panels.
     lines.append("## Dashboard Summary\n")
-    lines.append("| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped | Rows |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for a in audits:
         c = a.status_counts
+        row_count = sum(1 for p in a.panels if p.source_panel_type == "row")
+        audited_panels = len(a.panels) - row_count
+        panel_skipped = max(c.get("skipped", 0) - row_count, 0)
         lines.append(
             f"| {a.source} | {_escape_md(a.dashboard_title or a.file_name)} "
-            f"| {a.total_panels} "
+            f"| {audited_panels} "
             f"| {c.get('migrated', c.get('ok', 0))} "
             f"| {c.get('migrated_with_warnings', c.get('warning', 0))} "
             f"| {c.get('requires_manual', 0)} "
             f"| {c.get('not_feasible', 0)} "
-            f"| {c.get('skipped', 0)} |"
+            f"| {panel_skipped} "
+            f"| {row_count} |"
         )
     lines.append("")
 
@@ -571,9 +578,10 @@ def generate_pipeline_trace_md(audits: list[DashboardAudit]) -> str:
 
     # Per-dashboard detail
     for a in audits:
-        lines.append(f"---\n")
+        audited_panels = len(a.panels)
+        lines.append("---\n")
         lines.append(f"## {a.source.title()}: {a.dashboard_title or a.file_name}\n")
-        lines.append(f"**File:** `{a.file_name}` — **Panels:** {a.total_panels}\n")
+        lines.append(f"**File:** `{a.file_name}` — **Panels:** {audited_panels}\n")
 
         lines.append("| Panel | Source Type → Kibana | Status | Verdict | Source Query | Translated Query |")
         lines.append("|---|---|---|---|---|---|")
@@ -593,7 +601,7 @@ def generate_pipeline_trace_md(audits: list[DashboardAudit]) -> str:
         # Detailed traces for non-trivial panels
         interesting = [p for p in a.panels if p.translated_query or p.trace or p.query_ir]
         if interesting:
-            lines.append(f"### Detailed Traces\n")
+            lines.append("### Detailed Traces\n")
             for p in interesting[:15]:
                 lines.append(f"#### {p.title or '(untitled)'}\n")
 
@@ -653,7 +661,7 @@ def generate_pipeline_trace_md(audits: list[DashboardAudit]) -> str:
                 lines.append(f"**Verdict:** {_verdict(p)}\n")
 
         if a.controls:
-            lines.append(f"### Controls / Variables\n")
+            lines.append("### Controls / Variables\n")
             for ctrl in a.controls:
                 if isinstance(ctrl, dict):
                     label = ctrl.get("label", ctrl.get("fieldName", "—"))
@@ -664,14 +672,14 @@ def generate_pipeline_trace_md(audits: list[DashboardAudit]) -> str:
             lines.append("")
 
         if a.template_variables:
-            lines.append(f"### Template Variables\n")
+            lines.append("### Template Variables\n")
             for tv in a.template_variables:
                 lines.append(f"- `${tv.get('name', '?')}` → tag: `{tv.get('tag', '—')}`, "
                              f"default: `{tv.get('default', '*')}`")
             lines.append("")
 
         if a.feature_gap_summary:
-            lines.append(f"### Feature Gap Summary\n")
+            lines.append("### Feature Gap Summary\n")
             for k, v in a.feature_gap_summary.items():
                 lines.append(f"- **{k}:** {v}")
             lines.append("")
@@ -763,22 +771,28 @@ DATADOG_DOCS_PATH = ROOT / "docs" / "sources" / "datadog-trace.md"
 
 
 def _section_dashboard_summary(audits: list[DashboardAudit], *, source: str = "all") -> str:
+    # Rows (type=="row") are structural containers, not panels; they're tracked
+    # in a separate ``Rows`` column and excluded from the panel + skipped counts.
     lines = [
-        "| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped |",
-        "|--------|-----------|--------|----------|----------|--------|--------------|---------|",
+        "| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped | Rows |",
+        "|--------|-----------|--------|----------|----------|--------|--------------|---------|------|",
     ]
     total_panels = 0
     for a in audits:
         c = a.status_counts
-        total_panels += a.total_panels
+        row_count = sum(1 for p in a.panels if p.source_panel_type == "row")
+        audited_panels = len(a.panels) - row_count
+        panel_skipped = max(c.get("skipped", 0) - row_count, 0)
+        total_panels += audited_panels
         lines.append(
             f"| {a.source} | {_escape_md(a.dashboard_title or a.file_name)} "
-            f"| {a.total_panels} "
+            f"| {audited_panels} "
             f"| {c.get('migrated', c.get('ok', 0))} "
             f"| {c.get('migrated_with_warnings', c.get('warning', 0))} "
             f"| {c.get('requires_manual', 0)} "
             f"| {c.get('not_feasible', 0)} "
-            f"| {c.get('skipped', 0)} |"
+            f"| {panel_skipped} "
+            f"| {row_count} |"
         )
     lines.append("")
     if source == "grafana":
@@ -839,9 +853,10 @@ def _section_warning_patterns(audits: list[DashboardAudit]) -> str:
 def _section_per_dashboard_traces(audits: list[DashboardAudit]) -> str:
     lines: list[str] = []
     for a in audits:
+        audited_panels = len(a.panels)
         lines.append(f"### {a.source.title()}: {a.dashboard_title or a.file_name}")
         lines.append("")
-        lines.append(f"**File:** `{a.file_name}` — **Panels:** {a.total_panels}")
+        lines.append(f"**File:** `{a.file_name}` — **Panels:** {audited_panels}")
         lines.append("")
         lines.append("| Panel | Source Type → Kibana | Status | Verdict | Source Query | Translated Query |")
         lines.append("|-------|---------------------|--------|---------|-------------|-----------------|")
@@ -974,12 +989,27 @@ def _section_appendix_stats(audits: list[DashboardAudit]) -> str:
     for a in audits:
         for k, v in a.status_counts.items():
             totals[k] = totals.get(k, 0) + v
-    total = sum(totals.values())
-    if total == 0:
+    grand_total = sum(totals.values())
+    if grand_total == 0:
         return "No panels audited."
 
+    # Match print_report's accounting: Grafana ``type=="row"`` containers are
+    # structural elements, not panels — pull them out so percentages and the
+    # "renderable panels" number describe migratable content only.
+    total_rows = sum(
+        1 for a in audits for p in a.panels if p.source_panel_type == "row"
+    )
+    total_panel_skipped = max(totals.get("skipped", 0) - total_rows, 0)
+    total = grand_total - total_rows
+
+    if total_rows:
+        elements_line = f"{grand_total} total ({total} panels + {total_rows} rows)"
+    else:
+        elements_line = f"{grand_total} total ({total} panels)"
+
     lines = ["From the latest trace run:", "", "```"]
-    lines.append(f"Total panels found:  {total}")
+    lines.append(f"Elements:            {elements_line}")
+    lines.append(f"Renderable panels:   {total}")
     for key, label in [
         ("migrated", "Migrated"),
         ("migrated_with_warnings", "With warnings"),
@@ -987,12 +1017,13 @@ def _section_appendix_stats(audits: list[DashboardAudit]) -> str:
         ("warning", "Warning"),
         ("requires_manual", "Requires manual"),
         ("not_feasible", "Not feasible"),
-        ("skipped", "Skipped"),
     ]:
         count = totals.get(key, 0)
         if count:
-            pct = count / total * 100
+            pct = count / total * 100 if total > 0 else 0.0
             lines.append(f"  {label + ':':<20s} {count:>4d} ({pct:.1f}%)")
+    pct = total_panel_skipped / total * 100 if total > 0 else 0.0
+    lines.append(f"  {'Skipped:':<20s} {total_panel_skipped:>4d} ({pct:.1f}%)")
     lines.append("```")
 
     verdicts: dict[str, int] = {}
@@ -1077,7 +1108,7 @@ def _fill_template(template_text: str, audits: list[DashboardAudit], *, source: 
             end = result.index(close_tag) + len(close_tag)
             result = result[:start] + open_tag + "\n" + content + "\n" + close_tag + result[end:]
 
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
     last_tag = None
     for tag in ("NOT_FEASIBLE_BREAKDOWN", "APPENDIX_STATS", "WARNING_PATTERNS"):
         close = f"<!-- /GENERATED:{tag} -->"

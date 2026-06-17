@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import importlib.util
 import os
 import pathlib
@@ -49,6 +52,21 @@ class ValidatePanelQueriesScriptTests(unittest.TestCase):
         self.assertIn("cpu", fields)
         self.assertNotIn("inner_val", fields)
         self.assertNotIn("node_cpu_seconds_total_count", fields)
+
+    def test_phase2_validate_executes_native_promql_queries(self):
+        query = 'PROMQL index=metrics-prometheus-* step=1m value=(sum(rate(process_cpu_seconds_total[5m])))'
+
+        with mock.patch.object(
+            validate_panel_queries,
+            "_es_request",
+            return_value={"columns": [], "values": []},
+        ) as es_request:
+            status, detail, rows = validate_panel_queries.phase2_validate(query)
+
+        self.assertEqual(status, "OK")
+        self.assertEqual(detail, "valid")
+        self.assertEqual(rows, 0)
+        es_request.assert_called_once_with("POST", "/_query", {"query": query})
 
 
 if __name__ == "__main__":

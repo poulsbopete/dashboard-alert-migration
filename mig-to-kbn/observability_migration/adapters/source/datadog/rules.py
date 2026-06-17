@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Executable registries and extension catalog for the Datadog adapter."""
 
 from __future__ import annotations
@@ -10,7 +13,6 @@ from observability_migration.core.extensions import (
 )
 
 from .extension_schema import FieldMapProfileModel
-
 
 PLANNER_PRECHECKS = RuleRegistry("planner_prechecks", "plan")
 METRIC_PLANNERS = RuleRegistry("metric_planners", "plan")

@@ -1,14 +1,17 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Customer preflight validation: pre-ingest readiness assessment."""
 
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import requests
-
 
 # ---------------------------------------------------------------------------
 # Source-side probes (Prometheus / Loki metadata — no ES data needed)
@@ -20,6 +23,7 @@ def probe_source_metric_inventory(
     required_labels: set[str] | None = None,
     *,
     timeout: int = 15,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """Query Prometheus metadata to build a metric and label inventory.
 
@@ -44,7 +48,7 @@ def probe_source_metric_inventory(
 
     try:
         resp = requests.get(
-            f"{base}/api/v1/label/__name__/values", timeout=timeout,
+            f"{base}/api/v1/label/__name__/values", timeout=timeout, verify=verify,
         )
         resp.raise_for_status()
         body = resp.json()
@@ -56,7 +60,7 @@ def probe_source_metric_inventory(
         return result
 
     try:
-        resp = requests.get(f"{base}/api/v1/labels", timeout=timeout)
+        resp = requests.get(f"{base}/api/v1/labels", timeout=timeout, verify=verify)
         resp.raise_for_status()
         body = resp.json()
         if body.get("status") == "success":
@@ -88,6 +92,7 @@ def probe_target_readiness(
     *,
     timeout: int = 10,
     es_api_key: str | None = None,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """Check Elasticsearch cluster health, index templates, and data streams.
 
@@ -110,7 +115,7 @@ def probe_target_readiness(
         headers["Authorization"] = f"ApiKey {es_api_key}"
 
     try:
-        resp = requests.get(f"{base}/_cluster/health", headers=headers, timeout=timeout)
+        resp = requests.get(f"{base}/_cluster/health", headers=headers, timeout=timeout, verify=verify)
         if resp.status_code == 200:
             health = resp.json()
             result["cluster_health"] = {
@@ -118,6 +123,15 @@ def probe_target_readiness(
                 "number_of_nodes": health.get("number_of_nodes", 0),
                 "number_of_data_nodes": health.get("number_of_data_nodes", 0),
                 "active_shards": health.get("active_shards", 0),
+            }
+        elif resp.status_code == 410:
+            result["cluster_health"] = {
+                "status": "serverless",
+                "number_of_nodes": 0,
+                "number_of_data_nodes": 0,
+                "active_shards": 0,
+                "unsupported": True,
+                "message": "Cluster health API is not available on Elasticsearch Serverless.",
             }
         else:
             result["errors"].append(f"cluster health: HTTP {resp.status_code}")
@@ -130,7 +144,7 @@ def probe_target_readiness(
         tpl_key = pattern.replace("*", "").rstrip("-")
         try:
             resp = requests.get(
-                f"{base}/_index_template/{tpl_key}*", headers=headers, timeout=timeout,
+                f"{base}/_index_template/{tpl_key}*", headers=headers, timeout=timeout, verify=verify,
             )
             if resp.status_code == 200:
                 templates = resp.json().get("index_templates", [])
@@ -147,7 +161,7 @@ def probe_target_readiness(
 
         try:
             resp = requests.get(
-                f"{base}/_data_stream/{pattern}", headers=headers, timeout=timeout,
+                f"{base}/_data_stream/{pattern}", headers=headers, timeout=timeout, verify=verify,
             )
             if resp.status_code == 200:
                 streams = resp.json().get("data_streams", [])
@@ -339,6 +353,152 @@ def build_dashboard_complexity(results: list[Any]) -> list[dict[str, Any]]:
 # Helpers for extracting referenced metrics/labels from QueryIR
 # ---------------------------------------------------------------------------
 
+_FIELD_TOKEN_RE = re.compile(r"\b([A-Za-z_:][A-Za-z0-9_:]*)\s*(?=\{|\[)")
+_BARE_FIELD_TOKEN_RE = re.compile(r"\b([A-Za-z_:][A-Za-z0-9_:]*)\b(?!\s*\()")
+_LABEL_FILTER_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:!?=~?|=)")
+_DERIVED_METRIC_NAMES = {"computed_value", "constant_value", "log_count", "value"}
+_PROMQL_KEYWORDS = {
+    "abs",
+    "and",
+    "avg",
+    "bool",
+    "bottomk",
+    "by",
+    "ceil",
+    "count",
+    "count_values",
+    "floor",
+    "group",
+    "group_left",
+    "group_right",
+    "histogram_quantile",
+    "ignoring",
+    "irate",
+    "label_join",
+    "label_replace",
+    "le",
+    "max",
+    "min",
+    "offset",
+    "on",
+    "or",
+    "predict_linear",
+    "quantile",
+    "rate",
+    "round",
+    "scalar",
+    "stddev",
+    "stdvar",
+    "sum",
+    "time",
+    "topk",
+    "unless",
+    "vector",
+    "without",
+}
+_PROMQL_SET_OPERATORS = frozenset({
+    "or",
+    "and",
+    "unless",
+    "bool",
+    "on",
+    "ignoring",
+    "group_left",
+    "group_right",
+})
+_COUNTER_SUFFIXES = ("_total", "_count", "_sum")
+_GAUGE_RESOURCE_TOKENS = ("resource_limit", "resource_limits", "resource_request", "resource_requests")
+
+
+def _add_required_field(
+    required_fields: dict[str, dict[str, Any]],
+    field_name: str,
+    role: str,
+    *,
+    source_field: str | None = None,
+) -> None:
+    field_name = str(field_name or "").strip()
+    if not field_name or field_name in {"@timestamp", "time_bucket", "timestamp_bucket", "step", "__name__"}:
+        return
+    source_field = str(source_field or field_name).strip()
+    entry = required_fields.setdefault(
+        field_name,
+        {
+            "target_field": field_name,
+            "source_fields": set(),
+            "roles": set(),
+            "panels": 0,
+        },
+    )
+    if source_field:
+        entry["source_fields"].add(source_field)
+    entry["roles"].add(role)
+    entry["panels"] += 1
+
+
+def _metric_candidates(query_ir: dict[str, Any]) -> set[str]:
+    candidates = {
+        str(query_ir.get("source_metric", "") or "").strip(),
+        str(query_ir.get("metric", "") or "").strip(),
+    }
+    output_metric = str(query_ir.get("output_metric_field", "") or "").strip()
+    candidates.discard("")
+    if output_metric in candidates:
+        candidates.discard(output_metric)
+    candidates.difference_update(_DERIVED_METRIC_NAMES)
+
+    expression = str(query_ir.get("clean_expression", "") or query_ir.get("source_expression", "") or "")
+    candidates.update(match.group(1) for match in _FIELD_TOKEN_RE.finditer(expression))
+    # Strip non-metric token regions before the bare-identifier scan: labels
+    # inside `by(...)` / `without(...)` aggregation clauses and inside PromQL
+    # vector-match modifiers `on(...)` / `ignoring(...)` /
+    # `group_left(...)` / `group_right(...)`, Grafana interpolation tokens
+    # like `$__rate_interval` / `$cluster`, and the contents of bracketed
+    # time ranges like `[$__rate_interval]`. These can otherwise be picked
+    # up as metric names.
+    expression_stripped = re.sub(
+        r"\b(?:by|without)\s*\(([^()]*)\)",
+        "",
+        expression,
+        flags=re.IGNORECASE,
+    )
+    expression_stripped = re.sub(
+        r"\b(?:on|ignoring|group_left|group_right)\s*\(([^()]*)\)",
+        "",
+        expression_stripped,
+        flags=re.IGNORECASE,
+    )
+    expression_stripped = re.sub(r"\$[A-Za-z_][A-Za-z0-9_]*", "", expression_stripped)
+    expression_stripped = re.sub(r"\[[^\]]*\]", "", expression_stripped)
+    expression_without_labels = re.sub(r"\{[^{}]*\}", "", expression_stripped)
+    expression_without_literals = re.sub(r'"[^"]*"', '""', expression_without_labels)
+    candidates.update(
+        match.group(1)
+        for match in _BARE_FIELD_TOKEN_RE.finditer(expression_without_literals)
+        if match.group(1).lower() not in _PROMQL_KEYWORDS
+        and match.group(1).lower() not in _PROMQL_SET_OPERATORS
+    )
+    return {
+        item
+        for item in candidates
+        if item
+        and item not in {"scalar", "vector"}
+        and item.lower() not in _PROMQL_SET_OPERATORS
+    }
+
+
+def _label_filter_field(filter_expr: Any) -> str:
+    match = _LABEL_FILTER_RE.match(str(filter_expr or ""))
+    return match.group(1) if match else ""
+
+
+def _looks_like_counter_metric(metric_name: str) -> bool:
+    metric_name = str(metric_name or "")
+    if any(token in metric_name for token in _GAUGE_RESOURCE_TOKENS):
+        return False
+    return metric_name.endswith(_COUNTER_SUFFIXES)
+
+
 def _collect_referenced_metrics(results: list[Any]) -> set[str]:
     """Collect all metric names referenced in source PromQL expressions."""
     metrics: set[str] = set()
@@ -347,12 +507,7 @@ def _collect_referenced_metrics(results: list[Any]) -> set[str]:
             query_ir = getattr(pr, "query_ir", {}) or {}
             if not isinstance(query_ir, dict):
                 continue
-            metric = str(query_ir.get("source_metric", "") or "")
-            if metric:
-                metrics.add(metric)
-            output_metric = str(query_ir.get("output_metric_field", "") or "")
-            if output_metric and not output_metric.startswith("@"):
-                metrics.add(output_metric)
+            metrics.update(_metric_candidates(query_ir))
     return metrics
 
 
@@ -386,9 +541,21 @@ def build_target_schema_contract(
     required_indexes: Counter = Counter()
     required_fields: dict[str, dict[str, Any]] = {}
     counter_expectations: dict[str, int] = {}
+    counter_sources: dict[str, str] = {}
     unresolved_labels: Counter = Counter()
     unresolved_variables: Counter = Counter()
     feature_gaps: list[str] = []
+    schema_profile = None
+    field_capabilities_index = ""
+    field_capabilities_discovery = {"status": "not_attempted", "error": "", "field_count": 0}
+    if resolver:
+        schema_profile_fn = getattr(resolver, "schema_profile", None)
+        if callable(schema_profile_fn):
+            schema_profile = schema_profile_fn()
+        field_capabilities_index = str(getattr(resolver, "_index_pattern", "") or "")
+        discovery_status_fn = getattr(resolver, "discovery_status", None)
+        if callable(discovery_status_fn):
+            field_capabilities_discovery = discovery_status_fn()
 
     seen_features: set[str] = set()
 
@@ -413,27 +580,70 @@ def build_target_schema_contract(
             if target_index:
                 required_indexes[target_index] += 1
 
-            metric_field = str(query_ir.get("output_metric_field", "") or "")
-            if metric_field:
-                entry = required_fields.setdefault(
-                    metric_field, {"roles": set(), "panels": 0},
+            metric_fields = _metric_candidates(query_ir)
+            for metric_field in sorted(metric_fields):
+                target_metric = metric_field
+                if resolver and hasattr(resolver, "resolve_metric_field"):
+                    prefer = "counter" if (
+                        str(query_ir.get("source_type", "") or "") == "TS"
+                        and _looks_like_counter_metric(metric_field)
+                    ) else None
+                    target_metric = resolver.resolve_metric_field(metric_field, prefer=prefer)
+                _add_required_field(
+                    required_fields,
+                    target_metric,
+                    "metric",
+                    source_field=metric_field,
                 )
-                entry["roles"].add("metric")
-                entry["panels"] += 1
 
-            for group_field in query_ir.get("output_group_fields", []) or []:
-                if group_field:
-                    entry = required_fields.setdefault(
-                        group_field, {"roles": set(), "panels": 0},
-                    )
-                    entry["roles"].add("group_by")
-                    entry["panels"] += 1
+            for group_field in (
+                list(query_ir.get("source_group_fields", []) or [])
+                + list(query_ir.get("group_labels", []) or [])
+            ):
+                target_group = group_field
+                if resolver and hasattr(resolver, "resolve_label"):
+                    target_group = resolver.resolve_label(group_field)
+                _add_required_field(
+                    required_fields,
+                    target_group,
+                    "group_by",
+                    source_field=group_field,
+                )
+
+            for filter_expr in query_ir.get("label_filters", []) or []:
+                source_filter = _label_filter_field(filter_expr)
+                target_filter = source_filter
+                if resolver and hasattr(resolver, "resolve_label"):
+                    target_filter = resolver.resolve_label(source_filter)
+                _add_required_field(
+                    required_fields,
+                    target_filter,
+                    "filter",
+                    source_field=source_filter,
+                )
+            for filter_field in query_ir.get("source_filter_fields", []) or []:
+                target_filter = filter_field
+                if resolver and hasattr(resolver, "resolve_label"):
+                    target_filter = resolver.resolve_label(filter_field)
+                _add_required_field(
+                    required_fields,
+                    target_filter,
+                    "filter",
+                    source_field=filter_field,
+                )
 
             source_type = str(query_ir.get("source_type", "") or "")
-            if source_type == "TS" and metric_field:
-                counter_expectations[metric_field] = (
-                    counter_expectations.get(metric_field, 0) + 1
-                )
+            if source_type == "TS":
+                for metric_field in metric_fields:
+                    if not _looks_like_counter_metric(metric_field):
+                        continue
+                    target_metric = metric_field
+                    if resolver and hasattr(resolver, "resolve_metric_field"):
+                        target_metric = resolver.resolve_metric_field(metric_field, prefer="counter")
+                    counter_sources[target_metric] = metric_field
+                    counter_expectations[target_metric] = (
+                        counter_expectations.get(target_metric, 0) + 1
+                    )
 
             for loss in query_ir.get("semantic_losses", []) or []:
                 loss_str = str(loss)
@@ -460,6 +670,8 @@ def build_target_schema_contract(
         field_status[field_name] = {
             "status": status,
             "type": field_type,
+            "target_field": info.get("target_field", field_name),
+            "source_fields": sorted(info.get("source_fields", {field_name})),
             "roles": sorted(info["roles"]),
             "panels": info["panels"],
         }
@@ -470,8 +682,10 @@ def build_target_schema_contract(
     ):
         is_counter = None
         if resolver:
-            is_counter = resolver.is_counter(metric_name)
+            is_counter = resolver.is_counter(counter_sources.get(metric_name, metric_name))
         counter_status[metric_name] = {
+            "source_field": counter_sources.get(metric_name, metric_name),
+            "target_field": metric_name,
             "expected_counter": True,
             "confirmed_counter": is_counter,
             "panels": count,
@@ -482,6 +696,9 @@ def build_target_schema_contract(
     unknown = sum(1 for v in field_status.values() if v["status"] == "unknown")
 
     return {
+        "schema_profile": schema_profile,
+        "field_capabilities_index": field_capabilities_index,
+        "field_capabilities_discovery": field_capabilities_discovery,
         "required_indexes": dict(required_indexes.most_common()),
         "required_fields": field_status,
         "counter_expectations": counter_status,
@@ -498,12 +715,37 @@ def build_target_schema_contract(
     }
 
 
+def build_target_contract_summary(results: list[Any]) -> dict[str, Any]:
+    """Summarize target query contract outcomes across all translated panels."""
+    status_counter: Counter = Counter()
+    action_kinds: Counter = Counter()
+
+    for result in results:
+        for panel in getattr(result, "panel_results", []) or []:
+            evaluation = getattr(panel, "contract_evaluation", {}) or {}
+            status = str(evaluation.get("status", "") or "")
+            if status:
+                status_counter[status] += 1
+
+            plan = getattr(panel, "fulfillment_plan", {}) or {}
+            for action in plan.get("actions", []) or []:
+                kind = str(action.get("kind", "") or "")
+                if kind:
+                    action_kinds[kind] += 1
+
+    return {
+        "totals": dict(status_counter),
+        "action_kinds": dict(action_kinds),
+    }
+
+
 def build_preflight_report(
     results: list[Any],
     validation_summary: dict[str, Any],
     validation_records: list[dict[str, Any]],
     verification_payload: dict[str, Any],
     schema_contract: dict[str, Any],
+    target_contract_summary: dict[str, Any] | None = None,
     *,
     source_urls_configured: bool = False,
     target_url_configured: bool = False,
@@ -517,6 +759,7 @@ def build_preflight_report(
     target_readiness = target_readiness or {}
     datasource_audit = datasource_audit or {}
     complexity_scores = complexity_scores or []
+    target_contract_summary = target_contract_summary or {}
 
     total_panels = sum(r.total_panels for r in results)
     green = sum(
@@ -714,6 +957,7 @@ def build_preflight_report(
             },
             "target_validation": validation_summary.get("counts", {}),
             "schema_contract_totals": totals,
+            "target_contract_totals": target_contract_summary.get("totals", {}),
         },
         "source_metric_inventory": {
             "status": source_inventory.get("status", "not_configured"),
@@ -728,10 +972,16 @@ def build_preflight_report(
         "datasource_audit": datasource_audit,
         "complexity_scores": complexity_scores,
         "schema_contract": schema_contract,
+        "target_contract_summary": target_contract_summary,
         "blockers": blockers,
         "actions": actions,
         "customer_action_summary": _build_action_summary(
-            results, blockers, actions, evidence_level, schema_contract,
+            results,
+            blockers,
+            actions,
+            evidence_level,
+            schema_contract,
+            target_contract_summary=target_contract_summary,
             source_inventory=source_inventory,
             target_readiness=target_readiness,
             datasource_audit=datasource_audit,
@@ -745,6 +995,7 @@ def _build_action_summary(
     actions: list[str],
     evidence_level: str,
     schema_contract: dict[str, Any],
+    target_contract_summary: dict[str, Any] | None = None,
     *,
     source_inventory: dict[str, Any] | None = None,
     target_readiness: dict[str, Any] | None = None,
@@ -753,6 +1004,7 @@ def _build_action_summary(
     source_inventory = source_inventory or {}
     target_readiness = target_readiness or {}
     datasource_audit = datasource_audit or {}
+    target_contract_summary = target_contract_summary or {}
 
     lines = ["PREFLIGHT VALIDATION SUMMARY", "=" * 40, ""]
 
@@ -762,17 +1014,29 @@ def _build_action_summary(
         if (pr.verification_packet or {}).get("semantic_gate") == "Green"
     )
     lines.append(f"Dashboards: {len(results)}")
-    lines.append(f"Panels: {total} ({green} ready for deployment)")
+    if evidence_level == "full":
+        readiness_text = f"{green} ready for deployment"
+    elif evidence_level == "static_analysis":
+        readiness_text = f"{green} Green by static analysis"
+    else:
+        readiness_text = f"{green} Green with {evidence_level} evidence"
+    lines.append(f"Panels: {total} ({readiness_text})")
     lines.append(f"Evidence level: {evidence_level}")
     lines.append("")
 
     cluster_health = target_readiness.get("cluster_health", {})
     if cluster_health:
-        lines.append(
-            f"Target cluster: {cluster_health.get('status', '?').upper()} "
-            f"({cluster_health.get('number_of_data_nodes', '?')} data nodes, "
-            f"{cluster_health.get('active_shards', '?')} active shards)"
-        )
+        if cluster_health.get("unsupported"):
+            lines.append(
+                f"Target cluster: {cluster_health.get('status', '?').upper()} "
+                "(cluster health API not available)"
+            )
+        else:
+            lines.append(
+                f"Target cluster: {cluster_health.get('status', '?').upper()} "
+                f"({cluster_health.get('number_of_data_nodes', '?')} data nodes, "
+                f"{cluster_health.get('active_shards', '?')} active shards)"
+            )
         lines.append("")
 
     inv_status = source_inventory.get("status", "not_configured")
@@ -817,7 +1081,29 @@ def _build_action_summary(
         )
         lines.append("")
 
-    if not blockers and not actions:
+    contract_totals = target_contract_summary.get("totals", {})
+    action_kinds = target_contract_summary.get("action_kinds", {})
+    nonzero_statuses = [
+        (status, count)
+        for status, count in sorted(contract_totals.items())
+        if count
+    ]
+    risky_contract_statuses = {
+        "blocked",
+        "degraded_if_forced",
+        "exact_after_fulfillment",
+    }
+    has_risky_contract_totals = any(
+        contract_totals.get(status, 0) for status in risky_contract_statuses
+    )
+    if nonzero_statuses or action_kinds:
+        for status, count in nonzero_statuses:
+            lines.append(f"CONTRACT STATUS {status}: {count}")
+        for kind, count in sorted(action_kinds.items()):
+            lines.append(f"  - {kind}: {count}")
+        lines.append("")
+
+    if not blockers and not actions and not has_risky_contract_totals:
         lines.append(
             "All preflight checks passed. "
             "Ready for target ingest and deployment testing."
@@ -834,7 +1120,7 @@ def save_preflight_report(
         json.dump(report, fh, indent=2)
 
 
-def save_schema_contract(
+def save_preflight_json(
     contract: dict[str, Any], output_path: str | Path,
 ) -> None:
     output_path = Path(output_path)
@@ -846,9 +1132,10 @@ __all__ = [
     "build_dashboard_complexity",
     "build_datasource_audit",
     "build_preflight_report",
+    "build_target_contract_summary",
     "build_target_schema_contract",
     "probe_source_metric_inventory",
     "probe_target_readiness",
+    "save_preflight_json",
     "save_preflight_report",
-    "save_schema_contract",
 ]

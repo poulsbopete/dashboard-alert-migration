@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Configurable field name mapping from Datadog metric/tag names to Elasticsearch fields.
 
 Datadog uses dotted metric names (system.cpu.user) and tag keys (host, env, service).
@@ -18,7 +21,6 @@ from typing import Any
 
 import yaml
 
-from .extension_schema import FieldMapProfileModel, validate_field_profile_payload
 from observability_migration.core.verification.field_capabilities import (
     FieldCapability,
     fetch_field_capabilities,
@@ -28,6 +30,8 @@ from observability_migration.core.verification.field_capabilities import (
     is_searchable_field,
     is_text_like_field,
 )
+
+from .extension_schema import FieldMapProfileModel, validate_field_profile_payload
 
 
 @dataclass
@@ -73,10 +77,23 @@ class FieldMapProfile:
             mapped = self.tag_map[dd_tag]
             if context == "metric" and mapped in _LOG_ONLY_FIELDS:
                 return dd_tag
-            return mapped
+            return self._prefer_aggregatable_keyword_subfield(mapped, context=context)
         if self.tag_prefix:
-            return f"{self.tag_prefix}{dd_tag}"
-        return dd_tag
+            return self._prefer_aggregatable_keyword_subfield(f"{self.tag_prefix}{dd_tag}", context=context)
+        return self._prefer_aggregatable_keyword_subfield(dd_tag, context=context)
+
+    def _prefer_aggregatable_keyword_subfield(self, field_name: str, context: str = "") -> str:
+        """Prefer ``field.keyword`` when live caps show the base field is unsafe for grouping."""
+        if not field_name or field_name.endswith(".keyword"):
+            return field_name
+        keyword_field = f"{field_name}.keyword"
+        keyword_cap = self.field_capability(keyword_field, context=context)
+        if not keyword_cap or not is_aggregatable_field(keyword_cap):
+            return field_name
+        base_cap = self.field_capability(field_name, context=context)
+        if base_cap is None or has_conflicting_types(base_cap) or not is_aggregatable_field(base_cap):
+            return keyword_field
+        return field_name
 
     def map_log_field(self, dd_field: str) -> str:
         """Map a Datadog log attribute (@field) to an ES field."""
@@ -114,15 +131,30 @@ class FieldMapProfile:
     def has_conflicting_types(self, field_name: str, context: str = "") -> bool:
         return has_conflicting_types(self.field_capability(field_name, context=context))
 
-    def load_live_field_capabilities(self, es_url: str, es_api_key: str = "") -> dict[str, int]:
+    def load_live_field_capabilities(
+        self,
+        es_url: str,
+        es_api_key: str = "",
+        verify: bool | str = True,
+    ) -> dict[str, int]:
         """Populate field capabilities from the live target cluster."""
-        metric_caps = fetch_field_capabilities(es_url, self.metric_index, es_api_key=es_api_key)
+        metric_caps = fetch_field_capabilities(
+            es_url,
+            self.metric_index,
+            es_api_key=es_api_key,
+            verify=verify,
+        )
         log_caps = {}
         if self.logs_index:
             if self.logs_index == self.metric_index:
                 log_caps = metric_caps
             else:
-                log_caps = fetch_field_capabilities(es_url, self.logs_index, es_api_key=es_api_key)
+                log_caps = fetch_field_capabilities(
+                    es_url,
+                    self.logs_index,
+                    es_api_key=es_api_key,
+                    verify=verify,
+                )
         self.metric_field_caps = metric_caps
         self.log_field_caps = log_caps
         merged = {}
@@ -165,9 +197,16 @@ def _default_tag_map() -> dict[str, str]:
         "service": "service.name",
         "version": "service.version",
         "source": "service.name",
+        "region": "cloud.region",
+        "datacenter": "cloud.region",
+        "availability_zone": "cloud.availability_zone",
+        "zone": "cloud.availability_zone",
         "status": "log.level",
         "container_name": "container.name",
         "container_id": "container.id",
+        "@http.url_details.path": "http.url",
+        "http.url_details.path": "http.url",
+        "http.url": "http.url",
         "pod_name": "kubernetes.pod.name",
         "kube_namespace": "kubernetes.namespace",
         "kube_cluster_name": "kubernetes.cluster.name",
@@ -177,12 +216,41 @@ def _default_tag_map() -> dict[str, str]:
     }
 
 
+def _otel_tag_map() -> dict[str, str]:
+    tag_map = _default_tag_map()
+    tag_map.update({
+        "cluster": "k8s.cluster.name",
+        "kube_cluster_name": "k8s.cluster.name",
+        "kubernetes_cluster": "k8s.cluster.name",
+        "namespace": "k8s.namespace.name",
+        "namespace_name": "k8s.namespace.name",
+        "kube_namespace": "k8s.namespace.name",
+        "pod": "k8s.pod.name",
+        "pod_name": "k8s.pod.name",
+        "node": "k8s.node.name",
+        "node_name": "k8s.node.name",
+        "kube_node": "k8s.node.name",
+        "kube_deployment": "k8s.deployment.name",
+        "deployment": "k8s.deployment.name",
+        "kube_daemon_set": "k8s.daemonset.name",
+        "daemonset": "k8s.daemonset.name",
+        "kube_replica_set": "k8s.replicaset.name",
+        "replicaset": "k8s.replicaset.name",
+        "kube_stateful_set": "k8s.statefulset.name",
+        "statefulset": "k8s.statefulset.name",
+        "kube_service": "k8s.service.name",
+        "kube_container_name": "k8s.container.name",
+        "pod_phase": "k8s.pod.phase",
+    })
+    return tag_map
+
+
 OTEL_PROFILE = FieldMapProfile(
     name="otel",
     metric_index="metrics-*",
     logs_index="logs-*",
     timestamp_field="@timestamp",
-    tag_map=_default_tag_map(),
+    tag_map=_otel_tag_map(),
     metric_prefix="",
     metric_suffix="",
 )

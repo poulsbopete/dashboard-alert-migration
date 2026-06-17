@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Core data models for the Datadog → Kibana migration pipeline."""
 
 from __future__ import annotations
@@ -7,7 +10,6 @@ from typing import Any
 
 from observability_migration.core.assets.status import AssetStatus
 
-
 # ---------------------------------------------------------------------------
 # Widget type mapping
 # ---------------------------------------------------------------------------
@@ -16,6 +18,7 @@ WIDGET_TYPE_MAP: dict[str, str] = {
     "timeseries": "xy",
     "query_value": "metric",
     "toplist": "table",
+    "bar_chart": "table",
     "table": "table",
     "heatmap": "heatmap",
     "distribution": "xy",
@@ -51,7 +54,7 @@ WIDGET_TYPE_MAP: dict[str, str] = {
 }
 
 SUPPORTED_WIDGET_TYPES: set[str] = {
-    "timeseries", "query_value", "toplist", "table", "query_table",
+    "timeseries", "query_value", "toplist", "bar_chart", "table", "query_table",
     "heatmap", "distribution", "change", "scatterplot", "treemap",
     "sunburst", "pie", "geomap", "log_stream", "list_stream",
     "note", "free_text", "image", "iframe", "group",
@@ -81,8 +84,16 @@ class TagFilter:
     key: str
     value: str
     negated: bool = False
+    # True when the filter came from a Datadog ``key IN (a, b, c)`` /
+    # ``key NOT IN (...)`` list. ``value`` holds the pipe-joined members so it
+    # renders to a native ES|QL ``IN (...)`` instead of a chain of ``==``/OR.
+    is_in_list: bool = False
 
     def __str__(self) -> str:
+        if self.is_in_list:
+            op = "NOT IN" if self.negated else "IN"
+            members = ", ".join(v for v in self.value.split("|") if v)
+            return f"{self.key} {op} ({members})"
         neg = "!" if self.negated else ""
         return f"{neg}{self.key}:{self.value}"
 
@@ -158,6 +169,12 @@ class FormulaRef:
 @dataclass
 class FormulaNumber:
     value: float
+
+
+@dataclass
+class FormulaString:
+    """String literal inside a formula expression (e.g. top(q, 10, 'mean', 'desc'))."""
+    value: str
 
 
 @dataclass

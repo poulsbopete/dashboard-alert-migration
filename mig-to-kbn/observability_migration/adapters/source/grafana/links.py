@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Translate Grafana dashboard and panel links to Kibana equivalents.
 
 Grafana supports two types of links:
@@ -19,7 +22,6 @@ from __future__ import annotations
 
 import re
 from typing import Any
-
 
 _GRAFANA_VAR_RE = re.compile(
     r"\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)(?::[^}]+)?\}"

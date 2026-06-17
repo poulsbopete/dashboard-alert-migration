@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """YAML generation for kb-dashboard-cli format.
 
 Converts TranslationResults into YAML structures matching the
@@ -16,6 +19,13 @@ from typing import Any
 
 import yaml
 
+from observability_migration.core.reporting.report import _panel_query_index
+from observability_migration.targets.kibana.emit.esql_utils import extract_esql_shape
+from observability_migration.targets.kibana.emit.layout import (
+    PANEL_SIZE_CONSTRAINTS,
+    apply_style_guide_layout,
+)
+
 from .display import enrich_panel_display
 from .field_map import FieldMapProfile
 from .models import (
@@ -25,9 +35,6 @@ from .models import (
     TemplateVariable,
     TranslationResult,
 )
-from observability_migration.core.reporting.report import _panel_query_index
-from observability_migration.targets.kibana.emit.layout import apply_style_guide_layout
-
 
 GRID_COLUMNS = 48
 KIBANA_MIN_VERSION = "9.1.0"
@@ -218,6 +225,30 @@ def _infer_dashboard_filters(
     return [{"field": "data_stream.dataset", "equals": metrics_dataset_filter}]
 
 
+def _warn_dropped_xy_breakdowns(
+    non_time_dims: list[str], result: TranslationResult
+) -> None:
+    """Warn when an XY chart cannot show every grouping dimension.
+
+    A Kibana XY chart (line/bar/area) breaks its series down by a single field.
+    When the source query groups by two or more non-time dimensions, only the
+    first becomes the visual breakdown and the rest are absent from the chart,
+    so series differing only by a dropped dimension are visually merged. Surface
+    that as a warning instead of silently rendering a different shape than the
+    Datadog source.
+    """
+    extra = [d for d in non_time_dims[1:] if d]
+    if not extra:
+        return
+    warning = (
+        "XY chart shows a single breakdown; additional grouping "
+        f"dimension(s) {extra} are in the query but not on the chart, "
+        "so series differing only by those are visually merged"
+    )
+    if warning not in result.warnings:
+        result.warnings.append(warning)
+
+
 def _build_yaml_panel(
     widget: NormalizedWidget,
     result: TranslationResult,
@@ -295,6 +326,7 @@ def _build_esql_panel(
             other_dims = [d for d in dims if d != time_dim]
             if other_dims:
                 esql_block["breakdown"] = _dimension_config(other_dims[0])
+                _warn_dropped_xy_breakdowns(other_dims, result)
         if metrics:
             esql_block["metrics"] = [
                 _metric_config(widget, result, m)
@@ -409,31 +441,53 @@ def _build_lens_panel(
     metric_field = lens_cfg.get("metric_field", "value")
     raw_agg = lens_cfg.get("aggregation", "avg")
     aggregation = _LENS_AGG_NAMES.get(raw_agg, raw_agg.lower())
+    percentile = None
+    percentile_match = re.fullmatch(r"PERCENTILE\(%\s*,\s*(\d+)\)", str(raw_agg or ""), re.IGNORECASE)
+    if percentile_match:
+        aggregation = "percentile"
+        percentile = int(percentile_match.group(1))
     dv = lens_cfg.get("data_view", data_view)
     group_by = lens_cfg.get("group_by", [])
 
     lens_block: dict[str, Any] = {"type": chart_type, "data_view": dv}
+    metric_config = {"aggregation": aggregation, "field": metric_field}
+    if percentile is not None:
+        metric_config["percentile"] = percentile
 
     if chart_type == "metric":
-        lens_block["primary"] = {"aggregation": aggregation, "field": metric_field}
+        lens_block["primary"] = dict(metric_config)
     elif chart_type in ("line", "bar", "area"):
         lens_block["dimension"] = {"type": "date_histogram", "field": "@timestamp"}
-        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
+        lens_block["metrics"] = [dict(metric_config)]
         if group_by:
             lens_block["breakdown"] = {"type": "values", "field": group_by[0]}
-    elif chart_type == "pie":
-        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
-        if group_by:
-            lens_block["breakdowns"] = [{"type": "values", "field": g} for g in group_by]
-    elif chart_type == "datatable":
-        lens_block["metrics"] = [{"aggregation": aggregation, "field": metric_field}]
+            _warn_dropped_xy_breakdowns(group_by, result)
+    elif chart_type == "pie" or chart_type == "datatable":
+        lens_block["metrics"] = [dict(metric_config)]
         if group_by:
             lens_block["breakdowns"] = [{"type": "values", "field": g} for g in group_by]
     else:
-        lens_block["primary"] = {"aggregation": aggregation, "field": metric_field}
+        lens_block["primary"] = dict(metric_config)
 
     panel["lens"] = lens_block
     return panel
+
+
+_STATUS_PLACEHOLDER_HINTS: dict[str, str] = {
+    "check_status": (
+        "Datadog **check_status** widgets show the health of a synthetic "
+        "check (HTTP, TCP, SSL, etc.). The closest Elastic equivalent is a "
+        "[Synthetics monitor](https://www.elastic.co/guide/en/observability/current/monitor-uptime-synthetics.html); "
+        "configure one targeting the same endpoint, then visualize its "
+        "status field on this panel."
+    ),
+    "manage_status": (
+        "Datadog **manage_status** widgets summarize the state of one or "
+        "more monitors. The closest Elastic equivalent is the "
+        "[Alerts UI](https://www.elastic.co/guide/en/kibana/current/create-and-manage-rules.html); "
+        "create matching rules in Kibana and link to them from this panel."
+    ),
+}
 
 
 def _build_markdown_panel(
@@ -450,6 +504,10 @@ def _build_markdown_panel(
         lines = [f"**{result.title or widget.title or 'Untitled'}**", ""]
         lines.append(f"Original widget type: {widget.widget_type}")
         lines.append(f"Migration status: {result.status}")
+        hint = _STATUS_PLACEHOLDER_HINTS.get(widget.widget_type)
+        if hint:
+            lines.append("")
+            lines.append(hint)
         if result.source_queries:
             lines.append("")
             for sq in result.source_queries[:3]:
@@ -632,8 +690,8 @@ def _apply_proportional_layout(rows: list[list[dict[str, Any]]]) -> None:
         col_scale = GRID_COLUMNS / source_span
 
         for panel, dd_x, dd_w in zip(row_panels, xs, ws):
-            w = max(MIN_PANEL_WIDTH, int(round(dd_w * col_scale)))
-            x = int(round((dd_x - source_min_x) * col_scale))
+            w = max(MIN_PANEL_WIDTH, round(dd_w * col_scale))
+            x = round((dd_x - source_min_x) * col_scale)
             h = _preferred_panel_height(panel, w)
             panel["size"] = {"w": w, "h": h}
             panel["position"] = {"x": x, "y": y_cursor}
@@ -931,26 +989,38 @@ def _estimate_markdown_lines(content: str, width: int) -> int:
 
 
 def _normalize_tile_sizes(panels: list[dict[str, Any]]) -> None:
-    """Enforce minimum sizes per panel type, matching Grafana tool conventions."""
+    """Enforce per-type min/max sizes, matching the shared PANEL_SIZE_CONSTRAINTS table.
+
+    Descends into sections so nested panels get the same treatment.
+    """
     for panel in panels:
-        size = panel.get("size", {})
-        position = panel.get("position", {})
+        section = panel.get("section")
+        if isinstance(section, dict):
+            inner = section.get("panels")
+            if isinstance(inner, list):
+                _normalize_tile_sizes(inner)
+
+        size = panel.setdefault("size", {})
+        position = panel.setdefault("position", {})
         chart_type = _kibana_panel_type(panel)
 
-        h = size.get("h", 12)
+        constraints = PANEL_SIZE_CONSTRAINTS.get(chart_type)
+        if constraints is not None:
+            min_w, min_h, max_h = constraints
+            w = int(size.get("w", 0) or 0)
+            h = int(size.get("h", 0) or 0)
+            if w > 0 and w < min_w:
+                size["w"] = min_w
+            if h > 0 and h < min_h:
+                size["h"] = min_h
+            if max_h is not None and h > max_h:
+                size["h"] = max_h
 
-        if chart_type == "datatable" and h < 12:
-            size["h"] = 12
-
-        max_x = GRID_COLUMNS - size.get("w", 8)
-        if max_x < 0:
-            max_x = 0
-        x = position.get("x", 0)
+        w = int(size.get("w", 8) or 8)
+        max_x = max(0, GRID_COLUMNS - w)
+        x = int(position.get("x", 0) or 0)
         if x > max_x:
             position["x"] = max_x
-
-        panel["size"] = size
-        panel["position"] = position
 
 
 # ---------------------------------------------------------------------------
@@ -998,27 +1068,8 @@ def _resolve_overlaps(panels: list[dict[str, Any]]) -> None:
 def _infer_dimensions(result: TranslationResult) -> list[str]:
     """Infer dimension fields from the ES|QL query (group-by fields)."""
     query = result.esql_query or ""
-    dims: list[str] = []
-
-    if "BY " in query.upper():
-        by_idx = query.upper().rindex("BY ")
-        by_clause = query[by_idx + 3:]
-        first_line = by_clause.split("\n")[0].strip()
-        if first_line.startswith("|"):
-            return dims
-
-        parts = _split_by_clause(first_line)
-        for part in parts:
-            part = part.strip().rstrip("|").strip()
-            if not part:
-                continue
-            if "=" in part:
-                alias = part.split("=")[0].strip()
-                dims.append(alias)
-            else:
-                dims.append(part)
-
-    return dims
+    shape = extract_esql_shape(query)
+    return list(shape.group_fields)
 
 
 def _split_by_clause(text: str) -> list[str]:
@@ -1047,6 +1098,9 @@ def _infer_metrics(result: TranslationResult) -> list[str]:
     """Infer metric fields from the ES|QL STATS clause."""
     query = result.esql_query or ""
     dims = _infer_dimensions(result)
+    shape = extract_esql_shape(query)
+    if shape.metric_fields:
+        return list(shape.metric_fields)
     keep_fields = _infer_keep_fields(query)
     if keep_fields:
         metrics = [
@@ -1079,7 +1133,7 @@ def _infer_metrics(result: TranslationResult) -> list[str]:
 
 def _infer_keep_fields(query: str) -> list[str]:
     query = query or ""
-    keep_matches = list(re.finditer(r"\|\s*KEEP\s+(.+?)(?=\n\s*\||$)", query, re.IGNORECASE | re.DOTALL))
+    keep_matches = list(re.finditer(r"\|\s*KEEP\s+(.+?)(?=\s*\||$)", query, re.IGNORECASE | re.DOTALL))
     if not keep_matches:
         return []
     keep_clause = keep_matches[-1].group(1).replace("\n", " ").strip()
@@ -1107,7 +1161,10 @@ def _metric_config(
 ) -> dict[str, Any]:
     config: dict[str, Any] = {"field": field}
     label = _metric_label(widget, result, field)
-    if label:
+    # On metric (query_value) panels the panel title is already displayed by
+    # Kibana; setting primary.label to the same string triggers the
+    # metric-redundant-label lint rule and causes compile to fail.
+    if label and not (result.kibana_type == "metric" and label == (widget.title or "")):
         config["label"] = label
     return config
 
@@ -1172,7 +1229,7 @@ def _formula_output_label(widget: NormalizedWidget, field: str) -> str:
 
 def _query_output_label(widget: NormalizedWidget, field: str) -> str:
     metric_queries = [q for q in widget.queries if q.metric_query]
-    for idx, query in enumerate(metric_queries, start=1):
+    for _idx, query in enumerate(metric_queries, start=1):
         candidates = {
             _safe_output_name(query.name),
         }

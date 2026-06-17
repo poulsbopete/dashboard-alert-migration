@@ -1,11 +1,13 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
+import hashlib
 import json
 import os
 import re
-import hashlib
 from typing import Any
 
 from .local_ai import request_structured_json
-
 
 REVIEW_AI_BATCH_SIZE = 12
 REVIEW_AI_REASON_TOKENS = (

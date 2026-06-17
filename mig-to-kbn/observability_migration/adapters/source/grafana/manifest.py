@@ -1,10 +1,12 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import json
 import re
 from pathlib import Path
 from typing import Any
 
 from observability_migration.core.reporting.report import _ir_to_dict, build_runtime_summary
-
 
 ESQL_PREFIX_RE = re.compile(r"^\s*(?:FROM|TS|ROW)\b", re.IGNORECASE)
 LOGQL_TOKEN_RE = re.compile(r"\|\~|\|=|\bcount_over_time\s*\(", re.IGNORECASE)
@@ -61,7 +63,14 @@ def infer_query_language(query_text: str, datasource_type: str = "", panel_type:
 
 
 def _datasource_identity(meta: dict[str, str]) -> str:
-    return "::".join([meta.get("type", ""), meta.get("uid", ""), meta.get("name", "")])
+    uid = str(meta.get("uid") or "").strip()
+    if uid:
+        return f"uid::{uid}"
+    return "::".join([
+        "legacy",
+        str(meta.get("type") or "").strip(),
+        str(meta.get("name") or "").strip(),
+    ])
 
 
 def analyze_panel_targets(panel: dict[str, Any]) -> dict[str, Any]:
@@ -172,7 +181,16 @@ def classify_panel_readiness(panel_result: Any) -> str:
     notes = [str(note).lower() for note in (getattr(panel_result, "notes", []) or [])]
     if any("mixes datasource" in note for note in notes):
         return "manual_only"
+    query_ir = getattr(panel_result, "query_ir", {}) or {}
+    query_family = ""
+    if isinstance(query_ir, dict):
+        query_family = str(query_ir.get("family", "") or "").lower()
     if query_language == "esql":
+        return "elastic_ready"
+    if query_language == "promql" and (
+        query_family == "native_promql"
+        or any("native promql" in note for note in notes)
+    ):
         return "elastic_ready"
     if datasource_type == "elasticsearch":
         return "elastic_native_review"
@@ -227,7 +245,9 @@ def build_migration_manifest(results: list[Any]) -> dict[str, Any]:
     all_annotations = []
     all_alert_tasks = []
     all_transform_tasks = []
+    runtime_features: dict[str, Any] = {}
     for result in results:
+        runtime_features.update(dict(getattr(result, "runtime_features", {}) or {}))
         runtime_summary = build_runtime_summary(result)
         result.runtime_summary = runtime_summary
         dashboard_links = list(getattr(result, "dashboard_links", []) or [])
@@ -353,6 +373,7 @@ def build_migration_manifest(results: list[Any]) -> dict[str, Any]:
             "transformation_redesign": transformation_summary,
             "alert_migration": alert_summary,
         },
+        "runtime_features": runtime_features,
         "dashboards": dashboards,
         "panels": flat_panels,
     }

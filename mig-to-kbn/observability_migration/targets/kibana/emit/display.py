@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Grafana display metadata to kb-dashboard YAML schema mapping.
 
 Handles: units/format, legend, axis config, metric labels, title cleanup.
@@ -235,7 +238,7 @@ _LEGEND_TEMPLATE_RE = re.compile(r"\{\{[^}]*\}\}")
 
 def humanize_metric_label(field_name: str, legend_format: str | None = None) -> str | None:
     """Derive a human-readable label for a YAML metric field."""
-    if legend_format:
+    if legend_format and legend_format != "__auto":
         label = clean_template_variables(_LEGEND_TEMPLATE_RE.sub("", legend_format).strip())
         label = re.sub(r"^[\s\-–—:,;]+|[\s\-–—:,;]+$", "", label)
         if label and len(label) > 1:

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 from __future__ import annotations
 
@@ -8,9 +11,12 @@ import os
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
+
+from observability_migration.core.http import apply_tls
 
 from .esql_validate import materialize_dashboard_time_query
 
@@ -63,6 +69,12 @@ def parse_args():
         help="Saved objects page size to request from Kibana during dashboard discovery.",
     )
     parser.add_argument(
+        "--validation-workers",
+        type=int,
+        default=int(os.getenv("SMOKE_VALIDATION_WORKERS", "6")),
+        help="Thread pool size for panel ES|QL runtime validation.",
+    )
+    parser.add_argument(
         "--dashboard-title",
         action="append",
         default=[],
@@ -78,6 +90,11 @@ def parse_args():
         "--capture-screenshots",
         action="store_true",
         help="Capture dashboard screenshots using headless Chrome/Chromium.",
+    )
+    parser.add_argument(
+        "--segmented-screenshots",
+        action="store_true",
+        help="Capture multiple viewport screenshots per dashboard for visual panel review.",
     )
     parser.add_argument(
         "--browser-audit",
@@ -120,6 +137,18 @@ def parse_args():
         type=int,
         default=2200,
         help="Screenshot browser height in pixels.",
+    )
+    parser.add_argument(
+        "--segment-count",
+        type=int,
+        default=6,
+        help="Number of viewport chunks to capture when --segmented-screenshots is enabled.",
+    )
+    parser.add_argument(
+        "--segment-overlap",
+        type=int,
+        default=200,
+        help="Vertical pixel overlap between segmented screenshots.",
     )
     parser.add_argument(
         "--virtual-time-budget-ms",
@@ -311,13 +340,87 @@ def _load_dashboard_via_export(session, kibana_url, space_id, dashboard_id, time
     raise ValueError(f"Dashboard {dashboard_id} not found via _export")
 
 
-def validate_esql(es_url, query, timeout, es_api_key=""):
+def _kbn_filter_to_dsl(kbn_filter):
+    """Convert one compiled Kibana filter into ``(dsl, negate)`` or ``None``.
+
+    Mirrors how Kibana resolves a saved-object filter into Query DSL: disabled
+    filters are dropped, ``meta.negate`` routes the clause to ``must_not``, and
+    combined (AND/OR) filters reconstruct their DSL from ``meta.params`` since
+    their top-level ``query`` is empty.
+    """
+    meta = kbn_filter.get("meta", {}) or {}
+    if meta.get("disabled"):
+        return None
+    negate = bool(meta.get("negate", False))
+    query = kbn_filter.get("query") or {}
+    if query:
+        return query, negate
+    if meta.get("type") == "combined":
+        relation = str(meta.get("relation", "AND") or "AND").upper()
+        clauses = []
+        for param in meta.get("params", []) or []:
+            resolved = _kbn_filter_to_dsl(param)
+            if resolved is None:
+                continue
+            sub_dsl, sub_negate = resolved
+            clauses.append({"bool": {"must_not": [sub_dsl]}} if sub_negate else sub_dsl)
+        if not clauses:
+            return None
+        if relation == "OR":
+            return {"bool": {"should": clauses, "minimum_should_match": 1}}, negate
+        return {"bool": {"filter": clauses}}, negate
+    return None
+
+
+def extract_dashboard_filter_dsl(attributes):
+    """Build the dashboard-level Query DSL filter from a saved object's attributes.
+
+    Kibana Lens merges ``kibanaSavedObjectMeta.searchSourceJSON`` filters into the
+    ``/_query`` request before dispatching to Elasticsearch; the smoke validator
+    must do the same so a mismatched filter (e.g. wrong ``data_stream.dataset``)
+    is caught instead of producing a false-clean report (#113). Returns a bool
+    Query DSL object, or ``None`` when there is no effective filter.
+    """
+    meta = attributes.get("kibanaSavedObjectMeta", {}) or {}
+    raw = meta.get("searchSourceJSON", "") or ""
+    if isinstance(raw, str):
+        if not raw or raw == "{}":
+            return None
+        try:
+            search_source = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    else:
+        search_source = raw or {}
+    must = []
+    must_not = []
+    for kbn_filter in search_source.get("filter", []) or []:
+        resolved = _kbn_filter_to_dsl(kbn_filter)
+        if resolved is None:
+            continue
+        dsl, negate = resolved
+        (must_not if negate else must).append(dsl)
+    if not must and not must_not:
+        return None
+    bool_query = {}
+    if must:
+        bool_query["filter"] = must
+    if must_not:
+        bool_query["must_not"] = must_not
+    return {"bool": bool_query}
+
+
+def validate_esql(es_url, query, timeout, es_api_key="", session=None, dsl_filter=None):
     materialized_query = materialize_dashboard_time_query(query)
     headers = {"Authorization": f"ApiKey {es_api_key}"} if es_api_key else None
-    response = requests.post(
+    client = session or requests
+    body = {"query": materialized_query}
+    if dsl_filter:
+        body["filter"] = dsl_filter
+    response = client.post(
         f"{es_url}/_query",
         params={"format": "json"},
-        json={"query": materialized_query},
+        json=body,
         headers=headers,
         timeout=timeout,
     )
@@ -480,6 +583,79 @@ def capture_dashboard_screenshot(saved_object, args):
     }
 
 
+def capture_segmented_screenshots(saved_object, args):
+    title = saved_object.get("attributes", {}).get("title", "") or saved_object.get("id", "dashboard")
+    dashboard_id = saved_object.get("id", "")
+    url = build_dashboard_url(
+        args.kibana_url,
+        args.space_id,
+        dashboard_id,
+        time_from=args.time_from,
+        time_to=args.time_to,
+    )
+    chrome_binary = discover_chrome_binary(args.chrome_binary)
+    if not chrome_binary:
+        return {
+            "status": "skipped",
+            "path": "",
+            "error": "Chrome/Chromium binary not found",
+            "url": url,
+            "segments": [],
+        }
+
+    screenshot_dir = Path(args.screenshot_dir or f"{Path(args.output).stem}_screenshots")
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+    segment_count = max(1, int(getattr(args, "segment_count", 1) or 1))
+    overlap = max(0, int(getattr(args, "segment_overlap", 0) or 0))
+    step = max(1, int(args.window_height) - overlap)
+    segments = []
+    errors = []
+    for idx in range(segment_count):
+        output_path = screenshot_dir / f"{_safe_stem(title)}_{idx + 1:02d}.png"
+        scroll_y = idx * step
+        script = (
+            "window.scrollTo(0, "
+            f"{scroll_y}"
+            "); document.body.style.overflow='hidden';"
+        )
+        current_budget = int(args.virtual_time_budget_ms)
+        command = _chrome_command(
+            chrome_binary,
+            url,
+            args,
+            current_budget,
+            extra_args=[
+                "--run-all-compositor-stages-before-draw",
+                f"--screenshot={output_path}",
+                f"--run-script={script}",
+            ],
+        )
+        timeout_seconds = max(args.timeout, current_budget // 1000 + 30)
+        try:
+            proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            error = f"Segment {idx + 1} timed out after {timeout_seconds}s"
+            errors.append(error)
+            segments.append({"status": "failed", "path": str(output_path), "scroll_y": scroll_y, "error": error})
+            continue
+        if proc.returncode == 0 and output_path.exists():
+            segments.append({"status": "captured", "path": str(output_path), "scroll_y": scroll_y, "error": ""})
+        else:
+            error = proc.stderr.strip() or proc.stdout.strip() or f"Chrome exited with code {proc.returncode}"
+            errors.append(error)
+            segments.append({"status": "failed", "path": str(output_path), "scroll_y": scroll_y, "error": error[:800]})
+
+    captured = sum(1 for segment in segments if segment["status"] == "captured")
+    status = "captured" if captured == len(segments) else "partial" if captured else "failed"
+    return {
+        "status": status,
+        "path": str(screenshot_dir),
+        "error": "; ".join(errors)[:800],
+        "url": url,
+        "segments": segments,
+    }
+
+
 def _browser_audit_issues(html):
     issues = []
     for pattern in BROWSER_ERROR_PATTERNS:
@@ -595,6 +771,97 @@ def _collect_esql_queries(node, queries):
             _collect_esql_queries(item, queries)
 
 
+_LENS_AGG_TO_ESQL = {
+    "average": "AVG",
+    "avg": "AVG",
+    "sum": "SUM",
+    "min": "MIN",
+    "max": "MAX",
+    "median": "MEDIAN",
+    "unique_count": "COUNT_DISTINCT",
+}
+
+
+def _lens_layer_index(attrs: dict, layer_id: str) -> str:
+    expected_ref = f"indexpattern-datasource-layer-{layer_id}"
+    for ref in attrs.get("references", []) or []:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("name") == expected_ref and ref.get("id"):
+            return str(ref["id"])
+    return "metrics-*"
+
+
+def _lens_metric_expr(column: dict) -> str:
+    operation = str(column.get("operationType") or "").lower()
+    source_field = str(column.get("sourceField") or "").strip()
+    if operation == "count":
+        return "COUNT(*)"
+    if operation == "percentile" and source_field:
+        percentile = (column.get("params") or {}).get("percentile", 95)
+        return f"PERCENTILE({source_field}, {int(percentile)})"
+    function_name = _LENS_AGG_TO_ESQL.get(operation)
+    if function_name and source_field:
+        return f"{function_name}({source_field})"
+    return ""
+
+
+def _collect_lens_form_based_queries(attrs: dict) -> list[str]:
+    layers = (
+        attrs.get("state", {})
+        .get("datasourceStates", {})
+        .get("formBased", {})
+        .get("layers", {})
+    )
+    if not isinstance(layers, dict):
+        return []
+
+    queries: list[str] = []
+    for layer_id, layer in layers.items():
+        if not isinstance(layer, dict):
+            continue
+        columns = layer.get("columns", {})
+        if not isinstance(columns, dict):
+            continue
+        column_order = [col for col in layer.get("columnOrder", []) if col in columns]
+        ordered_columns = [columns[col] for col in column_order] or list(columns.values())
+        date_field = "@timestamp"
+        breakdown_fields: list[str] = []
+        metric_exprs: list[str] = []
+        for column in ordered_columns:
+            if not isinstance(column, dict):
+                continue
+            operation = str(column.get("operationType") or "").lower()
+            source_field = str(column.get("sourceField") or "").strip()
+            if operation == "date_histogram":
+                date_field = source_field or "@timestamp"
+            elif column.get("isBucketed") and source_field:
+                breakdown_fields.append(source_field)
+            elif not column.get("isBucketed"):
+                metric_expr = _lens_metric_expr(column)
+                if metric_expr:
+                    metric_exprs.append(metric_expr)
+        if not metric_exprs:
+            continue
+
+        stats_parts = [
+            f"value = {metric_exprs[0]}",
+            *[
+                f"value_{idx} = {metric_expr}"
+                for idx, metric_expr in enumerate(metric_exprs[1:], start=2)
+            ],
+        ]
+        by_fields = [f"time_bucket = BUCKET({date_field}, 50, ?_tstart, ?_tend)", *breakdown_fields]
+        query_lines = [
+            f"FROM {_lens_layer_index(attrs, str(layer_id))}",
+            f"| WHERE {date_field} >= ?_tstart AND {date_field} <= ?_tend",
+            f"| STATS {', '.join(stats_parts)} BY {', '.join(by_fields)}",
+            "| SORT time_bucket",
+        ]
+        queries.append("\n".join(query_lines))
+    return queries
+
+
 def extract_panel_queries(panel):
     attrs = panel.get("embeddableConfig", {}).get("attributes", {}) or {}
     state = attrs.get("state", {}) or {}
@@ -606,6 +873,7 @@ def extract_panel_queries(panel):
     ]
     _collect_esql_queries(attrs, candidates)
     _collect_esql_queries(panel.get("embeddableConfig", {}), candidates)
+    candidates.extend(_collect_lens_form_based_queries(attrs))
 
     unique = []
     seen = set()
@@ -637,7 +905,53 @@ def _panel_runtime_expectation(panel, queries):
     return "unknown"
 
 
-def inspect_dashboard(saved_object, es_url, timeout, screenshot=None, browser_audit=None, es_api_key=""):
+def _runtime_gap_reason(panel: dict) -> str:
+    panel_type = str(panel.get("type", "") or "").lower()
+    attrs = panel.get("embeddableConfig", {}).get("attributes", {}) or {}
+    visualization_type = str(attrs.get("visualizationType", "") or "").lower()
+    if panel_type == "lens" or visualization_type.startswith("lns"):
+        return "lens_by_design"
+    return "unexpected_gap"
+
+
+def _validate_panel_queries(
+    es_url, queries, timeout, es_api_key="", validation_workers=1, verify: bool | str = True,
+    dsl_filter=None,
+):
+    if not queries:
+        return []
+
+    def _run(query):
+        session = requests.Session()
+        apply_tls(session, verify)
+        return validate_esql(
+            es_url, query, timeout, es_api_key=es_api_key, session=session, dsl_filter=dsl_filter
+        )
+
+    workers = max(1, int(validation_workers or 1))
+    if workers == 1 or len(queries) == 1:
+        session = requests.Session()
+        apply_tls(session, verify)
+        return [
+            validate_esql(
+                es_url, query, timeout, es_api_key=es_api_key, session=session, dsl_filter=dsl_filter
+            )
+            for query in queries
+        ]
+    with ThreadPoolExecutor(max_workers=min(workers, len(queries))) as pool:
+        return list(pool.map(_run, queries))
+
+
+def inspect_dashboard(
+    saved_object,
+    es_url,
+    timeout,
+    screenshot=None,
+    browser_audit=None,
+    es_api_key="",
+    validation_workers=1,
+    verify: bool | str = True,
+):
     attributes = saved_object.get("attributes", {})
     raw_panels = attributes.get("panelsJSON", "[]")
     try:
@@ -660,6 +974,8 @@ def inspect_dashboard(saved_object, es_url, timeout, screenshot=None, browser_au
             ],
             "empty_panels": [],
             "not_runtime_checked_panels": [],
+            "lens_by_design_panels": [],
+            "unexpected_runtime_gap_panels": [],
             "non_query_panels": [],
             "layout": {"overlaps": [], "invalid_sizes": [], "out_of_bounds": [], "max_x": 0, "max_y": 0},
             "screenshot": screenshot or {"status": "not_requested", "path": "", "error": "", "url": ""},
@@ -668,10 +984,13 @@ def inspect_dashboard(saved_object, es_url, timeout, screenshot=None, browser_au
             "status": "has_runtime_errors",
             "panels": [],
         }
+    dashboard_filter = extract_dashboard_filter_dsl(attributes)
     panel_results = []
     failing_panels = []
     empty_panels = []
     not_runtime_checked_panels = []
+    lens_by_design_panels = []
+    unexpected_runtime_gap_panels = []
     non_query_panels = []
 
     for panel in panels:
@@ -685,14 +1004,28 @@ def inspect_dashboard(saved_object, es_url, timeout, screenshot=None, browser_au
                 "type": panel_type,
                 "status": "no_query_expected" if expectation == "no_query_expected" else "not_runtime_checked",
             }
+            if result["status"] == "not_runtime_checked":
+                result["coverage_reason"] = _runtime_gap_reason(panel)
             panel_results.append(result)
             if result["status"] == "no_query_expected":
                 non_query_panels.append(result)
             else:
                 not_runtime_checked_panels.append(result)
+                if result.get("coverage_reason") == "lens_by_design":
+                    lens_by_design_panels.append(result)
+                else:
+                    unexpected_runtime_gap_panels.append(result)
             continue
 
-        validations = [validate_esql(es_url, query, timeout, es_api_key=es_api_key) for query in queries]
+        validations = _validate_panel_queries(
+            es_url,
+            queries,
+            timeout,
+            es_api_key=es_api_key,
+            validation_workers=validation_workers,
+            verify=verify,
+            dsl_filter=dashboard_filter,
+        )
         failing = [item for item in validations if item["status"] == "fail"]
         rows = max((item["rows"] for item in validations), default=0)
         result_status = "fail" if failing else "empty" if rows == 0 else "pass"
@@ -734,6 +1067,8 @@ def inspect_dashboard(saved_object, es_url, timeout, screenshot=None, browser_au
         "failing_panels": failing_panels,
         "empty_panels": empty_panels,
         "not_runtime_checked_panels": not_runtime_checked_panels,
+        "lens_by_design_panels": lens_by_design_panels,
+        "unexpected_runtime_gap_panels": unexpected_runtime_gap_panels,
         "non_query_panels": non_query_panels,
         "layout": layout,
         "screenshot": screenshot or {"status": "not_requested", "path": "", "error": "", "url": ""},
@@ -761,6 +1096,8 @@ def build_summary(dashboards):
         "runtime_checked_panels": sum(item["runtime_checked_panels"] for item in dashboards),
         "non_query_panels": sum(len(item["non_query_panels"]) for item in dashboards),
         "not_runtime_checked_panels": sum(len(item["not_runtime_checked_panels"]) for item in dashboards),
+        "lens_by_design_panels": sum(len(item.get("lens_by_design_panels", [])) for item in dashboards),
+        "unexpected_runtime_gap_panels": sum(len(item.get("unexpected_runtime_gap_panels", [])) for item in dashboards),
         "dashboards_with_runtime_errors": sum(1 for item in dashboards if item["failing_panels"]),
         "dashboards_with_layout_issues": sum(
             1
@@ -773,7 +1110,9 @@ def build_summary(dashboards):
         ),
         "runtime_error_panels": sum(len(item["failing_panels"]) for item in dashboards),
         "empty_panels": sum(len(item["empty_panels"]) for item in dashboards),
-        "screenshots_captured": sum(1 for item in dashboards if item.get("screenshot", {}).get("status") == "captured"),
+        "screenshots_captured": sum(
+            1 for item in dashboards if item.get("screenshot", {}).get("status") in {"captured", "partial"}
+        ),
         "screenshots_failed": sum(1 for item in dashboards if item.get("screenshot", {}).get("status") == "failed"),
         "screenshots_skipped": sum(1 for item in dashboards if item.get("screenshot", {}).get("status") == "skipped"),
         "browser_audits_clean": sum(1 for item in dashboards if item.get("browser_audit", {}).get("status") == "clean"),
@@ -782,21 +1121,30 @@ def build_summary(dashboards):
     }
 
 
-def main():
+def main(verify: bool | str = True):
     args = parse_args()
     session = requests.Session()
+    apply_tls(session, verify)
     session.headers.update({"kbn-xsrf": "true"})
     if args.kibana_api_key:
         session.headers.update({"Authorization": f"ApiKey {args.kibana_api_key}"})
 
     dashboards = []
-    for item in load_dashboards(
-        session,
-        args.kibana_url,
-        args.space_id,
-        args.timeout,
-        per_page=args.saved_objects_per_page,
-    ):
+    if args.dashboard_id:
+        dashboard_items = [
+            load_dashboard(session, args.kibana_url, args.space_id, dashboard_id, args.timeout)
+            for dashboard_id in args.dashboard_id
+        ]
+    else:
+        dashboard_items = load_dashboards(
+            session,
+            args.kibana_url,
+            args.space_id,
+            args.timeout,
+            per_page=args.saved_objects_per_page,
+        )
+
+    for item in dashboard_items:
         if not should_include_dashboard(item, args.dashboard_title, args.dashboard_id):
             continue
         attributes = item.get("attributes", {}) or {}
@@ -807,7 +1155,12 @@ def main():
             item["id"],
             args.timeout,
         )
-        screenshot = capture_dashboard_screenshot(saved_object, args) if args.capture_screenshots else None
+        if args.segmented_screenshots:
+            screenshot = capture_segmented_screenshots(saved_object, args)
+        elif args.capture_screenshots:
+            screenshot = capture_dashboard_screenshot(saved_object, args)
+        else:
+            screenshot = None
         browser_audit = capture_browser_audit(saved_object, args) if args.browser_audit else None
         dashboards.append(
             inspect_dashboard(
@@ -817,6 +1170,8 @@ def main():
                 screenshot=screenshot,
                 browser_audit=browser_audit,
                 es_api_key=args.es_api_key,
+                validation_workers=getattr(args, "validation_workers", 1),
+                verify=verify,
             )
         )
 
@@ -829,6 +1184,7 @@ def main():
     }
 
     output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2))
 
     summary = payload["summary"]

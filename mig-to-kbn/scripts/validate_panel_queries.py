@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Validate every panel query in compiled YAML against the live ES cluster.
 
 Two-phase approach:
@@ -9,19 +12,20 @@ Two-phase approach:
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
-import sys
-import time
-import yaml
-import urllib.request
-import urllib.error
 import ssl
+import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-ES_ENDPOINT = os.environ["ELASTICSEARCH_ENDPOINT"]
-KEY = os.environ["KEY"]
+import yaml
+
+ES_ENDPOINT = os.environ.get("ELASTICSEARCH_ENDPOINT", "")
+KEY = os.environ.get("KEY", "")
 CTX = ssl.create_default_context()
 MAX_BROKEN_PCT = int(os.environ.get("MAX_BROKEN_PCT", "10"))
 VALIDATION_WORKERS = int(os.environ.get("VALIDATION_WORKERS", "8"))
@@ -132,11 +136,14 @@ def _split_parens(text: str) -> list[str]:
     parts, current, depth = [], [], 0
     for ch in text:
         if ch == "(":
-            depth += 1; current.append(ch)
+            depth += 1
+            current.append(ch)
         elif ch == ")":
-            depth -= 1; current.append(ch)
+            depth -= 1
+            current.append(ch)
         elif ch == "," and depth == 0:
-            parts.append("".join(current)); current = []
+            parts.append("".join(current))
+            current = []
         else:
             current.append(ch)
     if current:
@@ -174,11 +181,13 @@ def _inject_limit_zero(query: str) -> str:
 
 def phase2_validate(query: str) -> tuple[str, str, int]:
     query = query.strip()
-    if query.upper().startswith("ROW ") or query.upper().startswith("PROMQL "):
+    is_promql = query.upper().startswith("PROMQL ")
+    if query.upper().startswith("ROW "):
         return "OK", "constant/promql", 1
 
-    query = _sub_time_params(query)
-    query = _inject_limit_zero(query)
+    if not is_promql:
+        query = _sub_time_params(query)
+        query = _inject_limit_zero(query)
 
     result = _es_request("POST", "/_query", {"query": query})
     if "error" in result:
@@ -190,7 +199,7 @@ def phase2_validate(query: str) -> tuple[str, str, int]:
                 reason = root[0].get("reason", reason)
             return "ERROR", (reason or json.dumps(err))[:250], 0
         return "ERROR", str(err)[:250], 0
-    return "OK", "valid", 0
+    return "OK", "valid", len(result.get("values", []) or [])
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +219,7 @@ def _walk_panels(items, out):
     for item in items:
         if "section" in item:
             _walk_panels(item["section"].get("panels", []), out)
-        elif "esql" in item:
-            out.append(item)
-        elif "promql" in item:
+        elif "esql" in item or "promql" in item:
             out.append(item)
 
 
@@ -220,9 +227,66 @@ def _walk_panels(items, out):
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
-    yaml_dir = sys.argv[1] if len(sys.argv) > 1 else "migration_output_native/yaml"
-    specific = sys.argv[2] if len(sys.argv) > 2 else None
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "yaml_dir",
+        nargs="?",
+        default="migration_output_native/dashboards/yaml",
+        help="Directory containing compiled YAML dashboards",
+    )
+    parser.add_argument(
+        "specific",
+        nargs="?",
+        default=None,
+        help="Optional dashboard filename substring to filter on",
+    )
+    parser.add_argument(
+        "--es-endpoint",
+        default=os.environ.get("ELASTICSEARCH_ENDPOINT", ""),
+        help="Elasticsearch endpoint URL",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("KEY", ""),
+        help="Elasticsearch API key",
+    )
+    parser.add_argument(
+        "--max-broken-pct",
+        type=int,
+        default=int(os.environ.get("MAX_BROKEN_PCT", "10")),
+        help="Maximum allowed broken-panel percentage",
+    )
+    parser.add_argument(
+        "--validation-workers",
+        type=int,
+        default=int(os.environ.get("VALIDATION_WORKERS", "8")),
+        help="Thread pool size for query validation",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None):
+    global ES_ENDPOINT
+    global KEY
+    global MAX_BROKEN_PCT
+    global VALIDATION_WORKERS
+
+    args = parse_args(argv)
+    ES_ENDPOINT = args.es_endpoint
+    KEY = args.api_key
+    MAX_BROKEN_PCT = args.max_broken_pct
+    VALIDATION_WORKERS = args.validation_workers
+
+    if not ES_ENDPOINT or not KEY:
+        print("ERROR: ELASTICSEARCH_ENDPOINT and KEY must be set (or pass --es-endpoint/--api-key)")
+        return 1
+
+    yaml_dir = args.yaml_dir
+    specific = args.specific
 
     yaml_files = sorted(
         f for f in os.listdir(yaml_dir)
@@ -334,10 +398,11 @@ def main():
 
     if broken_pct > MAX_BROKEN_PCT:
         print(f"\n  VALIDATION FAILED: {broken_pct:.1f}% broken > {MAX_BROKEN_PCT}% threshold.")
-        sys.exit(1)
-    else:
-        print(f"\n  VALIDATION PASSED")
+        return 1
+
+    print("\n  VALIDATION PASSED")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

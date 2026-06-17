@@ -1,14 +1,20 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import pathlib
 import sys
 import unittest
 from unittest import mock
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from observability_migration.adapters.source.grafana.local_ai import parse_json_response_content, render_json_user_message, resolve_task_model
+from observability_migration.adapters.source.grafana.local_ai import (  # noqa: E402
+    parse_json_response_content,
+    render_json_user_message,
+    resolve_task_model,
+)
 
 
 class LocalAITests(unittest.TestCase):
