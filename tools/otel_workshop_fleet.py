@@ -438,6 +438,90 @@ def _run_worker(spec: dict[str, str]) -> int:
         "system_disk_io", unit="%", description="system.disk.io proxy", callbacks=[disk_io_obs]
     )
 
+    _DISK_DEVICES = ("/dev/xvda", "/dev/nvme0n1", "/dev/sda")
+
+    def disk_free_obs(_options: object):
+        phase = (time.time() - t0) / 77.0 + seed * 0.03
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(20e9, min(180e9, 100e9 + 60e9 * math.sin(phase) + rng.uniform(-5e9, 5e9))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_free", unit="By", description="system.disk.free → system_disk_free", callbacks=[disk_free_obs]
+    )
+
+    def disk_in_use_obs(_options: object):
+        phase = (time.time() - t0) / 77.0 + seed * 0.03
+        for dev_name in _DISK_DEVICES:
+            free = max(20e9, min(180e9, 100e9 + 60e9 * math.sin(phase)))
+            yield Observation(max(5.0, min(95.0, (200e9 - free) / 200e9 * 100.0)), {"device": dev_name})
+
+    meter.create_observable_gauge(
+        "system_disk_in_use",
+        unit="%",
+        description="system.disk.in_use → system_disk_in_use",
+        callbacks=[disk_in_use_obs],
+    )
+
+    def disk_queue_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(0.0, min(8.0, 2.0 + 4.0 * abs(math.sin(phase)) + rng.uniform(-0.5, 0.5))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_queue_size",
+        unit="1",
+        description="system.disk.queue_size → system_disk_queue_size",
+        callbacks=[disk_queue_obs],
+    )
+
+    def disk_read_time_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(1.0, min(40.0, 12.0 + 18.0 * abs(math.sin(phase)) + rng.uniform(-1.0, 1.0))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_read_time_pct",
+        unit="%",
+        description="system.disk.read_time_pct → system_disk_read_time_pct",
+        callbacks=[disk_read_time_obs],
+    )
+
+    def disk_write_time_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05 + 1.1
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(0.5, min(25.0, 7.0 + 12.0 * abs(math.sin(phase)) + rng.uniform(-0.5, 0.5))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_write_time_pct",
+        unit="%",
+        description="system.disk.write_time_pct → system_disk_write_time_pct",
+        callbacks=[disk_write_time_obs],
+    )
+
+    def disk_io_util_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(1.0, min(98.0, 35.0 + 40.0 * math.sin(phase) + rng.uniform(-6.0, 6.0))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_io_util", unit="%", description="system.io.util → system_io_util", callbacks=[disk_io_util_obs]
+    )
+
     def apdex_obs(_options: object):
         phase = (time.time() - t0) / 67.0 + (seed % 11) * 0.09
         yield Observation(max(0.55, min(0.995, 0.82 + 0.14 * math.sin(phase))))
