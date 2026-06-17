@@ -206,6 +206,21 @@ def _run_worker(spec: dict[str, str]) -> int:
         unit="ms",
         description="Datadog trace.http.request.duration (ms) for service-overview / error-budget panels",
     )
+    trace_client_errors = meter.create_counter(
+        "trace_http_client_errors",
+        unit="1",
+        description="Datadog trace.http.client_errors → trace_http_client_errors",
+    )
+    trace_spans = meter.create_counter(
+        "trace_spans_finished",
+        unit="1",
+        description="Datadog trace.spans.finished → trace_spans_finished",
+    )
+    trace_dns_hist = meter.create_histogram(
+        "trace_dns_lookup_duration",
+        unit="ms",
+        description="Datadog trace.dns.lookup.duration (ms) → trace_dns_lookup_duration",
+    )
     ctx_switches = meter.create_counter(
         "system_cpu_context_switches",
         unit="1",
@@ -430,6 +445,11 @@ def _run_worker(spec: dict[str, str]) -> int:
             trace_dur_ms.record(round(rng.uniform(6.0, 220.0), 2), dd_trace_attrs)
         if status >= 500 or (status == 429) or (rng.random() < 0.09):
             trace_errors.add(burst if status >= 500 else 1, dd_trace_attrs)
+
+        trace_spans.add(burst, {"service.name": service})
+        if status >= 500 or (status == 429) or (rng.random() < 0.09):
+            trace_client_errors.add(1, {"service.name": service, "http.route": route})
+        trace_dns_hist.record(round(rng.uniform(0.5, 80.0), 2), {"service.name": service})
 
         for _ in range(burst):
             duration_s = round(rng.uniform(0.006, 0.42), 4)
