@@ -104,11 +104,19 @@ fi
   --ensure-data-views \
   --fetch-alerts
 
-n_yaml="$(find "${OUT}/yaml" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
-echo "    YAML dashboards: ${n_yaml} (under ${OUT}/yaml/)"
+# Support both old layout (yaml/) and new (dashboards/yaml/) from newer mig-to-kbn.
+if [ -d "${OUT}/dashboards/yaml" ]; then
+  n_yaml="$(find "${OUT}/dashboards/yaml" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
+  echo "    YAML dashboards: ${n_yaml} (under ${OUT}/dashboards/yaml/)"
+else
+  n_yaml="$(find "${OUT}/yaml" -maxdepth 1 -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')" || n_yaml=0
+  echo "    YAML dashboards: ${n_yaml} (under ${OUT}/yaml/)"
+fi
 
 echo "==> [3/4] Publishing Grafana-derived rules from alert_comparison_results.json (disabled in Kibana by default)..."
-"${PY}" "${ROOT}/tools/publish_grafana_alert_drafts_kibana.py" --comparison "${OUT}/alert_comparison_results.json"
+ALERT_COMPARISON="${OUT}/alert_comparison_results.json"
+[ -f "${OUT}/alerts/alert_comparison_results.json" ] && ALERT_COMPARISON="${OUT}/alerts/alert_comparison_results.json"
+"${PY}" "${ROOT}/tools/publish_grafana_alert_drafts_kibana.py" --comparison "${ALERT_COMPARISON}"
 
-echo "==> [4/4] Open Elastic Serverless → Dashboards + Rules. Artifacts: ${OUT}/migration_report.json, ${OUT}/alert_comparison_results.json"
+echo "==> [4/4] Open Elastic Serverless → Dashboards + Rules. Artifacts: ${OUT}/migration_report.json (or dashboards/), ${OUT}/alert_comparison_results.json (or alerts/)"
 echo "==> Done."
