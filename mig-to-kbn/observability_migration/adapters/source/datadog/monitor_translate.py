@@ -1,11 +1,14 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Trusted Datadog monitor query translation for alert migration."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone as dt_timezone
-from functools import lru_cache
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from functools import cache
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -188,7 +191,10 @@ def _translate_metric_monitor(
     if not _metric_query_is_supported(metric_query, outer_functions):
         return DatadogMonitorTranslation()
     metric_query = _merge_supported_outer_metric_functions(metric_query, outer_functions)
-    if time_agg != metric_query.space_agg and time_agg != "last":
+    effective_time_agg = time_agg
+    if metric_query.as_count or re.fullmatch(r"p\d+", metric_query.space_agg or ""):
+        effective_time_agg = metric_query.space_agg
+    if effective_time_agg != metric_query.space_agg and effective_time_agg != "last":
         return DatadogMonitorTranslation()
 
     window_seconds = _monitor_span_to_seconds(window)
@@ -263,7 +269,7 @@ def _translate_metric_monitor(
         )
 
     agg_expr = _metric_agg_expr(
-        time_agg,
+        effective_time_agg,
         metric_field,
         metric_query,
         exact_rate_window_seconds=window_seconds if exact_rate_supported else 0,
@@ -549,7 +555,7 @@ def _translate_log_monitor(
             return DatadogMonitorTranslation()
         where_clause = f'KQL("{_esql_escape(kql)}")'
     else:
-        where_clause = log_ast_to_esql_where(log_query.ast, tag_map)
+        where_clause = log_ast_to_esql_where(log_query.ast, field_map)
         if not where_clause and search:
             return DatadogMonitorTranslation()
 
@@ -1316,7 +1322,7 @@ def _parse_calendar_shift_shift(raw_shift: str, raw_timezone: str) -> tuple[int,
     return 0, ""
 
 
-@lru_cache(maxsize=None)
+@cache
 def _calendar_shift_timezone_is_exact(timezone_name: str) -> bool:
     normalized = str(timezone_name or "").strip()
     if not normalized:
@@ -1328,9 +1334,9 @@ def _calendar_shift_timezone_is_exact(timezone_name: str) -> bool:
     except ZoneInfoNotFoundError:
         return False
 
-    current_year = datetime.now(dt_timezone.utc).year
+    current_year = datetime.now(UTC).year
     offsets = {
-        datetime(year, month, 15, 12, 0, tzinfo=dt_timezone.utc).astimezone(tzinfo).utcoffset()
+        datetime(year, month, 15, 12, 0, tzinfo=UTC).astimezone(tzinfo).utcoffset()
         for year in range(current_year - 1, current_year + 11)
         for month in range(1, 13)
     }
@@ -1633,9 +1639,7 @@ def _normalize_log_measure_field(measure_field: str) -> str:
 
 def _collect_log_fields(node: Any) -> list[str]:
     fields: list[str] = []
-    if isinstance(node, LogAttributeFilter):
-        fields.append(node.attribute)
-    elif isinstance(node, LogRange):
+    if isinstance(node, LogAttributeFilter) or isinstance(node, LogRange):
         fields.append(node.attribute)
     elif isinstance(node, LogWildcard):
         if node.attribute:

@@ -33,11 +33,10 @@ python3 tools/datadog_dashboard_to_elastic.py assets/datadog/dashboards/*.json -
 python3 tools/publish_grafana_drafts_kibana.py --drafts-dir build/elastic-datadog-dashboards
 ```
 
-## Path A — mig-to-kbn (default on VM)
+## One command (workshop VM)
 
 ```bash
-cd /root/workshop && source ~/.bashrc
-./scripts/migrate_datadog_dashboards_to_serverless.sh
+bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
 Uses **`datadog-migrate`** (Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + live validation), stage dir with **`monitors/`** for monitor JSON, and **`publish_datadog_alert_drafts_kibana.py`** for the four workshop rules. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**.

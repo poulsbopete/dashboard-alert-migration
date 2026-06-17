@@ -2,6 +2,18 @@
 
 **Audience:** teams **migrating Grafana customers to Elastic Observability Serverless**.
 
-Twenty Grafana JSON files plus **`assets/grafana/alerts/`** → **`grafana-migrate`** (**`--fetch-alerts`**) → **`build/mig-grafana/`** + **`publish_grafana_alert_drafts_kibana.py`** → Kibana (Dashboards + Rules). Legacy Path B still uses **`build/elastic-dashboards/`** with **`publish_grafana_drafts_kibana.py`**. Learners use **Cursor** + **`kibana-dashboards`** patterns to refine on the **es3-api**–provisioned Serverless project.
+Learners run **one command**:
 
-**Path B extension:** Assignment **B5b** walks through downloading **any** dashboard JSON from **[grafana.com/grafana/dashboards](https://grafana.com/grafana/dashboards/)** (or exporting from Grafana), running **`grafana_to_elastic.py`**, then **`publish_grafana_drafts_kibana.py`** — same pipeline as bundled assets, with explicit expectations about data sources and licenses.
+```bash
+bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh
+```
+
+That script: OTLP → **`grafana-migrate`** (20 dashboards + **`--fetch-alerts`**) → **`publish_grafana_alert_drafts_kibana.py`**.
+
+**Optional extensions (not in assignment):**
+
+- **Laptop + Cursor:** clone repo, paste VM **`export`** lines from **`grep … ~/.bashrc`**, run the same migrate script or raw **`grafana-migrate`** (see **`scripts/migrate_grafana_dashboards_to_serverless.sh`**).
+- **Legacy Path B:** **`grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** for `*-elastic-draft.json` flows.
+- **Any grafana.com dashboard:** export JSON → **`grafana_to_elastic.py`** → **`publish_grafana_drafts_kibana.py`**.
+
+**Agent Skills:** **`kibana-dashboards`**, **`agent-skills/workshop-grafana-to-elastic/SKILL.md`**.

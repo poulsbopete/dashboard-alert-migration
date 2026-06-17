@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Parser for Datadog metric query strings and formula expressions.
 
 Metric query format:
@@ -18,22 +21,23 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .parser_results import (
-    ParserDiagnostic,
-    ParserDiagnosticCode,
-    ParserResult,
-)
 from .models import (
+    FormulaBinOp,
+    FormulaExpression,
+    FormulaFuncCall,
+    FormulaNumber,
+    FormulaRef,
+    FormulaString,
+    FormulaUnary,
     FunctionCall,
     MetricQuery,
     ScopeBoolOp,
     TagFilter,
-    FormulaExpression,
-    FormulaBinOp,
-    FormulaFuncCall,
-    FormulaNumber,
-    FormulaRef,
-    FormulaUnary,
+)
+from .parser_results import (
+    ParserDiagnostic,
+    ParserDiagnosticCode,
+    ParserResult,
 )
 
 
@@ -192,11 +196,16 @@ def _parse_scope(scope_str: str) -> list[Any]:
 
 
 def _split_scope(scope_str: str) -> list[str]:
-    """Split scope on commas, respecting quoted strings."""
+    """Split scope on commas, respecting quoted strings and parentheses.
+
+    Parentheses must be honored so a Datadog ``key IN (a, b, c)`` list is not
+    split on its internal commas (which would silently drop the filter).
+    """
     parts: list[str] = []
     current: list[str] = []
     in_quote = False
     quote_char = ""
+    depth = 0
     for ch in scope_str:
         if ch in ('"', "'") and not in_quote:
             in_quote = True
@@ -205,7 +214,13 @@ def _split_scope(scope_str: str) -> list[str]:
         elif ch == quote_char and in_quote:
             in_quote = False
             current.append(ch)
-        elif ch == "," and not in_quote:
+        elif not in_quote and ch == "(":
+            depth += 1
+            current.append(ch)
+        elif not in_quote and ch == ")":
+            depth = max(depth - 1, 0)
+            current.append(ch)
+        elif ch == "," and not in_quote and depth == 0:
             parts.append("".join(current))
             current = []
         else:
@@ -219,7 +234,7 @@ def _parse_boolean_scope(scope_str: str) -> list[Any]:
     filters: list[Any] = []
     for part in _split_on_keyword(scope_str, "AND"):
         part = part.strip().strip(",").strip()
-        if not part or part == "*" or _TEMPLATE_VAR_RE.fullmatch(part):
+        if not part or part == "*":
             continue
         if part.startswith("(") and part.endswith(")"):
             part = part[1:-1].strip()
@@ -230,9 +245,11 @@ def _parse_boolean_scope(scope_str: str) -> list[Any]:
             options = [p.strip() for p in _split_on_keyword(part, "OR") if p.strip()]
             parsed = []
             for option in options:
-                if _TEMPLATE_VAR_RE.fullmatch(option):
-                    continue
-                if ":" not in option and not option.startswith(("!", "-")):
+                if (
+                    ":" not in option
+                    and not option.startswith(("!", "-"))
+                    and not _TEMPLATE_VAR_RE.fullmatch(option)
+                ):
                     continue
                 parsed.append(_parse_single_filter(option))
             if parsed and all(
@@ -301,12 +318,29 @@ def _split_on_keyword(text: str, keyword: str) -> list[str]:
     return parts
 
 
+_IN_LIST_RE = re.compile(
+    r"^(?P<key>[^:!\s][^:]*?)\s+(?P<op>NOT\s+IN|IN)\s*\((?P<members>[^)]*)\)\s*$",
+    re.IGNORECASE,
+)
+
+
 def _parse_single_filter(part: str) -> TagFilter:
+    in_match = _IN_LIST_RE.match(part.strip())
+    if in_match:
+        members = [
+            m.strip().strip("'\"")
+            for m in in_match.group("members").split(",")
+            if m.strip()
+        ]
+        return TagFilter(
+            key=in_match.group("key").strip(),
+            value="|".join(members),
+            negated=in_match.group("op").upper().startswith("NOT"),
+            is_in_list=True,
+        )
+
     negated = False
-    if part.startswith("!"):
-        negated = True
-        part = part[1:]
-    elif part.startswith("-"):
+    if part.startswith("!") or part.startswith("-"):
         negated = True
         part = part[1:]
 
@@ -316,9 +350,7 @@ def _parse_single_filter(part: str) -> TagFilter:
 
     key = part[:colon_pos].strip()
     value = part[colon_pos + 1:].strip()
-    if value.startswith('"') and value.endswith('"'):
-        value = value[1:-1]
-    elif value.startswith("'") and value.endswith("'"):
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         value = value[1:-1]
 
     return TagFilter(key=key, value=value, negated=negated)
@@ -391,9 +423,7 @@ def _parse_function_args(args_str: str) -> list[Any]:
         p = p.strip()
         if not p:
             continue
-        if p.startswith('"') and p.endswith('"'):
-            result.append(p[1:-1])
-        elif p.startswith("'") and p.endswith("'"):
+        if (p.startswith('"') and p.endswith('"')) or (p.startswith("'") and p.endswith("'")):
             result.append(p[1:-1])
         else:
             try:
@@ -407,10 +437,11 @@ def _parse_function_args(args_str: str) -> list[Any]:
 
 
 def _split_args(text: str) -> list[str]:
-    """Split function arguments on commas, respecting parens and quotes."""
+    """Split function arguments on commas, respecting parens, braces, and quotes."""
     parts: list[str] = []
     current: list[str] = []
     depth = 0
+    brace_depth = 0
     in_quote = False
     quote_char = ""
     for ch in text:
@@ -428,7 +459,13 @@ def _split_args(text: str) -> list[str]:
             elif ch == ")":
                 depth -= 1
                 current.append(ch)
-            elif ch == "," and depth == 0:
+            elif ch == "{":
+                brace_depth += 1
+                current.append(ch)
+            elif ch == "}":
+                brace_depth -= 1
+                current.append(ch)
+            elif ch == "," and depth == 0 and brace_depth == 0:
                 parts.append("".join(current))
                 current = []
             else:
@@ -517,6 +554,8 @@ class _FormulaTokenizer:
         r"""
         (\d+(?:\.\d+)?)       # number
         |([a-zA-Z_]\w*)       # identifier (query ref or function name)
+        |('(?:[^'\\]|\\.)*')  # single-quoted string
+        |("(?:[^"\\]|\\.)*")  # double-quoted string
         |([+\-*/])            # operator
         |([(),])              # punctuation
         |\s+                  # whitespace (skip)
@@ -537,9 +576,13 @@ class _FormulaTokenizer:
             elif m.group(2) is not None:
                 tokens.append(("IDENT", m.group(2)))
             elif m.group(3) is not None:
-                tokens.append(("OP", m.group(3)))
+                tokens.append(("STR", m.group(3)[1:-1]))
             elif m.group(4) is not None:
-                tokens.append(("PUNCT", m.group(4)))
+                tokens.append(("STR", m.group(4)[1:-1]))
+            elif m.group(5) is not None:
+                tokens.append(("OP", m.group(5)))
+            elif m.group(6) is not None:
+                tokens.append(("PUNCT", m.group(6)))
         return tokens
 
 
@@ -611,6 +654,10 @@ class _FormulaParser:
         if tok[0] == "NUM":
             self.consume()
             return FormulaNumber(value=float(tok[1]))
+
+        if tok[0] == "STR":
+            self.consume()
+            return FormulaString(value=tok[1])
 
         if tok[0] == "IDENT":
             name = self.consume()[1]

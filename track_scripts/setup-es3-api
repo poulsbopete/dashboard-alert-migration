@@ -244,33 +244,15 @@ python3 -m venv /opt/workshop-venv
 /opt/workshop-venv/bin/pip install --upgrade pip
 /opt/workshop-venv/bin/pip install -r "$TRACK_ROOT/tools/requirements.txt"
 
-# mig-to-kbn: must be vendored in the workshop git tree. Do NOT clone from .gitmodules here — upstream is often
-# private (elastic/mig-to-kbn) and sandboxes have no gh/SSH. Refresh on a laptop: ./scripts/update_mig_to_kbn.sh, commit, push.
-# Optional: set WORKSHOP_MIG_TO_KBN_GIT_URL (+ WORKSHOP_MIG_TO_KBN_GIT_REF) to an internal mirror with HTTPS token / deploy key.
-if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ]; then
-  _mig_url="${WORKSHOP_MIG_TO_KBN_GIT_URL:-}"
-  if [ -d "$TRACK_ROOT/.git" ]; then
-    echo "mig-to-kbn missing: trying git submodule update --init (parent .git only)..."
-    git -C "$TRACK_ROOT" submodule update --init --depth 1 mig-to-kbn 2>/dev/null \
-      || git -C "$TRACK_ROOT" submodule update --init mig-to-kbn 2>/dev/null \
-      || true
-  fi
-  if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -n "$_mig_url" ]; then
-    echo "mig-to-kbn missing: cloning from WORKSHOP_MIG_TO_KBN_GIT_URL (host-provided mirror) ..."
-    rm -rf "$TRACK_ROOT/mig-to-kbn"
-    _mig_ref="${WORKSHOP_MIG_TO_KBN_GIT_REF:-}"
-    if [ -n "$_mig_ref" ]; then
-      git clone --depth 1 --branch "$_mig_ref" "$_mig_url" "$TRACK_ROOT/mig-to-kbn" \
-        || git clone --depth 1 "$_mig_url" "$TRACK_ROOT/mig-to-kbn" \
-        || true
-    else
-      git clone --depth 1 "$_mig_url" "$TRACK_ROOT/mig-to-kbn" || true
-    fi
-    if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ]; then
-      echo "ERROR: WORKSHOP_MIG_TO_KBN_GIT_URL is set but mig-to-kbn clone failed (auth / URL / network)." >&2
-      exit 1
-    fi
-  fi
+# mig-to-kbn (elastic/observability-migration-platform): vendored in workshop git when present; otherwise
+# clone the public repo at track bootstrap. Override with WORKSHOP_MIG_TO_KBN_GIT_URL (+ _GIT_REF).
+if [ ! -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/ensure_workshop_mig_to_kbn_sources.sh" ]; then
+  MIG_TO_KBN_DIR="$TRACK_ROOT/mig-to-kbn" bash "$TRACK_ROOT/scripts/ensure_workshop_mig_to_kbn_sources.sh" || {
+    echo "ERROR: could not obtain mig-to-kbn sources (submodule or public clone failed)." >&2
+    echo "       Default: https://github.com/elastic/observability-migration-platform.git" >&2
+    echo "       Override: WORKSHOP_MIG_TO_KBN_GIT_URL / WORKSHOP_MIG_TO_KBN_GIT_REF on es3-api." >&2
+    exit 1
+  }
 fi
 
 WORKSHOP_MIG_TO_KBN_READY=0
@@ -284,9 +266,9 @@ if [ -f "$TRACK_ROOT/mig-to-kbn/pyproject.toml" ] && [ -x "$TRACK_ROOT/scripts/i
     WORKSHOP_MIG_TO_KBN_READY=0
   fi
 else
-  echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until mig-to-kbn is on disk." >&2
-  echo "      Fix (recommended): on your laptop run ./scripts/update_mig_to_kbn.sh (uses gh if logged in), git add mig-to-kbn && commit && push;" >&2
-  echo "      then re-publish the track. Optional on es3-api: WORKSHOP_MIG_TO_KBN_GIT_URL (+ _GIT_REF) = internal HTTPS/SSH mirror." >&2
+  echo "WARN: $TRACK_ROOT/mig-to-kbn/pyproject.toml not found — Path A migrate scripts will fail until sources are on disk." >&2
+  echo "      Fix: bash $TRACK_ROOT/scripts/ensure_workshop_mig_to_kbn_sources.sh" >&2
+  echo "      (default clone: https://github.com/elastic/observability-migration-platform.git)" >&2
 fi
 
 ALLOY_VER="${ALLOY_VERSION:-v1.8.3}"

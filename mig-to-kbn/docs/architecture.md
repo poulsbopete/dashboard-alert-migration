@@ -41,7 +41,10 @@ is Elastic Serverless.
 
 That changes the preferred Grafana translation branch:
 
-- compatible PromQL panels prefer native `PROMQL` when `--native-promql` is enabled
+- compatible PromQL panels use native `PROMQL` by default; when `--es-url` is
+  configured, target capability detection downgrades to ES|QL translation if the
+  `PROMQL` command is unsupported. `--native-promql` forces native and skips
+  detection; `--no-native-promql` opts out
 - LogQL panels still translate to ES|QL against the configured logs index
 - source-native ES|QL can be reused directly
 - the local OTLP lab is a repeatable stand-in for local development and CI, not the primary production target
@@ -182,12 +185,12 @@ the same stage sequence.
 
 | Stage | Grafana dedicated pipeline | Datadog dedicated pipeline |
 |---|---|---|
-| Runtime setup | Load rule packs/plugins, configure dataset filters, build `SchemaResolver`, optionally auto-enable `--validate` for upload/preflight | Load field profile, derive dataset filters, optionally load live `_field_caps` into the field map, and auto-enable `--validate` for upload when `--es-url` is present |
+| Runtime setup | Load rule packs/plugins, configure dataset filters, build `SchemaResolver`, and support explicit `--validate` for upload/preflight workflows | Load field profile, derive dataset filters, optionally load live `_field_caps` into the field map, and support explicit `--validate` during upload workflows |
 | Extract | `extract_dashboards_from_files()` or `extract_dashboards_from_grafana()` for dashboard documents; links/annotations/transforms/legacy alerts are derived later from dashboard JSON | `extract_dashboards_from_files()` or `extract_dashboards_from_api()` for dashboard objects; monitors stay out of scope as first-class live inputs |
 | Normalize | Mostly folded into dashboard/panel translation and layout handling | Explicit `normalize_dashboard()` to `NormalizedDashboard` / `NormalizedWidget` before planning |
 | Planning | Translation path chosen inside Grafana panel/query flow: native `PROMQL`, rule-engine ES|QL, LLM fallback, or native ES|QL reuse | Explicit `plan_widget()` chooses `lens`, `esql`, `esql_with_kql`, `markdown`, `group`, or `blocked` |
 | Translate | `translate_dashboard()` handles queries, panel mapping, controls, layout, and initial YAML emission | `translate_widget()` runs after planning; YAML is emitted later by `generate_dashboard_yaml()` |
-| Preflight / capability safety | Customer-facing preflight mode plus source/target probes; validation can be auto-enabled | Capability-aware preflight runs before translation when `--preflight` or live field capabilities are available |
+| Preflight / capability safety | Customer-facing preflight mode plus source/target probes; validation remains part of the preflight flow when target access is configured | Capability-aware preflight runs before translation when `--preflight` or live field capabilities are available |
 | Target query validation | First-class `--validate --es-url` loop with auto-fix/manualize and YAML sync | First-class `--validate --es-url` loop with shared ES query fixes plus Datadog-safe YAML regeneration/manualization |
 | Compile / layout | YAML lint, compile, and compiled-layout validation are part of the main Grafana flow | Optional shared compile via `--compile`, after any validation-driven YAML rewrites |
 | Upload | First-class `--upload` in the dedicated CLI after lint/compile/layout pass | First-class `--upload` in the dedicated CLI after compile; shared `obs-migrate upload` remains available |
@@ -309,7 +312,7 @@ The current architecture is intentionally honest about what is still partial:
 7. `observability_migration/app/cli.py` for the unified bootstrap
 8. `observability_migration/adapters/source/grafana/cli.py` or `observability_migration/adapters/source/datadog/cli.py` for the active source path
 9. `observability_migration/targets/kibana/compile.py` for shared compile/upload helpers
-10. `scripts/full_local_demo.sh` (full and bundled sample local validation flows) and `scripts/setup_serverless_data.py` for operational flows
+10. `scripts/full_local_demo.sh` (full and bundled sample local validation flows) and `scripts/setup_telemetry_data.py` for operational flows
 
 ## Related Docs
 
@@ -324,4 +327,3 @@ The current architecture is intentionally honest about what is still partial:
 | `docs/sources/datadog.md` | Datadog adapter details |
 | `docs/targets/kibana.md` | Shared Kibana target runtime |
 | `docs/local-otlp-validation.md` | Local validation lab |
-| `REMAINING-ROADMAP.md` | Current roadmap and highest-priority gaps |

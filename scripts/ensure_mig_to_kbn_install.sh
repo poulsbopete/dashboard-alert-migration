@@ -20,9 +20,15 @@ if [ -x "$BIN" ]; then
 fi
 
 if [ ! -f "${ROOT}/mig-to-kbn/pyproject.toml" ]; then
+  if [ -x "${ROOT}/scripts/ensure_workshop_mig_to_kbn_sources.sh" ]; then
+    bash "${ROOT}/scripts/ensure_workshop_mig_to_kbn_sources.sh" || true
+  fi
+fi
+
+if [ ! -f "${ROOT}/mig-to-kbn/pyproject.toml" ]; then
   echo "ERROR: ${BIN} not found and mig-to-kbn is missing at ${ROOT}/mig-to-kbn." >&2
-  echo "       Vendor tree: run ./scripts/update_mig_to_kbn.sh on your laptop (gh auth login for private elastic/mig-to-kbn)," >&2
-  echo "       commit mig-to-kbn/, push, and refresh the track. Optional VM mirror: WORKSHOP_MIG_TO_KBN_GIT_URL." >&2
+  echo "       Run: bash scripts/ensure_workshop_mig_to_kbn_sources.sh" >&2
+  echo "       Default upstream: https://github.com/elastic/observability-migration-platform.git" >&2
   exit 1
 fi
 

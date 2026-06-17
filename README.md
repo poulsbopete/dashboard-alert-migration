@@ -6,35 +6,34 @@
 → Kibana rules, **PromQL / metric-query** handoffs, and **OTLP** telemetry landing in Elastic’s **managed OTLP** so migrated
 views are validated on **live** Serverless data.
 
-**Primary migration engine:** **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (`grafana-migrate`, `datadog-migrate`).
-Read upstream [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md),
-[Grafana sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md), and
-[Datadog sources](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md). This repo **vendors** **`mig-to-kbn/`** in git (same tree as [elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)), so Instruqt sandboxes and **`git clone`** get **`pyproject.toml`** without pulling from GitHub at lab start. **Refresh vendored sources on your laptop** (not on the sandbox): **`gh auth login`** then **`./scripts/update_mig_to_kbn.sh`** — the script prefers **`gh repo clone elastic/mig-to-kbn`** when authenticated (private upstream is fine), else **`MIG_TO_KBN_GIT_URL`** (SSH/HTTPS), else public HTTPS. Then **`git add mig-to-kbn && git commit && git push`** and republish the track. Forks that strip **`mig-to-kbn/`** can set host env **`WORKSHOP_MIG_TO_KBN_GIT_URL`** (optional **`WORKSHOP_MIG_TO_KBN_GIT_REF`**) on **`es3-api`** for an **internal mirror** only; setup does **not** read **`.gitmodules`** URLs into the VM (they often point at private repos). When **`mig-to-kbn/pyproject.toml`** is present, bootstrap runs **`scripts/install_workshop_mig_to_kbn.sh`**, which installs **`uv`**
+**Primary migration engine:** **[elastic/observability-migration-platform](https://github.com/elastic/observability-migration-platform)** (`obs-migrate`, `grafana-migrate`, `datadog-migrate`; formerly **elastic/mig-to-kbn**).
+Read upstream [architecture](https://github.com/elastic/observability-migration-platform/blob/main/docs/architecture.md),
+[Grafana sources](https://github.com/elastic/observability-migration-platform/blob/main/docs/sources/grafana.md), and
+[Datadog sources](https://github.com/elastic/observability-migration-platform/blob/main/docs/sources/datadog.md). This repo may **vendor** **`mig-to-kbn/`** in git (local directory name for the upstream tree). **Instruqt sandboxes clone the public repo at bootstrap** when **`mig-to-kbn/pyproject.toml`** is not in the workshop mount — default **`https://github.com/elastic/observability-migration-platform.git`** (override with host env **`WORKSHOP_MIG_TO_KBN_GIT_URL`** / **`WORKSHOP_MIG_TO_KBN_GIT_REF`**). **Refresh vendored sources on your laptop** with **`./scripts/update_mig_to_kbn.sh`**, then optionally **`git add mig-to-kbn && git commit && git push`**. When **`mig-to-kbn/pyproject.toml`** is present, bootstrap runs **`scripts/install_workshop_mig_to_kbn.sh`**, which installs **`uv`**
 and a **Python 3.12** venv at **`/opt/mig-to-kbn-venv`**; dashboard compile/upload invokes **`uvx kb-dashboard-cli`**, so **`uv`**
-stays on **`PATH`** via **`~/.bashrc`**. If **`mig-to-kbn/`** is missing, setup continues with a warning and Path A migrate scripts exit with an error until you install it.
+stays on **`PATH`** via **`~/.bashrc`**.
 
 ### Upstream boundary — do not treat `mig-to-kbn/` as a workshop scratchpad
 
-**[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the **canonical home** for **`grafana-migrate`**, **`datadog-migrate`**, translators, and the shared Kibana compile/upload path. **Do not modify vendored `mig-to-kbn/` in this repo** to fix migration behavior, add lab-only hacks, or fork the engine long term.
+**[elastic/observability-migration-platform](https://github.com/elastic/observability-migration-platform)** is the **canonical home** for **`grafana-migrate`**, **`datadog-migrate`**, translators, and the shared Kibana compile/upload path. **Do not modify vendored `mig-to-kbn/` in this repo** to fix migration behavior, add lab-only hacks, or fork the engine long term.
 
 - **Workshop-specific work** belongs here: **`assets/grafana/`**, **`assets/datadog/`**, **`scripts/`**, **`track_scripts/`**, lab **`assignment.md`**, legacy **`tools/`** publishers, **`agent-skills/`** wrappers, **`track.yml`**, etc.
-- **Engine bugs, new panel support, CLI flags, or translator fixes** → open **[Issues](https://github.com/elastic/mig-to-kbn/issues)** / **[Pull requests](https://github.com/elastic/mig-to-kbn/pulls)** on **elastic/mig-to-kbn**, then refresh this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored bump.
+- **Engine bugs, new panel support, CLI flags, or translator fixes** → open **[Issues](https://github.com/elastic/observability-migration-platform/issues)** / **[Pull requests](https://github.com/elastic/observability-migration-platform/pulls)** upstream, then refresh this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored bump.
 
 The **`mig-to-kbn/`** directory in git is an **upstream snapshot** (aligned via the update script), not a second place to maintain migration logic.
 
-### When **elastic/mig-to-kbn** is updated (maintainer checklist)
+### When the migration platform is updated (maintainer checklist)
 
-Do this on your **laptop** (or CI with credentials), **not** on the Instruqt VM — sandboxes do not clone private upstream.
+Do this on your **laptop** (or CI), not on the Instruqt VM.
 
-1. **Authenticate** (if the upstream repo is private): `gh auth login`
-2. **Refresh the vendored tree:** from repo root, run **`./scripts/update_mig_to_kbn.sh`**  
-   - Optional: **`MIG_TO_KBN_REF=main`** (default) or another branch/tag; **`MIG_TO_KBN_GIT_URL=…`** if you use SSH/HTTPS instead of `gh`.
-   - Optional: **`./scripts/update_mig_to_kbn.sh --reinstall`** to also reinstall the local/VM-style venv after the bump (needs a suitable machine).
-3. **Review** `git diff mig-to-kbn/` (release notes / breaking CLI changes upstream).
-4. **Commit and push:** `git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"` && **`git push origin main`**
-5. **Publish the workshop:** **`instruqt track validate`** then **`instruqt track push`** (or **`./scripts/push_git_and_instruqt.sh`** after your commit).
+1. **Refresh sources:** from repo root, run **`./scripts/update_mig_to_kbn.sh`**  
+   - Optional: **`MIG_TO_KBN_REF=main`** (default) or another branch/tag; **`MIG_TO_KBN_GIT_URL=…`** to override the clone URL.
+   - Optional: **`./scripts/update_mig_to_kbn.sh --reinstall`** to also reinstall the local/VM-style venv after the bump.
+2. **Review** `git diff mig-to-kbn/` (release notes / breaking CLI changes upstream).
+3. **Optional commit and push:** `git add mig-to-kbn && git commit -m "Bump vendored mig-to-kbn"` && **`git push origin main`**
+4. **Publish the workshop:** **`instruqt track validate`** then **`instruqt track push`** (or **`./scripts/push_git_and_instruqt.sh`** after your commit).
 
-After that, new Instruqt plays and **`sync_workshop_from_git.sh`** pick up the bumped **`mig-to-kbn/`** from this repo.
+New Instruqt plays clone **`observability-migration-platform`** when the track mount omits **`mig-to-kbn/`**; vendored bumps in this repo still apply when the tree is bundled.
 
 **Instruqt** track (**two labs**) for a **high-volume migration spike**: **20** **Grafana** dashboards and **10**
 **Datadog-style** dashboards (plus **4** monitor JSON files) → Kibana on **Observability Serverless**, using
@@ -48,14 +47,14 @@ bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh
 # or Lab 2: bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
-Each migrate script sources **`/root/.bashrc`** and **`cd`s to the workshop root — use **`bash /root/workshop/scripts/…`** so **`$PWD`** does not matter (**`source ~/.bashrc`** alone can change directory and break **`./scripts/…`**).
+Each migrate script sources **`/root/.bashrc`** — use **`bash /root/workshop/scripts/…`** (absolute path) so **`$PWD`** does not matter.
 
 | Lab | One-liner (Terminal) |
 | --- | --- |
-| **Lab 1 — Grafana** | **`bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`** → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--esql-index metrics-*`**, Kibana-only **`--upload`** by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** adds **`--es-url`** + auto validation); **`publish_grafana_alert_drafts_kibana.py`** publishes **Rules** from **`alert_comparison_results.json`**. Artifacts: **`build/mig-grafana/`**. |
-| **Lab 2 — Datadog** | **`bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`** → **`datadog-migrate`** (Kibana-only upload by default; **`WORKSHOP_MIG_ES_VALIDATE=1`** optional); **`publish_datadog_alert_drafts_kibana.py`** publishes **Rules**. Artifacts: **`build/mig-datadog/`**, **`build/elastic-alerts/`**. |
+| **Lab 1 — Grafana** | **`bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh`** — one command: OTLP → **`grafana-migrate`** (20 dashboards + alerts) → Kibana |
+| **Lab 2 — Datadog** | **`bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`** — one command: OTLP → **`datadog-migrate`** (10 dashboards + monitors) → Kibana |
 
-**Path B (laptop + Cursor):** clone this repo **with** **`mig-to-kbn/`**, install **`uv`** + **`./scripts/install_workshop_mig_to_kbn.sh`** (or `uv pip install -e ./mig-to-kbn[all]`), copy `export` lines from `~/.bashrc` on the VM (`grep` patterns are in Lab 1 `assignment.md`), then run the same **`grafana-migrate` / `datadog-migrate`** commands as in the lab assignments.
+**Optional — laptop + Cursor:** clone repo, **`./scripts/install_workshop_mig_to_kbn.sh`**, paste VM **`export`** lines from **`~/.bashrc`**, run the same migrate scripts locally.
 
 **Refresh the repo on an existing sandbox** (same VM, no new play):
 
@@ -177,13 +176,15 @@ Lab **Path A** uses **mig-to-kbn** for dashboard upload; this publisher remains 
 | `02-lab-02-datadog-dashboards-alerts-to-elastic/` | Lab 2: **10** DD dashboards → **`build/mig-datadog/`**; **4** monitors → **`build/elastic-alerts/`** + Rules API |
 | `assets/grafana/` | **20** generated Grafana JSON exports (`scripts/generate_grafana_dashboards.py`); **`alerts/`** — unified **`grafana_alert_rules.json`** + **`grafana_datasources.json`** for **`--fetch-alerts`** |
 | `assets/datadog/dashboards/` | **10** Datadog-style dashboard JSON (**12** timeseries widgets each; regenerate with **`scripts/generate_datadog_dashboards.py`**) |
+| `assets/datadog/integrations-core/` | **8** real integration dashboards from [DataDog/integrations-core](https://github.com/DataDog/integrations-core) (BSD); refresh with **`scripts/update_datadog_integrations_dashboards.sh`** |
 | `assets/datadog/monitor-*.json` | **4** monitor samples |
 | `tools/` | `grafana_to_elastic.py`, `publish_grafana_drafts_kibana.py`, **`publish_grafana_alert_drafts_kibana.py`** (Grafana **`alert_comparison_results.json`** → Rules API), **`generate_dynamic_o11y_dashboard.py`** (probe OTLP streams → one Lens dashboard), **`publish_grafana_es_app_dashboard.py`** (Grafana app + Elasticsearch → ES|QL), `datadog_dashboard_to_elastic.py`, `datadog_to_elastic_alert.py` |
 | `workflows/` | **`dynamic-observability-dashboard.yaml`** — MCP-oriented steps: discovery, **`get_data_summary`**, ES|QL smoke; pair with **`generate_dynamic_o11y_dashboard.py`** to create the dashboard |
 | `scripts/install_workshop_mig_to_kbn.sh` | **`uv`** + **`/opt/mig-to-kbn-venv`** + `pip install -e mig-to-kbn[all]` |
 | `scripts/update_mig_to_kbn.sh` | Pull latest **`mig-to-kbn`** (vendored tree, submodule, or standalone clone); optional **`--reinstall`** venv |
-| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1 Path A:** OTLP → **`grafana-migrate`** (`--native-promql`, **`--fetch-alerts`**, **`--upload`**; optional **`WORKSHOP_MIG_ES_VALIDATE=1`** for **`--es-url`** + validation) → **`publish_grafana_alert_drafts_kibana.py`** |
+| `scripts/migrate_grafana_dashboards_to_serverless.sh` | **Lab 1:** one command — OTLP → **`grafana-migrate`** → **`publish_grafana_alert_drafts_kibana.py`** |
 | `scripts/migrate_datadog_dashboards_to_serverless.sh` | **Lab 2:** OTLP → **`datadog-migrate`** (optional **`WORKSHOP_MIG_ES_VALIDATE=1`**) + monitor JSON → **`publish_datadog_alert_drafts_kibana.py`** |
+| `scripts/migrate_datadog_integrations_to_serverless.sh` | **Lab 2 optional:** integrations-core dashboards → **`build/mig-datadog-integrations/`** |
 | `tools/publish_datadog_alert_drafts_kibana.py` | POST/PUT **`monitor-*-elastic.json`** rule drafts to **`/api/alerting/rule/{id}`** |
 | `tools/publish_grafana_alert_drafts_kibana.py` | POST/PUT emitted **`rule_payload`** rows from **`build/mig-grafana/alert_comparison_results.json`** |
 | `assets/alloy/workshop.alloy` | Alloy: OTLP ingest + Prometheus self-scrape → **mOTLP** export ([Alloy OTLP→HTTP](https://grafana.com/docs/alloy/latest/reference/components/otelcol.exporter.otlphttp/)) |

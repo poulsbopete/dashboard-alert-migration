@@ -8,6 +8,8 @@ The goal is to make it easy to answer this question:
 
 The answer is now yes, using the scripts and infrastructure in this guide.
 
+For the directory-level lab and fixture inventory, see `infra/README.md`.
+
 ## What You Get
 
 The local lab gives you:
@@ -155,15 +157,15 @@ This keeps Alloy as an optional front end instead of making it a hard dependency
 
 `bash scripts/full_local_demo.sh --sample-set bundled` uses three dashboards from `infra/grafana/dashboards`:
 
-- `otel-collector-dashboard.json`
 - `node-exporter-full.json`
-- `loki-dashboard.json`
+- `k8s-views-global.json`
+- `diverse-panels-test.json`
 
 These give you a reasonable mix of:
 
-- collector and OTLP-related metrics
 - large Prometheus-node style dashboards
-- log-oriented panels
+- Kubernetes cluster views
+- mixed panel semantics, including placeholder/manual cases
 
 ## Manual Commands Behind The Helper Script
 
@@ -198,9 +200,9 @@ Then it runs:
   --fail-on-layout-issues \
   --fail-on-not-runtime-checked \
   --fail-on-browser-errors \
-  --dashboard-title "AWS OpenTelemetry Collector" \
   --dashboard-title "Node Exporter Full" \
-  --dashboard-title "Loki Dashboard quick search"
+  --dashboard-title "Kubernetes / Views / Global" \
+  --dashboard-title "Diverse Panel Types Test"
 ```
 
 ## Kibana Data Views

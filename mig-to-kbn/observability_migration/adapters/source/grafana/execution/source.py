@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -24,6 +27,7 @@ def build_source_execution_summary(
     *,
     prometheus_url: str = "",
     loki_url: str = "",
+    verify: bool | str = True,
 ) -> SourceExecutionSummary:
     query_language = str(getattr(panel_result, "query_language", "") or "").lower()
 
@@ -47,7 +51,7 @@ def build_source_execution_summary(
                 query=source_query,
                 reason=f"{adapter} adapter recognized; pass --prometheus-url to enable live source execution",
             )
-        return _execute_live(adapter, query_language, source_query, prometheus_url=prometheus_url)
+        return _execute_live(adapter, query_language, source_query, prometheus_url=prometheus_url, verify=verify)
 
     if query_language == "logql":
         adapter = "loki_http"
@@ -60,7 +64,7 @@ def build_source_execution_summary(
                 query=source_query,
                 reason=f"{adapter} adapter recognized; pass --loki-url to enable live source execution",
             )
-        return _execute_live(adapter, query_language, source_query, loki_url=loki_url)
+        return _execute_live(adapter, query_language, source_query, loki_url=loki_url, verify=verify)
 
     return SourceExecutionSummary(
         status="not_applicable",
@@ -78,6 +82,7 @@ def _execute_live(
     *,
     prometheus_url: str = "",
     loki_url: str = "",
+    verify: bool | str = True,
 ) -> SourceExecutionSummary:
     if not query:
         return SourceExecutionSummary(
@@ -92,6 +97,7 @@ def _execute_live(
         query_language,
         prometheus_url=prometheus_url,
         loki_url=loki_url,
+        verify=verify,
     )
     if result.status == "pass":
         return SourceExecutionSummary(

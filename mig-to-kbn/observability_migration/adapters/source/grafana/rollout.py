@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Rollout safety: artifact lineage, rollout states, and shadow-space workflow.
 
 This module provides the infrastructure for safe, traceable migration deployments.
@@ -13,7 +16,6 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
 
 ROLLOUT_STATES = (
     "report_only",
@@ -243,10 +245,10 @@ def generate_review_queue(plan: RolloutPlan) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "ROLLOUT_STATES",
     "ArtifactBundle",
     "DashboardLineage",
     "RolloutPlan",
-    "ROLLOUT_STATES",
     "build_rollout_plan",
     "generate_review_queue",
     "promote_dashboard",

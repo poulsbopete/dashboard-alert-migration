@@ -4,6 +4,7 @@ __pycache__/
 .workshop-mig-venv/
 /opt/workshop-venv/
 .env
+serverless_creds.env
 .elastic-credentials
 *.log
 build/

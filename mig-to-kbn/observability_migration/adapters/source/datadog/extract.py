@@ -1,12 +1,71 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Dashboard extraction from Datadog (file-based and API)."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
 import json
 import os
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from observability_migration.core.selection import (
+    AssetSelectionMetadata,
+    parse_selection_datetime,
+)
+
+
+def _safe_parse_dt(value: Any) -> Any:
+    """Best-effort datetime parse; return None on anything unusable."""
+    if value is None or value == "":
+        return None
+    try:
+        return parse_selection_datetime(str(value))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _team_from_tags(tags: list[str]) -> str | None:
+    """Derive a team from a ``team:<value>`` tag, if present."""
+    for tag in tags:
+        if isinstance(tag, str) and tag.casefold().startswith("team:"):
+            return tag.split(":", 1)[1]
+    return None
+
+
+def selection_metadata_from_datadog_dashboard(raw: dict[str, Any]) -> AssetSelectionMetadata:
+    """Map a raw Datadog dashboard dict into the source-agnostic selection view.
+
+    ``folder`` (Dashboard Lists API, not fetched) and ``starred`` (absent from
+    the ``get_dashboard`` payload) are ``None`` -> degrade gracefully.
+    """
+    tags = [str(t) for t in (raw.get("tags") or [])]
+    return AssetSelectionMetadata(
+        folder=None,
+        tags=tags,
+        datasources=["datadog"],
+        team=_team_from_tags(tags),
+        updated_at=_safe_parse_dt(raw.get("modified_at")),
+        starred=None,
+    )
+
+
+def selection_metadata_from_datadog_monitor(raw: dict[str, Any]) -> AssetSelectionMetadata:
+    """Map a raw Datadog monitor dict into the source-agnostic selection view.
+
+    folder/datasource/starred are ``None`` (not supplied by monitors).
+    """
+    tags = [str(t) for t in (raw.get("tags") or [])]
+    return AssetSelectionMetadata(
+        folder=None,
+        tags=tags,
+        datasources=None,
+        team=_team_from_tags(tags),
+        updated_at=_safe_parse_dt(raw.get("modified")),
+        starred=None,
+    )
 
 
 def _json_safe_api_value(value: Any) -> Any:
@@ -22,6 +81,14 @@ def _json_safe_api_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_json_safe_api_value(item) for item in value]
     return value
+
+
+def _apply_sdk_tls(config: Any, verify: bool | str = True) -> None:
+    """Apply a requests-style TLS verify value to Datadog API client config."""
+    if verify is False:
+        config.verify_ssl = False
+    elif isinstance(verify, str) and verify.strip():
+        config.ssl_ca_cert = verify.strip()
 
 
 def extract_dashboards_from_files(input_dir: str) -> list[dict[str, Any]]:
@@ -78,25 +145,27 @@ def extract_dashboards_from_api(
     app_key: str,
     site: str = "datadoghq.com",
     dashboard_ids: list[str] | None = None,
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """Pull dashboards from the Datadog API using the official Python client.
 
     Requires `datadog-api-client` to be installed.
     """
     try:
-        from datadog_api_client import Configuration, ApiClient
+        from datadog_api_client import ApiClient, Configuration
         from datadog_api_client.v1.api.dashboards_api import DashboardsApi
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "datadog-api-client is required for API extraction. "
             "Install with: pip install -e '.[datadog]' "
             "or pip install datadog-api-client"
-        )
+        ) from exc
 
     config = Configuration()
     config.api_key["apiKeyAuth"] = api_key
     config.api_key["appKeyAuth"] = app_key
     config.server_variables["site"] = site
+    _apply_sdk_tls(config, verify)
 
     dashboards: list[dict[str, Any]] = []
 
@@ -145,6 +214,7 @@ def extract_monitors_from_api(
     site: str = "datadoghq.com",
     monitor_ids: list[str | int] | None = None,
     monitor_query: str = "",
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """Pull monitors from the Datadog API using the official Python client.
 
@@ -157,17 +227,18 @@ def extract_monitors_from_api(
     try:
         from datadog_api_client import ApiClient, Configuration
         from datadog_api_client.v1.api.monitors_api import MonitorsApi
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "datadog-api-client is required for API extraction. "
             "Install with: pip install -e '.[datadog]' "
             "or pip install datadog-api-client"
-        )
+        ) from exc
 
     config = Configuration()
     config.api_key["apiKeyAuth"] = api_key
     config.api_key["appKeyAuth"] = app_key
     config.server_variables["site"] = site
+    _apply_sdk_tls(config, verify)
 
     monitors: list[dict[str, Any]] = []
 

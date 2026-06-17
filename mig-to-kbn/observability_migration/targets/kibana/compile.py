@@ -1,39 +1,41 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """YAML compilation, upload, and post-validation sync helpers.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
 from observability_migration.core.assets.visual import refresh_visual_ir
+from observability_migration.core.http import apply_subprocess_tls_env
+from observability_migration.targets.kibana import layout as layout_module
+from observability_migration.targets.kibana import lint as lint_module
+from observability_migration.targets.kibana._kbtool import tool_argv
 from observability_migration.targets.kibana.emit.esql_utils import extract_esql_columns
 
 COMMAND_TIMEOUT_SECONDS = 90
 VALIDATION_TIMEOUT_SECONDS = 120
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent.parent
-
-
-def _run_command(cmd, timeout):
+def _run_command(cmd, timeout, env=None):
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return False, f"Command timed out after {timeout}s: {shlex.join(str(part) for part in cmd)}"
     return proc.returncode == 0, (proc.stdout or "") + (proc.stderr or "")
 
 
 def compile_yaml(yaml_path, output_dir):
-    cmd = [
-        "uvx",
-        "kb-dashboard-cli",
+    cmd = tool_argv("kb-dashboard-cli") + [
         "compile",
         "--input-file",
         str(yaml_path),
@@ -55,13 +57,11 @@ def compile_all(yaml_dir, compiled_dir):
 
 
 def lint_dashboard_yaml(yaml_dir):
-    script = _repo_root() / "scripts" / "validate_dashboard_yaml.sh"
-    return _run_command(["bash", str(script), str(yaml_dir)], timeout=VALIDATION_TIMEOUT_SECONDS)
+    return lint_module.lint_dashboard_yaml(yaml_dir)
 
 
 def validate_compiled_layout(compiled_dir):
-    script = _repo_root() / "scripts" / "validate_dashboard_layout.py"
-    return _run_command([sys.executable, str(script), str(compiled_dir)], timeout=VALIDATION_TIMEOUT_SECONDS)
+    return layout_module.validate_compiled_layout(compiled_dir)
 
 
 def detect_space_id_from_kibana_url(kibana_url):
@@ -91,11 +91,16 @@ def kibana_url_for_space(kibana_url, space_id=""):
     return urlunsplit((split.scheme, split.netloc, normalized_path, split.query, split.fragment))
 
 
-def upload_yaml(yaml_path, output_dir, kibana_url, space_id="", kibana_api_key=""):
+def upload_yaml(
+    yaml_path,
+    output_dir,
+    kibana_url,
+    space_id="",
+    kibana_api_key="",
+    verify: bool | str = True,
+):
     upload_url = kibana_url_for_space(kibana_url, space_id)
-    cmd = [
-        "uvx",
-        "kb-dashboard-cli",
+    cmd = tool_argv("kb-dashboard-cli") + [
         "compile",
         "--input-file",
         str(yaml_path),
@@ -108,7 +113,8 @@ def upload_yaml(yaml_path, output_dir, kibana_url, space_id="", kibana_api_key="
     ]
     if kibana_api_key:
         cmd.extend(["--kibana-api-key", str(kibana_api_key)])
-    return _run_command(cmd, timeout=COMMAND_TIMEOUT_SECONDS)
+    env = apply_subprocess_tls_env(verify, env=os.environ.copy())
+    return _run_command(cmd, timeout=COMMAND_TIMEOUT_SECONDS, env=env)
 
 
 def _sync_esql_panel_fields(yaml_panel, old_query, new_query):
@@ -159,6 +165,23 @@ def _sync_esql_panel_fields(yaml_panel, old_query, new_query):
         for old_value, new_value in zip(old_by_cols, new_by_cols):
             for item in breakdowns:
                 _replace_field(item, old_value, new_value)
+
+    # Issue #109 safety net: a gauge's min/max/goal accessors must reference
+    # columns the (resynced) query actually produces. If a resync replaced the
+    # query with one that no longer carries the ``_gauge_*`` bounds (e.g. a
+    # native-PROMQL gauge whose trailing ``| EVAL _gauge_*`` was dropped), keep
+    # the bound only when its column still appears in the query. Otherwise drop
+    # it so the gauge degrades gracefully instead of erroring with "Provided
+    # column name or index is invalid".
+    if esql_config.get("type") == "gauge":
+        for bound_key in ("minimum", "maximum", "goal"):
+            bound = esql_config.get(bound_key)
+            if not isinstance(bound, dict):
+                continue
+            field = bound.get("field")
+            if field and not re.search(rf"\b{re.escape(field)}\b", new_query or ""):
+                esql_config.pop(bound_key, None)
+                changed = True
 
     return changed
 

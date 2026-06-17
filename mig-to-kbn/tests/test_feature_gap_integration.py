@@ -1,8 +1,10 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import unittest
 from unittest import mock
 
 from observability_migration.adapters.source.grafana import annotations as annotations_module
-from observability_migration.targets.kibana import compile as compile_module
 from observability_migration.adapters.source.grafana import manifest as manifest_module
 from observability_migration.adapters.source.grafana import panels as panels_module
 from observability_migration.adapters.source.grafana import rules as rules_module
@@ -10,6 +12,7 @@ from observability_migration.adapters.source.grafana import schema as schema_mod
 from observability_migration.adapters.source.grafana import smoke_integration
 from observability_migration.adapters.source.grafana.alerts import extract_alerts_from_dashboard
 from observability_migration.core.reporting.report import MigrationResult, PanelResult
+from observability_migration.targets.kibana import compile as compile_module
 
 
 class KibanaSpaceHelpersTests(unittest.TestCase):
@@ -128,6 +131,24 @@ class ManifestWiringTests(unittest.TestCase):
         self.assertEqual(payload["feature_gaps"]["alert_migration"]["total"], 1)
         self.assertEqual(payload["dashboards"][0]["dashboard_links"][0]["title"], "Docs")
         self.assertEqual(payload["panels"][0]["link_migrations"][0]["title"], "Runbook")
+
+    def test_manifest_includes_runtime_feature_profile(self):
+        from observability_migration.adapters.source.grafana.runtime_features import PROMQL_COMMAND_V0
+
+        result = MigrationResult("Native PromQL", "grafana-uid-2")
+        result.runtime_features = {
+            PROMQL_COMMAND_V0: {
+                "supported": True,
+                "source": "default",
+                "confidence": "unverified",
+                "level": "runtime",
+                "reason": "no --es-url configured; native PROMQL assumed for offline migration",
+            }
+        }
+
+        payload = manifest_module.build_migration_manifest([result])
+
+        self.assertEqual(payload["runtime_features"], result.runtime_features)
 
 
 class AlertTraversalTests(unittest.TestCase):

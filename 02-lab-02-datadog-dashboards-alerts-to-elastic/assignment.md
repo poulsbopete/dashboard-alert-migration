@@ -3,8 +3,7 @@ slug: lab-02-datadog-dashboards-alerts-to-elastic
 id: berxl591tjk4
 type: challenge
 title: Lab 2 — Datadog dashboards & monitors → Elastic
-teaser: Ten Datadog-style dashboards plus four monitors — CLI drafts, Cursor + Agent
-  Skills for Kibana dashboards and alerting rules.
+teaser: One command migrates 10 Datadog-style dashboards and four monitors into Kibana.
 notes:
 - type: text
   contents: |
@@ -33,7 +32,7 @@ notes:
   contents: |
     ## This lab
 
-    **10** Datadog dashboards (**`datadog-migrate`**) + **4** monitors (workshop rule publisher) → Kibana. Pick **Path A** or **Path B** (same **`mig-to-kbn`** + env pattern as Lab 1).
+    **10** Datadog dashboards (**`datadog-migrate`**) + **4** monitors (workshop rule publisher) → Kibana. Run **one command** in **Terminal** when the sandbox is ready.
 
     **Live OTLP:** **`./scripts/send_datadog_otel.sh`** (or **`tools/datadog_otel_to_elastic.py`**) — same pipeline as Lab 1.
 
@@ -73,69 +72,48 @@ difficulty: ""
 enhanced_loading: null
 ---
 
-# Lab 2 — Datadog → Elastic Serverless
-
-**10** dashboards via **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`datadog-migrate`** ([Datadog source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md), [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md)) with **`--field-profile otel`**; **4** monitors still use workshop **`datadog_to_elastic_alert.py`** → **`publish_datadog_alert_drafts_kibana.py`** (rules imported **disabled**, no connectors until you edit).
-
-Pick **Path A** or **Path B** (or both).
-
-## Path A — one script (same idea as Lab 1)
+When the sandbox is ready, open **Terminal** and run:
 
 ```bash
 bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh
-# Optional strict validation: WORKSHOP_MIG_ES_VALIDATE=1 bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh
 ```
 
-The script sources **`~/.bashrc`** and **`cd`s to the repo root itself — use this **absolute** path so **`$PWD`** does not matter.
+That single script:
 
-Then **Dashboards** (migrated titles) and **Observability → Rules** in the Elastic Serverless tab.
+1. Starts (or reuses) the **OTLP** pipeline — Alloy → Elastic **mOTLP**
+2. Runs **`datadog-migrate`** on **10** Datadog JSON files in **`assets/datadog/dashboards/`** (`--field-profile otel`, uploads to Kibana)
+3. Converts **4** monitor JSON files under **`assets/datadog/`** and publishes **Rules** via **`publish_datadog_alert_drafts_kibana.py`** (imported **disabled**)
 
-**Kibana-only upload (default):** same as Lab 1 — **`datadog-migrate`** with **`--upload`** + **Kibana URL / API key** only. The migrate script passes **`--es-url ""`** and **`--es-api-key ""`** so **`ES_URL`** / **`ES_API_KEY`** from **`~/.bashrc`** do **not** turn on live ES|QL validation (the CLI otherwise reads those env vars by default). **`WORKSHOP_MIG_ES_VALIDATE=1`** restores **`--es-url`**, **`--es-api-key`**, and **`--validate`**. Workshop also passes **`--logs-index`**, **`--ensure-data-views`**, **`--fetch-monitors`**.
+The script loads **`KIBANA_URL`** and **`ES_API_KEY`** from **`~/.bashrc`** — no **`cd`** or **`source`** needed first. Use the **absolute path** above so it works even if your shell left **`/root/workshop`**.
 
-**Monitors under `monitors/`:** exports need **`id`** + **`type`** (API shape), or **`type`** + **`query`** (workshop samples); **`--fetch-monitors`** ingests them into **`monitor_migration_results.json`**.
+## Verify
 
-**If `latency_p95` fails at compile:** **`kb-dashboard-cli`** may reject some Lens XY shapes (formula vs aggregation). Other dashboards still upload; track **mig-to-kbn** / **kb-dashboard-cli** updates or re-run after **`./scripts/sync_workshop_from_git.sh`**.
+Open the **Elastic Serverless** tab:
 
-*Charts empty or “requires_manual” markdown panels?* Ensure OTLP is healthy (**`./scripts/check_workshop_otel_pipeline.sh`**, **`./scripts/start_workshop_otel.sh`**). After **`./scripts/sync_workshop_from_git.sh`**, re-run **`bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`** so Kibana gets dashboards rebuilt from the repo’s Datadog JSON (workshop fleet now emits **system_net_***, **trace_http_***, **system_cpu_***, etc., aligned with **`datadog-migrate --field-profile otel`**).
+- **Dashboards** — migrated titles from the Datadog exports
+- **Observability → Rules** — four workshop rules (imported **disabled**; enable in the UI to test)
 
-**Optional — synthetic metrics from migrated Datadog YAML:** **`mig-to-kbn/scripts/setup_datadog_serverless_data.py`** discovers metrics from compiled dashboard YAML. Set **`DASHBOARD_YAML_DIR`** to **`/root/workshop/build/mig-datadog/yaml`** (Path B: **`$PWD/build/mig-datadog/yaml`**), plus **`ELASTICSEARCH_ENDPOINT`**, **`KEY`**, and optional **`DATA_HOURS`**, **`INTERVAL_SEC`**. See the script header and **`mig-to-kbn/docs/command-contract.md`**.
+## Troubleshooting
 
-## Path B — Cursor on your laptop
+| Symptom | Fix |
+| --- | --- |
+| Empty charts | `bash /root/workshop/scripts/check_workshop_otel_pipeline.sh` then `bash /root/workshop/scripts/start_workshop_otel.sh` — wait ~1 min |
+| Still empty after migrate | Re-run migrate after OTLP is healthy; `cd /root/workshop && ./scripts/sync_workshop_from_git.sh` if files are stale |
+| Script not found | **Stop** → **Start** the track (wait for challenge to finish loading) |
+| `latency_p95` compile warning | Other dashboards still upload; refresh workshop files and re-run migrate |
 
-1. Same **Lab 1 Path B** setup: workshop repo with **`mig-to-kbn/`**, **`uv`**, Python **≥ 3.11**, **`install_workshop_mig_to_kbn.sh`** (or equivalent venv).
-2. On the **Instruqt** VM, copy credentials:
+Optional pre-upload ES\|QL validation: `WORKSHOP_MIG_ES_VALIDATE=1 bash /root/workshop/scripts/migrate_datadog_dashboards_to_serverless.sh`
+
+## Optional — integration dashboards
+
+Migrate **eight** official Agent integration dashboards from [DataDog/integrations-core](https://github.com/DataDog/integrations-core) (see **`assets/datadog/integrations-core/ATTRIBUTION.md`**):
 
 ```bash
-cd /root/workshop && source ~/.bashrc
-grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY|ES_USERNAME|ES_PASSWORD)=' ~/.bashrc
+bash /root/workshop/scripts/migrate_datadog_integrations_to_serverless.sh
 ```
 
-3. In **Cursor**, **paste** those **`export`** lines, then mirror the migrate script: stage dashboards under **`build/mig-datadog-stage/`** (JSON in root, **`monitors/`** for monitor files), run **`datadog-migrate`**, then alerts:
-
-```bash
-rm -rf build/mig-datadog-stage && mkdir -p build/mig-datadog-stage/monitors
-cp assets/datadog/dashboards/*.json build/mig-datadog-stage/
-cp assets/datadog/monitor-*.json build/mig-datadog-stage/monitors/
-mkdir -p build/elastic-alerts
-export MIG_TO_KBN_VENV="${MIG_TO_KBN_VENV:-.venv-mig}"
-"$MIG_TO_KBN_VENV/bin/datadog-migrate" \
-  --source files --input-dir build/mig-datadog-stage --output-dir build/mig-datadog \
-  --field-profile otel --data-view 'metrics-*' --logs-index 'logs-*' \
-  --upload \
-  --kibana-url "$KIBANA_URL" --kibana-api-key "${KIBANA_API_KEY:-$ES_API_KEY}" \
-  --ensure-data-views --fetch-monitors
-# Optional strict validation: add --es-url "$ES_URL" --es-api-key "$ES_API_KEY" before --upload (same as WORKSHOP_MIG_ES_VALIDATE=1).
-for f in assets/datadog/monitor-*.json; do
-  base="$(basename "$f" .json)"
-  python3 tools/datadog_to_elastic_alert.py "$f" -o "build/elastic-alerts/${base}-elastic.json"
-done
-python3 tools/publish_datadog_alert_drafts_kibana.py --alerts-dir build/elastic-alerts
-```
-
-The sandbox **already runs Alloy + OTLP**. If Lens panels look empty, on the VM run **`./scripts/check_workshop_otel_pipeline.sh`** or **`./scripts/start_workshop_otel.sh`**.
-
-Optional skills: **`workshop-datadog-dashboards-to-elastic`**, **`workshop-datadog-to-elastic-alerts`**, **`kibana-dashboards`**, **`kibana-alerting-rules`**. Do not paste API keys into the AI chat.
+These use integration metric namespaces (`nginx.*`, `postgresql.*`, …), not the OTLP workshop fleet — expect many panels to need data mapping after migration.
 
 ## Done
 
-**Check** when **`build/mig-datadog/yaml/`** has **10** `*.yaml` files, **`build/mig-datadog/migration_report.json`** exists, and **`build/elastic-alerts/`** has **4** `monitor-*-elastic.json` (Path A: **`/root/workshop/build/`**; Path B: your clone).
+**Check** passes when **`build/mig-datadog/yaml/`** has **10** `*.yaml` files, **`build/mig-datadog/migration_report.json`** exists, and **`build/elastic-alerts/`** has **4** `monitor-*-elastic.json` files.

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 # Regenerate the dashboard schema from kb-dashboard-core.
 #
@@ -7,6 +10,25 @@
 #   PYTHON_BIN=python3.12 bash scripts/generate_dashboard_schema.sh
 
 set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage: bash scripts/generate_dashboard_schema.sh
+
+Regenerate the canonical dashboard schema artifacts under docs/dashboards/.
+
+The script provisions a temporary virtualenv, installs kb-dashboard-core, and
+emits docs/dashboards/schema.json plus docs/dashboards/schema.toon when npx is
+available.
+
+Optional overrides:
+  SCHEMA_CORE_SOURCE  Pinned kb-dashboard-core spec, e.g. "kb-dashboard-core==1.2.3"
+  PYTHON_BIN          Python interpreter to use for the throw-away venv
+
+Pass -h or --help to print this message and exit without side effects.
+EOF
+  exit 0
+fi
 
 SCHEMA_CORE_SOURCE="${SCHEMA_CORE_SOURCE:-kb-dashboard-core}"
 PYTHON_BIN="${PYTHON_BIN:-}"

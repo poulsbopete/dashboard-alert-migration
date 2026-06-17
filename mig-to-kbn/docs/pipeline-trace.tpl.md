@@ -15,8 +15,8 @@ This document is the **shared architecture overview** for the migration
 pipeline. For per-dashboard traces with source queries, translation steps, and
 translated output, see the source-specific trace docs:
 
-- [Grafana Pipeline Trace](sources/grafana-trace.md) — 9 dashboards, PromQL / LogQL → Kibana
-- [Datadog Pipeline Trace](sources/datadog-trace.md) — 15 dashboards, metric / log / formula → Kibana
+- [Grafana Pipeline Trace](sources/grafana-trace.md) — per-dashboard PromQL / LogQL → Kibana traces
+- [Datadog Pipeline Trace](sources/datadog-trace.md) — per-dashboard metric / log / formula → Kibana traces
 
 This is the **shared** pipeline contract, not the exact dedicated CLI sequence
 for every source. The source adapters differ materially:
@@ -122,8 +122,10 @@ the Datadog adapter.
 
 **Grafana** has four translation paths, chosen automatically per panel:
 
-1. **Native PROMQL** (`--native-promql`, preferred) — wraps the original PromQL
-   in `PROMQL index=… value=(expr)`. Highest fidelity.
+1. **Native PROMQL** (the default; when `--es-url` is set, target detection
+   downgrades to ES|QL translation if the `PROMQL` command is unsupported;
+   `--native-promql` forces it and `--no-native-promql` opts out) — wraps
+   the original PromQL in `PROMQL index=… value=(expr)`. Highest fidelity.
 2. **Rule-engine ES|QL** — parses PromQL AST via `promql-parser`, classifies,
    runs through priority-ordered translation rules, renders ES|QL.
 3. **LLM fallback** (optional) — for `not_feasible` panels, asks an LLM.

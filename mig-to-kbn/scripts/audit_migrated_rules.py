@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Audit migrated Kibana rules and optionally disable the enabled subset."""
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path = [path for path in sys.path if path != str(ROOT)]
 sys.path.insert(0, str(ROOT))
 
-from observability_migration.targets.kibana.alerting import audit_migrated_rules
+from observability_migration.targets.kibana.alerting import audit_migrated_rules  # noqa: E402
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -58,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(json.dumps(result, indent=2))
 
+    if result.get("errors"):
+        return 2
     if args.disable_enabled:
         return 0 if not result["remediation"]["failed_rule_ids"] else 1
     return 0 if not result["enabled_migrated_rule_ids"] else 1

@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Path A (Instruqt): OTLP (optional) → Grafana JSON → mig-to-kbn (grafana-migrate) → upload (--native-promql).
-# Unified alerts under assets/grafana/alerts/ are migrated with --fetch-alerts; publish_grafana_alert_drafts_kibana.py
-# POSTs rule payloads from build/mig-grafana/alert_comparison_results.json (rules created disabled by default).
-# Default: Kibana-only upload (--kibana-url + --kibana-api-key, no --es-url / --validate) so empty clusters do not
-#          fail live ES|QL pre-upload validation (Subham / team guidance). Set WORKSHOP_MIG_ES_VALIDATE=1 to pass
-#          --es-url, --es-api-key, and --validate (auto-enabled by mig-to-kbn when --es-url is set with --upload).
+# Lab 1 (Instruqt): OTLP → grafana-migrate → upload (--native-promql) → alert publisher.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -66,7 +61,7 @@ if [ "${WORKSHOP_SKIP_OTEL:-0}" = "1" ]; then
 elif [ "${WORKSHOP_FORCE_OTEL_RESTART:-0}" != "1" ] \
   && curl -sf --max-time 3 "http://127.0.0.1:12345/metrics" >/dev/null 2>&1 \
   && pgrep -f '[o]tel_workshop_fleet.py' >/dev/null 2>&1; then
-  echo "==> [1/4] OTLP already running (Alloy + fleet). Skipping restart — same situation as Path B after bootstrap."
+  echo "==> [1/4] OTLP already running (Alloy + fleet). Skipping restart."
   echo "    To force a full restart: WORKSHOP_FORCE_OTEL_RESTART=1 bash ${ROOT}/scripts/migrate_grafana_dashboards_to_serverless.sh"
   WAIT_OTLP=45
 else

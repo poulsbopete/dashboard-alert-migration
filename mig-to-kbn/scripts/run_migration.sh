@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 #
 # End-to-end migration pipeline:
 #   1. Migrate Grafana dashboards → Kibana YAML  (with --native-promql)
@@ -65,6 +68,10 @@ set -a && source serverless_creds.env && set +a
 
 INPUT_DIR="infra/grafana/dashboards"
 OUTPUT_DIR="migration_output_native"
+ALERT_ARTIFACT_DIR="$OUTPUT_DIR/alerts"
+DASHBOARD_YAML_DIR="$OUTPUT_DIR/dashboards/yaml"
+COMPILED_DIR="$OUTPUT_DIR/dashboards/compiled"
+RUN_SUMMARY="$OUTPUT_DIR/run_summary.json"
 DATA_VIEW="metrics-*"
 ESQL_INDEX="metrics-*"
 
@@ -74,39 +81,39 @@ echo "  Step 1: Migrate Grafana → Kibana YAML (native PROMQL)"
 echo "============================================================"
 $VENV -m observability_migration.adapters.source.grafana.cli \
   --source files \
+  --assets dashboards \
   --input-dir "$INPUT_DIR" \
   --output-dir "$OUTPUT_DIR" \
   --native-promql \
   --data-view "$DATA_VIEW" \
   --esql-index "$ESQL_INDEX"
 
-YAML_DIR="$OUTPUT_DIR/yaml"
-
 if [ "$SKIP_DATA" = false ]; then
   echo ""
   echo "============================================================"
-  echo "  Step 2: Extract metrics from compiled YAML"
+  echo "  Step 2: Generate & ingest synthetic telemetry data"
   echo "============================================================"
-  $VENV "$SCRIPT_DIR/extract_dashboard_metrics.py" "$YAML_DIR" /tmp/dashboard_metrics.json
-
-  echo ""
-  echo "============================================================"
-  echo "  Step 3: Generate & ingest synthetic data (with preflight)"
-  echo "============================================================"
-  DASHBOARD_YAML_DIR="$YAML_DIR" \
+  # Remove leftover data streams that overlap metrics-*/logs-* but were not
+  # created by this seeder (old parity/experiment streams). Their incompatible
+  # mappings make shared fields conflict across the wildcard, so panels querying
+  # metrics-* return zero rows. Default on for parity with run_seed_data.sh; set
+  # PURGE_FOREIGN_STREAMS=0 to skip.
+  PURGE_FOREIGN_STREAMS="${PURGE_FOREIGN_STREAMS:-1}"
+  PURGE_FLAG=()
+  if [ "$PURGE_FOREIGN_STREAMS" = "1" ]; then
+    PURGE_FLAG=(--purge-foreign-streams)
+  fi
   DATA_HOURS="${DATA_HOURS:-6}" \
   INTERVAL_SEC="${INTERVAL_SEC:-30}" \
-  BULK_WORKERS="${BULK_WORKERS:-4}" \
   BATCH_DOC_LIMIT="${BATCH_DOC_LIMIT:-8000}" \
-    $VENV "$SCRIPT_DIR/setup_serverless_data.py"
+    $VENV "$SCRIPT_DIR/setup_telemetry_data.py" "$DASHBOARD_YAML_DIR" "${PURGE_FLAG[@]}"
 fi
 
 if [ "$SKIP_UPLOAD" = false ]; then
   echo ""
   echo "============================================================"
-  echo "  Step 4: Upload compiled dashboards to Kibana"
+  echo "  Step 3: Upload compiled dashboards to Kibana"
   echo "============================================================"
-  COMPILED_DIR="$OUTPUT_DIR/compiled"
   upload_ok=0
   upload_fail=0
   for dir in "$COMPILED_DIR"/*/; do
@@ -135,10 +142,13 @@ if [ "$SKIP_UPLOAD" = false ]; then
   echo "  Step 5: Validate panel queries against live ES"
   echo "============================================================"
   MAX_BROKEN_PCT="${MAX_BROKEN_PCT:-10}" \
-    $VENV "$SCRIPT_DIR/validate_panel_queries.py" "$YAML_DIR"
+    $VENV "$SCRIPT_DIR/validate_panel_queries.py" "$DASHBOARD_YAML_DIR"
 fi
 
 echo ""
 echo "============================================================"
 echo "  Pipeline complete"
 echo "============================================================"
+echo "Output dir:         $OUTPUT_DIR"
+echo "Dashboard YAML:     $DASHBOARD_YAML_DIR"
+echo "Run summary:        $RUN_SUMMARY"

@@ -1,0 +1,10 @@
+source: up{job='prom'} or vector(0)
+feasibility: feasible
+warning: Approximated PromQL 'or vector(N)' zero-fill fallback by dropping the constant operand; time ranges with no data appear as gaps instead of the fallback value
+---
+TS metrics-*
+| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend
+| WHERE service.name == "prom"
+| WHERE up IS NOT NULL
+| STATS up = up BY time_bucket = TBUCKET(5 minute)
+| SORT time_bucket ASC

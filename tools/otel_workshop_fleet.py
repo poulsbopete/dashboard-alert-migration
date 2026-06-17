@@ -206,6 +206,21 @@ def _run_worker(spec: dict[str, str]) -> int:
         unit="ms",
         description="Datadog trace.http.request.duration (ms) for service-overview / error-budget panels",
     )
+    trace_client_errors = meter.create_counter(
+        "trace_http_client_errors",
+        unit="1",
+        description="Datadog trace.http.client_errors → trace_http_client_errors",
+    )
+    trace_spans = meter.create_counter(
+        "trace_spans_finished",
+        unit="1",
+        description="Datadog trace.spans.finished → trace_spans_finished",
+    )
+    trace_dns_hist = meter.create_histogram(
+        "trace_dns_lookup_duration",
+        unit="ms",
+        description="Datadog trace.dns.lookup.duration (ms) → trace_dns_lookup_duration",
+    )
     ctx_switches = meter.create_counter(
         "system_cpu_context_switches",
         unit="1",
@@ -293,6 +308,50 @@ def _run_worker(spec: dict[str, str]) -> int:
         callbacks=[cpu_iow_obs],
     )
 
+    def cpu_nice_obs(_options: object):
+        phase = (time.time() - t0) / 60.0 + (seed % 7) * 0.11
+        yield Observation(max(0.5, min(4.0, 1.5 + 1.2 * math.sin(phase) + rng.uniform(-0.1, 0.1))))
+
+    meter.create_observable_gauge(
+        "system_cpu_nice",
+        unit="%",
+        description="Datadog system.cpu.nice → system_cpu_nice",
+        callbacks=[cpu_nice_obs],
+    )
+
+    def cpu_stolen_obs(_options: object):
+        phase = (time.time() - t0) / 80.0 + (seed % 9) * 0.07
+        yield Observation(max(0.1, min(2.0, 0.6 + 0.5 * math.sin(phase) + rng.uniform(-0.05, 0.05))))
+
+    meter.create_observable_gauge(
+        "system_cpu_stolen",
+        unit="%",
+        description="Datadog system.cpu.stolen → system_cpu_stolen",
+        callbacks=[cpu_stolen_obs],
+    )
+
+    def cpu_guest_obs(_options: object):
+        phase = (time.time() - t0) / 95.0 + (seed % 11) * 0.09
+        yield Observation(max(0.0, min(1.5, 0.4 + 0.4 * math.sin(phase) + rng.uniform(-0.03, 0.03))))
+
+    meter.create_observable_gauge(
+        "system_cpu_guest",
+        unit="%",
+        description="Datadog system.cpu.guest → system_cpu_guest",
+        callbacks=[cpu_guest_obs],
+    )
+
+    def cpu_interrupt_obs(_options: object):
+        phase = (time.time() - t0) / 8.0 + (seed % 13) * 0.13
+        yield Observation(max(0.2, min(3.0, 0.8 + 0.7 * abs(math.sin(phase)) + rng.uniform(-0.1, 0.1))))
+
+    meter.create_observable_gauge(
+        "system_cpu_interrupt",
+        unit="%",
+        description="Datadog system.cpu.interrupt → system_cpu_interrupt",
+        callbacks=[cpu_interrupt_obs],
+    )
+
     def load1_obs(_options: object):
         phase = (time.time() - t0) / 28.0 + seed * 0.02
         yield Observation(max(0.15, min(14.0, 2.2 + 4.5 * math.sin(phase) + rng.uniform(-0.4, 0.4))))
@@ -343,12 +402,168 @@ def _run_worker(spec: dict[str, str]) -> int:
         "system_mem_total", unit="By", description="system.mem.total proxy", callbacks=[mem_total_obs]
     )
 
+    def mem_cached_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(0.8e9, 16e9 * 0.15 * (1.0 + 0.3 * math.sin(phase)) + rng.uniform(-1e8, 1e8)))
+
+    meter.create_observable_gauge(
+        "system_mem_cached", unit="By", description="system.mem.cached → system_mem_cached", callbacks=[mem_cached_obs]
+    )
+
+    def mem_usable_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        util = max(0.12, min(0.88, 0.38 + 0.28 * math.sin(phase * 0.85)))
+        yield Observation((16e9 * (1.0 - util)) + rng.uniform(-3e8, 3e8))
+
+    meter.create_observable_gauge(
+        "system_mem_usable", unit="By", description="system.mem.usable → system_mem_usable", callbacks=[mem_usable_obs]
+    )
+
+    def mem_buffered_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(2e8, 16e9 * 0.055 * (1.0 + 0.2 * math.sin(phase * 0.6)) + rng.uniform(-5e7, 5e7)))
+
+    meter.create_observable_gauge(
+        "system_mem_buffered",
+        unit="By",
+        description="system.mem.buffered → system_mem_buffered",
+        callbacks=[mem_buffered_obs],
+    )
+
+    def mem_slab_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(1e8, 16e9 * 0.035 * (1.0 + 0.15 * math.sin(phase * 0.4)) + rng.uniform(-3e7, 3e7)))
+
+    meter.create_observable_gauge(
+        "system_mem_slab", unit="By", description="system.mem.slab → system_mem_slab", callbacks=[mem_slab_obs]
+    )
+
+    def mem_commit_limit_obs(_options: object):
+        yield Observation(24e9 + rng.uniform(-1e7, 1e7))
+
+    meter.create_observable_gauge(
+        "system_mem_commit_limit",
+        unit="By",
+        description="system.mem.commit_limit → system_mem_commit_limit",
+        callbacks=[mem_commit_limit_obs],
+    )
+
+    def swap_used_obs(_options: object):
+        phase = (time.time() - t0) / 90.0 + seed * 0.01
+        yield Observation(max(0.5e9, min(3e9, 1.5e9 + 1.2e9 * math.sin(phase) + rng.uniform(-1e8, 1e8))))
+
+    meter.create_observable_gauge(
+        "system_swap_used", unit="By", description="system.swap.used → system_swap_used", callbacks=[swap_used_obs]
+    )
+
+    def swap_pct_free_obs(_options: object):
+        phase = (time.time() - t0) / 90.0 + seed * 0.01
+        swap_used = max(0.5e9, min(3e9, 1.5e9 + 1.2e9 * math.sin(phase)))
+        yield Observation(max(0.0, min(100.0, (4e9 - swap_used) / 4e9 * 100.0)))
+
+    meter.create_observable_gauge(
+        "system_swap_pct_free",
+        unit="%",
+        description="system.swap.pct_free → system_swap_pct_free",
+        callbacks=[swap_pct_free_obs],
+    )
+
+    mem_page_faults = meter.create_counter(
+        "system_mem_page_faults",
+        unit="1",
+        description="system.mem.page_faults → system_mem_page_faults",
+    )
+
     def disk_io_obs(_options: object):
         phase = (time.time() - t0) / 23.0 + seed * 0.05
         yield Observation(max(1.0, min(98.0, 35.0 + 40.0 * math.sin(phase) + rng.uniform(-6.0, 6.0))))
 
     meter.create_observable_gauge(
         "system_disk_io", unit="%", description="system.disk.io proxy", callbacks=[disk_io_obs]
+    )
+
+    _DISK_DEVICES = ("/dev/xvda", "/dev/nvme0n1", "/dev/sda")
+
+    def disk_free_obs(_options: object):
+        phase = (time.time() - t0) / 77.0 + seed * 0.03
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(20e9, min(180e9, 100e9 + 60e9 * math.sin(phase) + rng.uniform(-5e9, 5e9))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_free", unit="By", description="system.disk.free → system_disk_free", callbacks=[disk_free_obs]
+    )
+
+    def disk_in_use_obs(_options: object):
+        phase = (time.time() - t0) / 77.0 + seed * 0.03
+        for dev_name in _DISK_DEVICES:
+            free = max(20e9, min(180e9, 100e9 + 60e9 * math.sin(phase)))
+            yield Observation(max(5.0, min(95.0, (200e9 - free) / 200e9 * 100.0)), {"device": dev_name})
+
+    meter.create_observable_gauge(
+        "system_disk_in_use",
+        unit="%",
+        description="system.disk.in_use → system_disk_in_use",
+        callbacks=[disk_in_use_obs],
+    )
+
+    def disk_queue_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(0.0, min(8.0, 2.0 + 4.0 * abs(math.sin(phase)) + rng.uniform(-0.5, 0.5))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_queue_size",
+        unit="1",
+        description="system.disk.queue_size → system_disk_queue_size",
+        callbacks=[disk_queue_obs],
+    )
+
+    def disk_read_time_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(1.0, min(40.0, 12.0 + 18.0 * abs(math.sin(phase)) + rng.uniform(-1.0, 1.0))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_read_time_pct",
+        unit="%",
+        description="system.disk.read_time_pct → system_disk_read_time_pct",
+        callbacks=[disk_read_time_obs],
+    )
+
+    def disk_write_time_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05 + 1.1
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(0.5, min(25.0, 7.0 + 12.0 * abs(math.sin(phase)) + rng.uniform(-0.5, 0.5))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_disk_write_time_pct",
+        unit="%",
+        description="system.disk.write_time_pct → system_disk_write_time_pct",
+        callbacks=[disk_write_time_obs],
+    )
+
+    def disk_io_util_obs(_options: object):
+        phase = (time.time() - t0) / 23.0 + seed * 0.05
+        for dev_name in _DISK_DEVICES:
+            yield Observation(
+                max(1.0, min(98.0, 35.0 + 40.0 * math.sin(phase) + rng.uniform(-6.0, 6.0))),
+                {"device": dev_name},
+            )
+
+    meter.create_observable_gauge(
+        "system_io_util", unit="%", description="system.io.util → system_io_util", callbacks=[disk_io_util_obs]
     )
 
     def apdex_obs(_options: object):
@@ -383,6 +598,69 @@ def _run_worker(spec: dict[str, str]) -> int:
     )
     container_net_sent = meter.create_counter(
         "container_net_sent", unit="By", description="container.net.sent → container_net_sent"
+    )
+
+    def container_cpu_user_obs(_options):
+        phase = (time.time() - t0) / 42.0 + (seed % 5)
+        for cname, scale in ((f"{service}-main", 1.0), (f"{service}-sidecar", 0.4)):
+            u = max(5.0, min(60.0, (0.22 + 0.38 * math.sin(phase)) * 100.0 * scale + rng.uniform(-2.0, 2.0)))
+            yield Observation(u, {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_cpu_user",
+        unit="%",
+        description="Datadog container.cpu.user → container_cpu_user (per container)",
+        callbacks=[container_cpu_user_obs],
+    )
+
+    def container_cpu_system_obs(_options):
+        phase = (time.time() - t0) / 42.0 + (seed % 5)
+        for cname, scale in ((f"{service}-main", 1.0), (f"{service}-sidecar", 0.4)):
+            u = max(0.08, min(0.88, 0.22 + 0.38 * math.sin(phase)))
+            sys_f = max(1.0, min(20.0, (1.0 - u) * 0.28 * 100.0 * scale + rng.uniform(-0.5, 0.5)))
+            yield Observation(sys_f, {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_cpu_system",
+        unit="%",
+        description="Datadog container.cpu.system → container_cpu_system (per container)",
+        callbacks=[container_cpu_system_obs],
+    )
+
+    def container_cpu_shares_obs(_options):
+        yield Observation(512.0, {"container.name": f"{service}-main"})
+        yield Observation(256.0, {"container.name": f"{service}-sidecar"})
+
+    meter.create_observable_gauge(
+        "container_cpu_shares",
+        unit="1",
+        description="Datadog container.cpu.shares → container_cpu_shares",
+        callbacks=[container_cpu_shares_obs],
+    )
+
+    def container_fs_usage_obs(_options):
+        phase = (time.time() - t0) / 120.0 + (seed % 3) * 0.7
+        for cname, base in ((f"{service}-main", 4e9), (f"{service}-sidecar", 1.5e9)):
+            v = base + 2e9 * (0.5 + 0.5 * math.sin(phase)) + rng.uniform(-1e8, 1e8)
+            yield Observation(max(0.5e9, v), {"container.name": cname})
+
+    meter.create_observable_gauge(
+        "container_filesystem_usage",
+        unit="By",
+        description="Datadog container.fs.usage → container_filesystem_usage (per container)",
+        callbacks=[container_fs_usage_obs],
+    )
+
+    # K8s-semantic proxy — no real pod lifecycle behind these; included so migrated panels render data
+    container_restarts = meter.create_counter(
+        "container_restarts",
+        unit="1",
+        description="Datadog kubernetes.containers.restarts → container_restarts (K8s-semantic proxy)",
+    )
+    container_oom = meter.create_counter(
+        "container_oom_events",
+        unit="1",
+        description="Datadog kubernetes.containers.oom_killed → container_oom_events (K8s-semantic proxy)",
     )
 
     routes = ["/health", "/api/v1/orders", "/api/v1/users", "/api/v1/cart", "/readyz"]
@@ -431,12 +709,18 @@ def _run_worker(spec: dict[str, str]) -> int:
         if status >= 500 or (status == 429) or (rng.random() < 0.09):
             trace_errors.add(burst if status >= 500 else 1, dd_trace_attrs)
 
+        trace_spans.add(burst, {"service.name": service})
+        if status >= 500 or (status == 429) or (rng.random() < 0.09):
+            trace_client_errors.add(1, {"service.name": service, "http.route": route})
+        trace_dns_hist.record(round(rng.uniform(0.5, 80.0), 2), {"service.name": service})
+
         for _ in range(burst):
             duration_s = round(rng.uniform(0.006, 0.42), 4)
             duration_hist.record(duration_s, base_attrs)
             req_counter.add(1, base_attrs)
 
         ctx_switches.add(rng.randint(1_200, 48_000), {})
+        mem_page_faults.add(rng.randint(50, 4_000), {})
 
         iface = rng.choice(("eth0", "ens5", "ens6"))
         dev = rng.choice(("/dev/xvda", "/dev/nvme0n1", "/dev/sda"))
@@ -460,6 +744,10 @@ def _run_worker(spec: dict[str, str]) -> int:
         for cname in (f"{service}-main", f"{service}-sidecar"):
             container_net_rcvd.add(int(rng.uniform(8_000, 420_000)), {"container.name": cname})
             container_net_sent.add(int(rng.uniform(9_000, 480_000)), {"container.name": cname})
+            if rng.random() < 0.05:
+                container_restarts.add(1, {"container.name": cname})
+            if rng.random() < 0.02:
+                container_oom.add(1, {"container.name": cname})
 
         if status >= 500 or rng.random() < err_prob:
             reason = (

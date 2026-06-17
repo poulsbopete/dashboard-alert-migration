@@ -8,8 +8,13 @@ reporting, optional upload, and post-upload smoke validation.
 
 Grafana query translation has four paths:
 
-1. **Native PROMQL** (`--native-promql`): wraps compatible PromQL in
-   `PROMQL index=... value=(expr)` for highest fidelity on Elastic Serverless.
+1. **Native PROMQL** (the default high-fidelity path): wraps compatible PromQL
+   in `PROMQL index=... value=(expr)` for highest fidelity on Elastic
+   Serverless. When `--es-url` is set, the target is probed and the run falls
+   back to ES|QL translation only if the `PROMQL` command is unsupported (or the
+   probe is inconclusive). With no `--es-url` there is no cluster to probe, so
+   native PROMQL is used optimistically. Use `--no-native-promql` to force ES|QL
+   translation, or `--native-promql` to force native and skip the probe.
 2. **Rule-engine ES|QL**: parses PromQL with `promql-parser`, classifies the
    expression, and translates it through the rule pipeline.
 3. **LLM fallback ES|QL**: optional local-AI fallback for panels the rule
@@ -106,15 +111,45 @@ field profiles.
 
 ### How Schema Resolution Works
 
-`SchemaResolver` resolves Prometheus labels to target Elasticsearch fields
-through a four-level priority chain:
+`SchemaResolver` first **auto-detects the target layout** (schema profile) from
+live `_field_caps`, then resolves Prometheus metric names, labels, and metric
+types to match it. Three profiles are recognized:
+
+| Schema profile | How the data was ingested | Metric `http_requests_total` → | Label `service` → |
+|---|---|---|---|
+| `prometheus_remote_write` | Elastic Fleet/Agent Prometheus integration | `prometheus.http_requests_total.counter` / `.value` / `.rate` | `prometheus.labels.service` |
+| `prometheus_native` | Native ES `/_prometheus/api/v1/write` endpoint | `metrics.http_requests_total` | `labels.service` |
+| generic / OTel (none detected) | OTel collector, custom mapping, or no data found | `http_requests_total` (pass-through) | exact match → OTel candidate → as-is |
+
+Within the detected profile, **labels** resolve through this order:
 
 | Priority | Source | How to configure |
 |---|---|---|
 | 1 (highest) | Rule-pack `label_rewrites` | `--rules-file custom-pack.yaml` |
-| 2 | Live ES `_field_caps` discovery | `--es-url` flag |
-| 3 | Built-in Prometheus → OTel candidate mappings | Always available offline |
-| 4 (lowest) | Pass-through (use label as-is) | Default fallback |
+| 2 | Exact field match (source-faithful) | target advertises the label as a real field |
+| 3 | Profile-namespaced field (`prometheus.labels.<l>` / `labels.<l>`) | detected from `_field_caps` |
+| 4 | Live ES `_field_caps` OTel discovery | `--es-url` flag |
+| 5 | Built-in Prometheus → OTel candidate mappings | always available offline |
+| 6 (lowest) | Pass-through (use label as-is) | default fallback |
+
+`resolve_metric_field()` rewrites metric names the same way per profile (a no-op
+only for the generic/OTel layout), and `is_counter()` resolves counter-vs-gauge
+(rule-pack `metric_kinds` → `counter_suffixes` → the field's `time_series_metric`
+capability → the profile's counter field) so `rate()`/`irate()` stay correct.
+
+> **Profile detection requires live data.** If `--es-url` is unreachable or the
+> target has not ingested the Prometheus data yet, no profile is detected and
+> the resolver falls back to OTel candidates + pass-through — dashboards look
+> migrated but may query the wrong fields. Ingest first, then migrate with a
+> reachable `--es-url`, and confirm `schema_profile`,
+> `field_capabilities_discovery`, and resolved target-field `status` in
+> `required_target_contract.json`.
+
+Dashboard migration writes `schema_change_report.md` and
+`telemetry_contract.json` under `<output-dir>/dashboards/` automatically. Use
+the schema report for the per-panel Prometheus source field -> Elastic target
+field table, and use `required_target_contract.json` for live field-existence
+status.
 
 ### Built-in Prometheus → OTel Mappings
 
@@ -172,7 +207,8 @@ Load a rule pack with:
   --input-dir infra/grafana/dashboards \
   --output-dir migration_output \
   --rules-file my-rule-pack.yaml \
-  --native-promql
+  --es-url "$ELASTICSEARCH_ENDPOINT" \
+  --es-api-key "$KEY"
 ```
 
 To emit a validated starter rule-pack template:
@@ -185,7 +221,7 @@ To emit a validated starter rule-pack template:
 
 | Aspect | Grafana (SchemaResolver + rule packs) | Datadog (FieldMapProfile) |
 |---|---|---|
-| Metric name mapping | Not needed — PromQL metric names pass through to ES or are wrapped in `PROMQL` | Explicit `metric_map` + automatic dot-to-underscore + optional prefix/suffix |
+| Metric name mapping | Profile-dependent and automatic — pass-through for OTel/generic targets, rewritten to `prometheus.<metric>.{counter,value,rate}` (Fleet remote_write) or `metrics.<metric>` (native endpoint); native `PROMQL` panels query the metric name directly | Explicit `metric_map` + automatic dot-to-underscore + optional prefix/suffix |
 | Tag / label mapping | `SchemaResolver` with multi-level priority and live discovery | `tag_map` dictionary with optional `tag_prefix` fallback |
 | Customization | Rule-pack YAML (`--rules-file`) | Custom profile YAML (`--field-profile path.yaml`) |
 | Live field discovery | `--es-url` feeds `SchemaResolver` | `--es-url` loads `_field_caps` into the profile |
@@ -193,32 +229,50 @@ To emit a validated starter rule-pack template:
 
 ## Command Coverage
 
-Grafana command examples are centralized in `docs/command-contract.md` to avoid duplication and stale snippets.
+Grafana command examples and the canonical shared migration contract are
+centralized in `docs/command-contract.md` to avoid duplication and stale
+snippets.
 
 Use that doc for:
 - dedicated Grafana migration flows (`grafana-migrate`)
 - unified `obs-migrate migrate --source grafana`
+- the asset scope contract (`--assets {dashboards,alerts,all}` plus the
+  deprecated `--fetch-alerts` alias)
 - integrated `--smoke`, `--browser-audit`, and `--capture-screenshots` migration flows
 - extension catalog commands
 - standalone post-upload smoke validation commands
 
-## High-Value Flags
+## Grafana-Specific Notes
 
-- `--native-promql`: prefer native PromQL over ES|QL translation for compatible panels.
-- `--validate --es-url ...`: validate emitted queries against Elasticsearch before compile/upload.
-- `--upload --kibana-url ...`: upload compiled dashboards after lint and compile gates pass.
-- `--smoke`: auto-enable upload, validate uploaded dashboards in Kibana, and write `uploaded_dashboard_smoke_report.json` unless `--smoke-output` overrides the path.
-- `--browser-audit`: with `--smoke`, run a browser-visible error scan and save HTML artifacts under `<output-dir>/browser_qa`.
-- `--capture-screenshots`: with `--smoke`, capture dashboard screenshots under `<output-dir>/dashboard_qa`.
-- `--smoke-output`: explicit path for the integrated post-upload smoke report JSON.
-- `--preflight`: run readiness checks and write `preflight_report.json` plus `required_target_contract.json`.
-- `--source api` or unified `--input-mode api`: pull dashboard documents directly from Grafana using the current env-driven HTTP basic-auth path.
-- `--dataset-filter`: explicit `data_stream.dataset` value for the dashboard-level metrics filter (default `prometheus` for rule-engine ES|QL; cleared when `--native-promql` is set). Useful for OTel or custom data streams.
-- `--logs-dataset-filter`: explicit `data_stream.dataset` value for the dashboard-level logs filter (default empty).
-- `--rules-file` / `--plugin`: extend deterministic translation without editing core code.
-- `obs-migrate extensions --source grafana --template-out ...`: emit a validated starter rule-pack template.
-- `obs-migrate extensions --source grafana`: print the shared extension catalog, including rule-pack/plugin surfaces and built-in registry rules.
-- `--polish-metadata` / `--review-explanations`: add reviewer-facing polish and explanations on top of the deterministic pipeline.
+- `--assets {dashboards,alerts,all}` is the canonical selector on both the
+  dedicated and unified migration surfaces. `--fetch-alerts` remains only as a
+  deprecated compatibility alias. Using the alias always emits a deprecation
+  warning; if the requested asset selection is `dashboards`, including explicit
+  `--assets dashboards`, runtime normalization upgrades the run to `--assets all`.
+- Dashboard artifacts are written under `<output-dir>/dashboards`; alert
+  artifacts are written under `<output-dir>/alerts`.
+- Native PromQL is the default high-fidelity path. When `--es-url` reaches a
+  target without ES|QL `PROMQL` support, the run downgrades to ES|QL
+  translation. Use `--no-native-promql` to force ES|QL translation, or
+  `--native-promql` to force native PromQL and skip target detection.
+- `--source api` (or unified `--input-mode api`) pulls dashboard documents over
+  HTTP basic auth. Connection details are **flag-first with env fallback**:
+  `--grafana-url` / `--grafana-user` / `--grafana-pass` default to `GRAFANA_URL`
+  / `GRAFANA_USER` / `GRAFANA_PASS`; `--grafana-token` (env `GRAFANA_TOKEN`) is
+  the bearer-token alternative.
+- `--ca-cert <path>` (env `OBS_MIGRATE_CA_CERT`) and `--insecure` (env
+  `OBS_MIGRATE_INSECURE`) control TLS verification for all outbound connections
+  (Grafana, Elasticsearch, Kibana, and the Node upload step). Prefer `--ca-cert`
+  for private CAs; `--insecure` disables verification for testing only.
+- `--dataset-filter` and `--logs-dataset-filter` control the emitted dashboard
+  filters when you need non-default dataset wiring.
+- `--create-alert-rules` runs after an alert-capable asset selection and writes
+  `<output-dir>/alerts/alert_rule_upload_results.json`.
+- `--rules-file` / `--plugin` extend deterministic translation without editing
+  core code.
+- `--preflight`, `--polish-metadata`, and `--review-explanations` remain
+  Grafana-specific workflow helpers; use the canonical command doc for the
+  audited CLI surfaces around upload, smoke, and shared target management.
 
 For overlay-driven authoring before exporting YAML, a matching starter CUE file
 is available at `examples/cue/grafana-rule-pack.cue`.

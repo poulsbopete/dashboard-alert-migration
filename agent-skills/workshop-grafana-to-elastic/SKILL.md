@@ -2,56 +2,38 @@
 name: workshop-grafana-to-elastic
 description: >
   Workshop skill for Grafana-customer migrations to Elastic Observability Serverless: bulk-convert Grafana dashboard JSON
-  (Prometheus/PromQL) into dashboard drafts via CLI; pair with Elastic Agent Skills and Cursor for PromQL→ES|QL planning
-  and Kibana Dashboards API publishing.
+  (Prometheus/PromQL) into Kibana dashboards and rules via grafana-migrate; pair with Elastic Agent Skills for refinement.
 metadata:
   author: workshop
-  version: 0.3.0
+  version: 0.4.0
 ---
 
 # Grafana → Elastic (workshop)
 
 ## When to use
 
-**Grafana → Elastic Serverless** migration practice: **Grafana** exports in `assets/grafana/` (**20** sample dashboards)
+**Grafana → Elastic Serverless** migration practice: **Grafana** exports in `assets/grafana/` (**20** dashboards)
 and **`assets/grafana/alerts/`** (unified alert rules for **`--fetch-alerts`**)
-→ **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → **`build/mig-grafana/`** + upload to **Kibana** on **Observability Serverless** (**`--native-promql`** for Serverless), then **`tools/publish_grafana_alert_drafts_kibana.py`** for **Rules**. **Telemetry:** **OpenTelemetry SDK** → **Grafana Alloy** → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**. Optional legacy **`tools/grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** still exist for comparison.
+→ **[observability-migration-platform](https://github.com/elastic/observability-migration-platform)** **`grafana-migrate`**
+→ **`build/mig-grafana/`** + Kibana upload (**`--native-promql`**), then **`tools/publish_grafana_alert_drafts_kibana.py`** for **Rules**.
 
-## Prerequisites
+**Telemetry:** OpenTelemetry SDK → Grafana Alloy → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**.
 
-- **`mig-to-kbn/`** + **`uv`** + Python **≥ 3.11** (Instruqt: **`/opt/mig-to-kbn-venv`** from **`install_workshop_mig_to_kbn.sh`**)
-- Workshop checkout (`/root/workshop` in Instruqt)
-
-## Path A — Instruqt Terminal (Kibana API)
+## Run migration (Instruqt)
 
 ```bash
-cd /root/workshop && source ~/.bashrc
-./scripts/migrate_grafana_dashboards_to_serverless.sh
+bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh
 ```
 
-Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-migrate`** with **`--upload --ensure-data-views --fetch-alerts`** and **Kibana** credentials only by default (no **`--es-url`** / live ES|QL — avoids placeholder panels on empty clusters). Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add **`--es-url`**, **`--es-api-key`**, and pre-upload validation. Then **`publish_grafana_alert_drafts_kibana.py`**. Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**, **`alert_comparison_results.json`**.
+Waits for OTLP (or starts **`start_workshop_otel.sh`**), runs **`grafana-migrate`** with **`--upload --ensure-data-views --fetch-alerts`**, then publishes rules. Output: **`build/mig-grafana/yaml/`**, **`migration_report.json`**, **`alert_comparison_results.json`**.
 
-## Path B — Laptop + Cursor (same flow as Lab 1 assignment)
+Set **`WORKSHOP_MIG_ES_VALIDATE=1`** to add live ES\|QL validation before upload.
 
-Use **Instruqt Terminal** (secrets in `~/.bashrc`) and **laptop** (clone + Cursor). Order matters.
+## Optional — laptop + Cursor
 
-1. **Laptop:** clone the workshop repo **including** **`mig-to-kbn/`** (private **`elastic/mig-to-kbn`**). Run **`./scripts/install_workshop_mig_to_kbn.sh`**. Grafana inputs: **`assets/grafana/*.json`** (top-level only; **`fixtures/`** excluded by Grafana file glob).
-2. **Instruqt Terminal:** **`cd /root/workshop && source ~/.bashrc`**, then:
-
-   ```bash
-   # Exports: KIBANA_URL, ES_URL, ES_USERNAME, ES_PASSWORD, ES_API_KEY (when bootstrap succeeded), ES_DEPLOYMENT_ID,
-   # WORKSHOP_ROOT, WORKSHOP_OTLP_ENDPOINT (unique per Instruqt play — from ~/.bashrc / project_results or derived by
-   # ./scripts/start_workshop_otel.sh from ES_URL; never paste another lab’s ingest URL).
-   grep -E '^export (KIBANA_URL|ES_URL|ES_USERNAME|ES_PASSWORD|ES_API_KEY|ES_DEPLOYMENT_ID|WORKSHOP_ROOT|WORKSHOP_OTLP_ENDPOINT|WORKSHOP_OTLP_AUTH_HEADER)=' ~/.bashrc
-   ```
-
-3. **Laptop — Cursor integrated terminal:** paste the printed **`export`** lines, Enter (do not paste into chat).
-4. **Cursor:** install [Elastic Agent Skills](https://github.com/elastic/agent-skills) **`kibana-dashboards`**, attach it, open this repo folder.
-5. **Laptop terminal:** mirror Lab 1 Path B — run **`grafana-migrate`** with **`--input-dir assets/grafana`** (see **`01-lab-01-grafana-to-elastic/assignment.md`**).
-
-6. **Optional — legacy drafts:** **`python3 tools/grafana_to_elastic.py …`** + **`publish_grafana_drafts_kibana.py`** for `*-elastic-draft.json` flows.
-
-7. **Optional:** use **`kibana-dashboards`** to refine uploaded dashboards or map **PromQL** → **ES|QL** / Lens in Kibana.
+1. Clone workshop repo; **`./scripts/install_workshop_mig_to_kbn.sh`**
+2. On VM: `grep -E '^export (KIBANA_URL|ES_URL|ES_API_KEY)=' ~/.bashrc` — paste into laptop terminal
+3. Run the same migrate script from repo root, or invoke **`grafana-migrate`** directly (see **`scripts/migrate_grafana_dashboards_to_serverless.sh`**)
 
 ## Safety
 

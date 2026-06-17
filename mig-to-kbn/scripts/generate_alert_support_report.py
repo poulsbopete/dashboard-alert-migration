@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Generate alert-support standings from real Grafana and Datadog tool outputs."""
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+import argparse
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
-
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples" / "alerting"
@@ -163,7 +166,7 @@ def _reason_items(row: dict[str, Any]) -> list[str]:
 
 
 def _default_reason(row: dict[str, Any]) -> str:
-    tier = str(((row.get("target") or {}).get("automation_tier", "") or "")).strip()
+    tier = str((row.get("target") or {}).get("automation_tier", "") or "").strip()
     if tier == "draft_requires_review":
         return "review-only by migration policy; translated query should be human-validated before enablement"
     return "none"
@@ -445,7 +448,7 @@ def _group_examples(
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         family = _family_label(source_name, row, granularity=granularity)
-        tier = str(((row.get("target") or {}).get("automation_tier", "") or ""))
+        tier = str((row.get("target") or {}).get("automation_tier", "") or "")
         grouped[(family, tier)].append(row)
     return sorted(
         ((family, tier, entries) for (family, tier), entries in grouped.items()),
@@ -542,7 +545,7 @@ def _family_breakdown(
     for row in rows:
         family_counts[(
             _family_label(source_name, row, granularity=granularity),
-            str(((row.get("target") or {}).get("automation_tier", "") or "")),
+            str((row.get("target") or {}).get("automation_tier", "") or ""),
         )] += 1
     return [
         {
@@ -649,12 +652,12 @@ def _source_rows(source_name: str, comparison: dict[str, Any]) -> list[dict[str,
 def _artifact_paths(source_name: str) -> dict[str, str]:
     if source_name == "grafana":
         return {
-            "results": "examples/alerting/generated/grafana/alert_migration_results.json",
-            "comparison": "examples/alerting/generated/grafana/alert_comparison_results.json",
+            "results": "examples/alerting/generated/grafana/alerts/alert_migration_results.json",
+            "comparison": "examples/alerting/generated/grafana/alerts/alert_comparison_results.json",
         }
     return {
-        "results": "examples/alerting/generated/datadog/monitor_migration_results.json",
-        "comparison": "examples/alerting/generated/datadog/monitor_comparison_results.json",
+        "results": "examples/alerting/generated/datadog/alerts/monitor_migration_results.json",
+        "comparison": "examples/alerting/generated/datadog/alerts/monitor_comparison_results.json",
     }
 
 
@@ -710,11 +713,11 @@ def render_markdown_report(grafana_comparison: dict[str, Any], datadog_compariso
         "## Generated Artifacts",
         "",
         "- Grafana:",
-        f"  - `{(GENERATED_DIR / 'grafana' / 'alert_migration_results.json').relative_to(ROOT)}`",
-        f"  - `{(GENERATED_DIR / 'grafana' / 'alert_comparison_results.json').relative_to(ROOT)}`",
+        f"  - `{(GENERATED_DIR / 'grafana' / 'alerts' / 'alert_migration_results.json').relative_to(ROOT)}`",
+        f"  - `{(GENERATED_DIR / 'grafana' / 'alerts' / 'alert_comparison_results.json').relative_to(ROOT)}`",
         "- Datadog:",
-        f"  - `{(GENERATED_DIR / 'datadog' / 'monitor_migration_results.json').relative_to(ROOT)}`",
-        f"  - `{(GENERATED_DIR / 'datadog' / 'monitor_comparison_results.json').relative_to(ROOT)}`",
+        f"  - `{(GENERATED_DIR / 'datadog' / 'alerts' / 'monitor_migration_results.json').relative_to(ROOT)}`",
+        f"  - `{(GENERATED_DIR / 'datadog' / 'alerts' / 'monitor_comparison_results.json').relative_to(ROOT)}`",
         "",
         "## Summary",
         "",
@@ -798,7 +801,13 @@ def _write_summary_json(grafana_comparison: dict[str, Any], datadog_comparison: 
     )
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    _parse_args(argv)
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
     grafana_output = GENERATED_DIR / "grafana"
@@ -815,11 +824,12 @@ def main() -> None:
         "observability_migration.adapters.source.grafana.cli",
         "--source",
         "files",
+        "--assets",
+        "alerts",
         "--input-dir",
         str(GRAFANA_INPUT_DIR),
         "--output-dir",
         str(grafana_output),
-        "--fetch-alerts",
         "--data-view",
         "metrics-*",
         "--es-url",
@@ -833,6 +843,8 @@ def main() -> None:
         "observability_migration.adapters.source.datadog.cli",
         "--source",
         "files",
+        "--assets",
+        "alerts",
         "--input-dir",
         str(datadog_input_dir),
         "--output-dir",
@@ -841,7 +853,6 @@ def main() -> None:
         str(DATADOG_FIELD_PROFILE),
         "--data-view",
         "metrics-*",
-        "--fetch-monitors",
         "--es-url",
         "",
         "--kibana-url",
@@ -852,8 +863,8 @@ def main() -> None:
         "",
     ])
 
-    grafana_comparison = _load_json(grafana_output / "alert_comparison_results.json")
-    datadog_comparison = _load_json(datadog_output / "monitor_comparison_results.json")
+    grafana_comparison = _load_json(grafana_output / "alerts" / "alert_comparison_results.json")
+    datadog_comparison = _load_json(datadog_output / "alerts" / "monitor_comparison_results.json")
     _write_markdown(grafana_comparison, datadog_comparison)
     _write_summary_json(grafana_comparison, datadog_comparison)
 

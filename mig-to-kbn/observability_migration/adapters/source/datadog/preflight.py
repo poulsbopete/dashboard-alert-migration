@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Preflight validation: detect target incompatibilities before generation.
 
 Checks run before the planner/translator to catch:
@@ -12,22 +15,26 @@ Each check returns a PreflightResult that can block, warn, or pass.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from .field_map import FieldMapProfile
-from .models import LogAttributeFilter, LogBoolOp, LogNot, LogRange, LogWildcard, ScopeBoolOp, TagFilter
 from observability_migration.core.verification.field_capabilities import (
     FieldCapability,
     assess_field_usage,
 )
 
+from .field_map import FieldMapProfile
+from .models import LogAttributeFilter, LogBoolOp, LogNot, LogRange, LogWildcard, ScopeBoolOp, TagFilter
 
 ESQL_DEFAULT_ROW_LIMIT = 1000
 ESQL_MAX_ROW_LIMIT = 10000
 DEFAULT_RUNTIME_FIELD_BUDGET = 5
 MIN_KIBANA_MAJOR = 8
 MIN_KIBANA_MINOR = 12
+_TEMPLATE_TOKEN_RE = re.compile(r"\$\w+(?:\.\w+)*")
 
 
 @dataclass
@@ -300,6 +307,103 @@ def run_preflight(
     return result
 
 
+def build_target_readiness_contract(
+    dashboards: list[Any],
+    field_map: FieldMapProfile,
+) -> dict[str, Any]:
+    """Build a machine-readable source-to-target field readiness contract."""
+    has_shared_caps = bool(getattr(field_map, "field_caps", {}) or {})
+    has_metric_caps = bool(getattr(field_map, "metric_field_caps", {}) or {})
+    has_log_caps = bool(getattr(field_map, "log_field_caps", {}) or {})
+    required_fields: dict[str, dict[str, Any]] = {}
+
+    for dashboard in dashboards:
+        for req in _extract_required_fields(dashboard, field_map=field_map):
+            target_name = str(req.get("name", "") or "").strip()
+            if not target_name:
+                continue
+            source_name = str(req.get("source_name", "") or "").strip() or target_name
+            context = str(req.get("context", "") or "")
+            role = str(req.get("usage", "") or "field")
+            widget_id = str(req.get("widget_id", "") or "")
+            capability = field_map.field_capability(target_name, context=context)
+            context_has_caps = has_shared_caps
+            if context == "metric":
+                context_has_caps = has_shared_caps or has_metric_caps
+            elif context == "log":
+                context_has_caps = has_shared_caps or has_log_caps
+
+            status = "unknown"
+            field_type = None
+            if capability is not None:
+                status = "confirmed"
+                field_type = capability.type
+            elif context_has_caps:
+                status = "missing"
+
+            entry = required_fields.setdefault(
+                target_name,
+                {
+                    "target_field": target_name,
+                    "source_fields": set(),
+                    "roles": set(),
+                    "contexts": set(),
+                    "widgets": set(),
+                    "status": status,
+                    "type": field_type,
+                },
+            )
+            entry["source_fields"].add(source_name)
+            entry["roles"].add(role)
+            if context:
+                entry["contexts"].add(context)
+            if widget_id:
+                entry["widgets"].add(widget_id)
+            if entry["status"] != "confirmed":
+                entry["status"] = status
+                entry["type"] = field_type
+
+    serialized_fields = {}
+    for field_name, info in sorted(required_fields.items()):
+        serialized_fields[field_name] = {
+            "target_field": info["target_field"],
+            "source_fields": sorted(info["source_fields"]),
+            "roles": sorted(info["roles"]),
+            "contexts": sorted(info["contexts"]),
+            "widgets": sorted(info["widgets"]),
+            "status": info["status"],
+            "type": info["type"],
+        }
+
+    confirmed = sum(1 for v in serialized_fields.values() if v["status"] == "confirmed")
+    missing = sum(1 for v in serialized_fields.values() if v["status"] == "missing")
+    unknown = sum(1 for v in serialized_fields.values() if v["status"] == "unknown")
+    return {
+        "source": "datadog",
+        "field_profile": field_map.name,
+        "metric_index": field_map.metric_index,
+        "logs_index": field_map.logs_index,
+        "capabilities": {
+            "metric_fields": len(getattr(field_map, "metric_field_caps", {}) or {}),
+            "log_fields": len(getattr(field_map, "log_field_caps", {}) or {}),
+            "total_fields": len(getattr(field_map, "field_caps", {}) or {}),
+        },
+        "required_fields": serialized_fields,
+        "totals": {
+            "fields": len(serialized_fields),
+            "fields_confirmed": confirmed,
+            "fields_missing": missing,
+            "fields_unknown": unknown,
+        },
+    }
+
+
+def save_target_readiness_contract(contract: dict[str, Any], output_path: str | Path) -> None:
+    output_path = Path(output_path)
+    with output_path.open("w", encoding="utf-8") as fh:
+        json.dump(contract, fh, indent=2)
+
+
 def _extract_required_fields(
     dashboard_ir: Any,
     field_map: FieldMapProfile | None = None,
@@ -320,6 +424,8 @@ def _extract_required_fields(
                     "type_family": "numeric",
                 })
                 for filt in _collect_metric_scope_filters(mq.scope):
+                    if _is_template_token(filt.key):
+                        continue
                     required.append({
                         "name": field_map.map_tag(filt.key, context="metric") if field_map else filt.key,
                         "source_name": filt.key,
@@ -328,6 +434,8 @@ def _extract_required_fields(
                         "context": "metric",
                     })
                 for tag in mq.group_by:
+                    if _is_template_token(tag):
+                        continue
                     required.append({
                         "name": field_map.map_tag(tag, context="metric") if field_map else tag,
                         "source_name": tag,
@@ -338,6 +446,8 @@ def _extract_required_fields(
             if q.log_query and q.log_query.ast is not None:
                 for log_req in _collect_log_required_fields(q.log_query.ast):
                     raw_name = log_req.get("name", "")
+                    if _is_template_token(raw_name):
+                        continue
                     is_tag = log_req.get("is_tag", False)
                     required.append({
                         "name": _map_log_field_name(raw_name, field_map, is_tag=is_tag) if field_map else raw_name,
@@ -451,7 +561,7 @@ def _extract_log_group_fields(
             if not isinstance(group_by, dict):
                 continue
             facet = str(group_by.get("facet", "") or "").strip()
-            if not facet:
+            if not facet or _is_template_token(facet.lstrip("@")):
                 continue
             required.append({
                 "name": _map_log_field_name(facet, field_map, is_tag=not facet.startswith("@")) if field_map else facet.lstrip("@"),
@@ -472,6 +582,10 @@ def _map_log_field_name(
     if is_tag or normalized in field_map.tag_map:
         return field_map.map_tag(normalized, context="log")
     return field_map.map_log_field(normalized)
+
+
+def _is_template_token(value: str) -> bool:
+    return bool(_TEMPLATE_TOKEN_RE.fullmatch(str(value or "").strip()))
 
 
 def _parse_version(version_str: str) -> tuple[int, int] | None:

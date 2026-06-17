@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """ES|QL string parsing and shape extraction utilities.
 """
 
@@ -50,26 +53,69 @@ class ESQLShape:
 
 
 def split_esql_pipeline(esql):
+    """Split an ES|QL pipeline on top-level ``|`` separators.
+
+    The splitter understands three string forms so pipes inside string
+    literals do not accidentally split a stage:
+
+    * ``\"\"\"...\"\"\"`` — ES|QL raw triple-quoted strings. Backslash escapes
+      are *not* processed; the literal terminates at the next ``\"\"\"``.
+    * ``\"...\"`` — regular double-quoted strings.
+    * ``'...'`` — kept for safety even though ES|QL does not officially use
+      single-quoted string literals.
+
+    Without triple-quoted awareness, each individual ``\"`` in a
+    ``\"\"\"...\"\"\"`` literal would flip an in/out-of-quote boundary, which
+    causes pipeline stages following the literal to be merged or dropped
+    whenever the surrounding string contains additional ``\"`` characters
+    (as the native PROMQL emission's ``REPLACE(..., \"\"\"...\"\"\", \"$1\")``
+    calls routinely do).
+    """
+    text = str(esql or "")
     parts = []
     current = []
-    in_quote = None
-    for char in str(esql or ""):
-        if in_quote:
+    mode = "out"
+    quote_char = None
+    i = 0
+    n = len(text)
+    while i < n:
+        char = text[i]
+        if mode == "in_triple":
+            if char == '"' and text.startswith('"""', i):
+                current.append('"""')
+                i += 3
+                mode = "out"
+                continue
             current.append(char)
-            if char == in_quote:
-                in_quote = None
+            i += 1
             continue
-        if char in ("'", '"'):
-            in_quote = char
+        if mode == "in_single":
             current.append(char)
+            if char == quote_char:
+                mode = "out"
+                quote_char = None
+            i += 1
+            continue
+        if char == '"' and text.startswith('"""', i):
+            current.append('"""')
+            i += 3
+            mode = "in_triple"
+            continue
+        if char in ('"', "'"):
+            current.append(char)
+            mode = "in_single"
+            quote_char = char
+            i += 1
             continue
         if char == "|":
             part = "".join(current).strip()
             if part:
                 parts.append(part)
             current = []
+            i += 1
             continue
         current.append(char)
+        i += 1
     tail = "".join(current).strip()
     if tail:
         parts.append(tail)
@@ -132,6 +178,15 @@ def is_time_bucket_expression(expr):
 
 
 def select_xy_dimension_fields(by_cols, time_fields=None):
+    """Pick the x-axis (and optional breakdown) dimension for an XY chart.
+
+    Returns ``(None, None)`` when neither a time field nor any group column is
+    available: an XY chart needs a real x-axis column, and inventing a
+    ``time_bucket`` dimension the query never outputs makes Lens fail at render
+    time with "Provided column name or index is invalid" (issue #127). Callers
+    must treat a ``None`` dimension as "this query has no time series" and
+    degrade to a single-value/metric visualization instead.
+    """
     by_cols = list(by_cols or [])
     time_fields = [f for f in (time_fields or []) if f in by_cols]
     dimension = None
@@ -140,64 +195,102 @@ def select_xy_dimension_fields(by_cols, time_fields=None):
     elif by_cols:
         dimension = by_cols[0]
     else:
-        dimension = "time_bucket"
+        return None, None
     breakdown = next((f for f in by_cols if f != dimension), None)
     return dimension, breakdown
 
 
+def _metric_fields_from_projection(projected_fields, group_fields):
+    return [
+        field
+        for field in projected_fields
+        if field not in group_fields and not is_time_like_output_field(field)
+    ]
+
+
 def extract_esql_shape(esql):
     commands = split_esql_pipeline(esql)
+    shape = ESQLShape()
     for command in commands:
-        if not command.lower().startswith("stats "):
+        lower_command = command.lower()
+        if lower_command.startswith("stats "):
+            assignments_text, by_text = split_top_level_keyword(command[6:].strip(), "BY")
+            metric_fields = []
+            for assignment in _split_top_level_csv(assignments_text):
+                alias, expr = split_top_level_assignment(assignment)
+                field_name = alias or expr
+                if field_name:
+                    metric_fields.append(field_name)
+            group_fields = []
+            time_fields = []
+            for part in _split_top_level_csv(by_text):
+                alias, expr = split_top_level_assignment(part)
+                field_name = alias or expr
+                if not field_name:
+                    continue
+                group_fields.append(field_name)
+                if is_time_like_output_field(field_name) or is_time_bucket_expression(expr or field_name):
+                    time_fields.append(field_name)
+            shape = ESQLShape(
+                metric_fields=metric_fields,
+                group_fields=group_fields,
+                time_fields=time_fields,
+                projected_fields=list(group_fields) + list(metric_fields),
+                mode="stats",
+            )
             continue
-        assignments_text, by_text = split_top_level_keyword(command[6:].strip(), "BY")
-        metric_fields = []
-        for assignment in _split_top_level_csv(assignments_text):
-            alias, expr = split_top_level_assignment(assignment)
-            field_name = alias or expr
-            if field_name:
-                metric_fields.append(field_name)
-        group_fields = []
-        time_fields = []
-        for part in _split_top_level_csv(by_text):
-            alias, expr = split_top_level_assignment(part)
-            field_name = alias or expr
-            if not field_name:
-                continue
-            group_fields.append(field_name)
-            if is_time_like_output_field(field_name) or is_time_bucket_expression(expr or field_name):
-                time_fields.append(field_name)
-        return ESQLShape(
-            metric_fields=metric_fields,
-            group_fields=group_fields,
-            time_fields=time_fields,
-            projected_fields=list(group_fields) + list(metric_fields),
-            mode="stats",
-        )
-    for command in reversed(commands):
-        if not command.lower().startswith("keep "):
+
+        if lower_command.startswith("eval "):
+            for assignment in _split_top_level_csv(command[5:].strip()):
+                alias, _expr = split_top_level_assignment(assignment)
+                if alias and alias not in shape.projected_fields:
+                    shape.projected_fields.append(alias)
             continue
-        projected_fields = [part.strip() for part in _split_top_level_csv(command[5:].strip()) if part.strip()]
-        time_fields = [f for f in projected_fields if is_time_like_output_field(f)]
-        return ESQLShape(
-            projected_fields=projected_fields,
-            time_fields=time_fields,
-            mode="keep",
-        )
-    if commands and commands[0].lower().startswith("row "):
-        projected_fields = []
-        for assignment in _split_top_level_csv(commands[0][4:].strip()):
-            alias, expr = split_top_level_assignment(assignment)
-            field_name = alias or expr
-            if field_name:
-                projected_fields.append(field_name)
-        time_fields = [f for f in projected_fields if is_time_like_output_field(f)]
-        return ESQLShape(
-            projected_fields=projected_fields,
-            time_fields=time_fields,
-            mode="row",
-        )
-    return ESQLShape()
+
+        if lower_command.startswith("keep "):
+            projected_fields = [part.strip() for part in _split_top_level_csv(command[5:].strip()) if part.strip()]
+            group_fields = [field for field in shape.group_fields if field in projected_fields]
+            metric_fields = [field for field in shape.metric_fields if field in projected_fields]
+            if not metric_fields:
+                metric_fields = _metric_fields_from_projection(projected_fields, group_fields)
+            time_fields = [
+                field
+                for field in projected_fields
+                if field in shape.time_fields or is_time_like_output_field(field)
+            ]
+            shape = ESQLShape(
+                metric_fields=metric_fields,
+                group_fields=group_fields,
+                time_fields=time_fields,
+                projected_fields=projected_fields,
+                mode=shape.mode or "keep",
+            )
+            continue
+
+        if lower_command.startswith("drop "):
+            dropped_fields = {part.strip() for part in _split_top_level_csv(command[5:].strip()) if part.strip()}
+            shape.metric_fields = [field for field in shape.metric_fields if field not in dropped_fields]
+            shape.group_fields = [field for field in shape.group_fields if field not in dropped_fields]
+            shape.time_fields = [field for field in shape.time_fields if field not in dropped_fields]
+            shape.projected_fields = [field for field in shape.projected_fields if field not in dropped_fields]
+            if not shape.metric_fields:
+                shape.metric_fields = _metric_fields_from_projection(shape.projected_fields, shape.group_fields)
+            continue
+
+        if lower_command.startswith("row "):
+            projected_fields = []
+            for assignment in _split_top_level_csv(command[4:].strip()):
+                alias, expr = split_top_level_assignment(assignment)
+                field_name = alias or expr
+                if field_name:
+                    projected_fields.append(field_name)
+            time_fields = [f for f in projected_fields if is_time_like_output_field(f)]
+            shape = ESQLShape(
+                projected_fields=projected_fields,
+                time_fields=time_fields,
+                mode="row",
+            )
+    return shape
 
 
 def extract_esql_columns(esql):

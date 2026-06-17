@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Extract and classify Grafana transformations as structured redesign tasks.
 
 Grafana transformations (joins, calculations, regex extracts, filters, etc.)
@@ -9,7 +12,6 @@ redesign tasks that appear in the migration manifest and preflight report.
 from __future__ import annotations
 
 from typing import Any
-
 
 TRANSFORM_COMPLEXITY = {
     "merge": "medium",

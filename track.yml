@@ -4,14 +4,15 @@ title: Grafana & Datadog → Elastic Serverless (migration workshop)
 teaser: Grafana & Datadog → Elastic Serverless—dashboards, alerts, and OTLP in guided
   labs.
 description: |
-  mig-to-kbn labs (grafana-migrate, datadog-migrate), Alloy→OTLP, Kibana on :8080. See the repo README for full setup; engine is upstream elastic/mig-to-kbn.
+  obs-migrate labs (grafana-migrate, datadog-migrate), Alloy→OTLP, Kibana on :8080. See the repo README for full setup; engine is upstream elastic/observability-migration-platform.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
+- obs-migrate
 - elastic
+- observability-migration-platform
 - opentelemetry
 - serverless
 - migration
-- mig-to-kbn
 - observability
 owner: elastic
 developers:
@@ -35,5 +36,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "16319075016440163965"
+checksum: "11018181323140766133"
 enhanced_loading: false

@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Rollout planning helpers for Datadog migrations."""
 
 from __future__ import annotations
@@ -234,10 +237,10 @@ def generate_review_queue(plan: RolloutPlan) -> list[dict[str, Any]]:
 
 
 __all__ = [
+    "ROLLOUT_STATES",
     "ArtifactBundle",
     "DashboardLineage",
     "RolloutPlan",
-    "ROLLOUT_STATES",
     "build_rollout_plan",
     "generate_review_queue",
     "promote_dashboard",
