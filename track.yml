@@ -8,22 +8,26 @@ description: |
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - obs-migrate
+- co.elastic.workshops.production
 - elastic
+- co.elastic.workshops.production.grafana_datadog_elastic_serverless
 - observability-migration-platform
 - opentelemetry
 - serverless
 - migration
 - observability
+- co.elastic.workshops
 owner: elastic
 developers:
 - peter.simkins@elastic.co
 instructors:
 - peter.simkins@elastic.co
+- abhinav.chauhan@elastic.co
 - kyle.gorak@elastic.co
 show_timer: true
 skipping_enabled: true
-idle_timeout: 600
-timelimit: 14400
+idle_timeout: 3600
+timelimit: 10800
 lab_config:
   extend_ttl: 3600
   sidebar_enabled: true
@@ -36,5 +40,5 @@ lab_config:
   hideStopButton: false
   default_layout: AssignmentRight
   default_layout_sidebar_size: 35
-checksum: "11018181323140766133"
+checksum: "15263174271564127210"
 enhanced_loading: false

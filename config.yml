@@ -1,22 +1,22 @@
 # Team secret *names* belong here so `instruqt track push` keeps sandbox bindings (values live in Instruqt only).
 version: "3"
 virtualmachines:
-  - name: es3-api
-    image: elastic/es3-api-v2
-    shell: /bin/bash
-    environment:
-      PRODUCT_TIER: complete
-      PROJECT_TYPE: observability
-      REGIONS: aws-us-east-1
-      # Optional override for mig-to-kbn clone URL (default on es3-api: public observability-migration-platform).
-      # WORKSHOP_MIG_TO_KBN_GIT_URL: https://github.com/elastic/observability-migration-platform.git
-      # WORKSHOP_MIG_TO_KBN_GIT_REF: main
-    memory: 12288
-    cpus: 4
-    allow_external_ingress:
-      - http
-      - https
-      - high-ports
+- name: es3-api
+  image: elastic/es3-api-v2
+  shell: /bin/bash
+  environment:
+    PRODUCT_TIER: complete
+    PROJECT_TYPE: observability
+    REGIONS: aws-us-east-1
+    # Optional override for mig-to-kbn clone URL (default on es3-api: public observability-migration-platform).
+    # WORKSHOP_MIG_TO_KBN_GIT_URL: https://github.com/elastic/observability-migration-platform.git
+    # WORKSHOP_MIG_TO_KBN_GIT_REF: main
+  memory: 12288
+  cpus: 4
+  allow_external_ingress:
+  - http
+  - https
+  - high-ports
 secrets:
-  - name: LLM_PROXY_PROD
-  - name: ESS_CLOUD_API_KEY
+- name: LLM_PROXY_PROD
+- name: ESS_CLOUD_API_KEY
