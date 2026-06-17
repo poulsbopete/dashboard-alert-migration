@@ -308,6 +308,50 @@ def _run_worker(spec: dict[str, str]) -> int:
         callbacks=[cpu_iow_obs],
     )
 
+    def cpu_nice_obs(_options: object):
+        phase = (time.time() - t0) / 60.0 + (seed % 7) * 0.11
+        yield Observation(max(0.5, min(4.0, 1.5 + 1.2 * math.sin(phase) + rng.uniform(-0.1, 0.1))))
+
+    meter.create_observable_gauge(
+        "system_cpu_nice",
+        unit="%",
+        description="Datadog system.cpu.nice → system_cpu_nice",
+        callbacks=[cpu_nice_obs],
+    )
+
+    def cpu_stolen_obs(_options: object):
+        phase = (time.time() - t0) / 80.0 + (seed % 9) * 0.07
+        yield Observation(max(0.1, min(2.0, 0.6 + 0.5 * math.sin(phase) + rng.uniform(-0.05, 0.05))))
+
+    meter.create_observable_gauge(
+        "system_cpu_stolen",
+        unit="%",
+        description="Datadog system.cpu.stolen → system_cpu_stolen",
+        callbacks=[cpu_stolen_obs],
+    )
+
+    def cpu_guest_obs(_options: object):
+        phase = (time.time() - t0) / 95.0 + (seed % 11) * 0.09
+        yield Observation(max(0.0, min(1.5, 0.4 + 0.4 * math.sin(phase) + rng.uniform(-0.03, 0.03))))
+
+    meter.create_observable_gauge(
+        "system_cpu_guest",
+        unit="%",
+        description="Datadog system.cpu.guest → system_cpu_guest",
+        callbacks=[cpu_guest_obs],
+    )
+
+    def cpu_interrupt_obs(_options: object):
+        phase = (time.time() - t0) / 8.0 + (seed % 13) * 0.13
+        yield Observation(max(0.2, min(3.0, 0.8 + 0.7 * abs(math.sin(phase)) + rng.uniform(-0.1, 0.1))))
+
+    meter.create_observable_gauge(
+        "system_cpu_interrupt",
+        unit="%",
+        description="Datadog system.cpu.interrupt → system_cpu_interrupt",
+        callbacks=[cpu_interrupt_obs],
+    )
+
     def load1_obs(_options: object):
         phase = (time.time() - t0) / 28.0 + seed * 0.02
         yield Observation(max(0.15, min(14.0, 2.2 + 4.5 * math.sin(phase) + rng.uniform(-0.4, 0.4))))
