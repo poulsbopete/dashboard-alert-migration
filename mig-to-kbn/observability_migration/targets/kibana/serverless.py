@@ -278,7 +278,15 @@ def ensure_data_view(
     space_id: str = "",
     timeout: int = 30,
 ) -> dict[str, Any]:
-    """Create a data view if one with the same title doesn't exist.
+    """Ensure a data view with ``title`` exists and has ``id == title``.
+
+    ``kb-dashboard-cli`` compiles NDJSON that references data views by their
+    saved-object ID, and this codebase sets ``view_id=title`` by convention so
+    that ID is predictable.  If a data view with the right title already exists
+    but was created externally (e.g. by Fleet) with a UUID id, the upload will
+    fail with "Missing references: index-pattern:<title>".  In that case this
+    function deletes the mismatched data view and recreates it with
+    ``id == title`` to satisfy the invariant.
 
     Returns the existing or newly created data view.
     """
@@ -287,8 +295,20 @@ def ensure_data_view(
     )
     for dv in existing:
         if dv.get("title") == title:
-            logger.info("Data view '%s' already exists (id=%s)", title, dv.get("id"))
-            return dv
+            if dv.get("id") == title:
+                logger.info("Data view '%s' already exists (id=%s)", title, dv.get("id"))
+                return dv
+            # Existing data view has a UUID id (e.g. created by Fleet/Kibana setup).
+            # Compiled NDJSON references index-pattern by title-as-id, so delete and
+            # recreate with view_id=title to keep the id contract.
+            logger.info(
+                "Data view '%s' exists with id=%s (expected id=%s); recreating.",
+                title, dv.get("id"), title,
+            )
+            delete_data_view(
+                kibana_url, dv["id"], api_key=api_key, space_id=space_id, timeout=timeout,
+            )
+            break
     logger.info("Creating data view '%s'", title)
     return create_data_view(
         kibana_url,
