@@ -35,7 +35,7 @@ notes:
   contents: |
     ## This lab
 
-    **20** Grafana JSON → **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: repo includes **`mig-to-kbn/`**, Python **3.11+**, **`uv`**, paste **`export`** from VM **`~/.bashrc`**, run the same CLI — OTLP already running from bootstrap).
+    **20** Grafana JSON → **[mig-to-kbn](https://github.com/elastic/observability-migration-platform)** **`grafana-migrate`** → Kibana. Pick **Path A** (VM migrate script) or **Path B** (**Cursor**: repo includes **`mig-to-kbn/`**, Python **3.11+**, **`uv`**, paste **`export`** from VM **`~/.bashrc`**, run the same CLI — OTLP already running from bootstrap).
 
     **Next slide:** mini-game while the sandbox finishes provisioning.
 - type: text
@@ -75,7 +75,7 @@ enhanced_loading: null
 
 # Lab 1 — Grafana → Elastic Serverless (**20 dashboards**)
 
-Migration uses **[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** (see [Grafana source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md) and [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md)): **`grafana-migrate`** with **`--native-promql`** for Observability Serverless.
+Migration uses **[elastic/observability-migration-platform](https://github.com/elastic/observability-migration-platform)** (see [Grafana source](https://github.com/elastic/observability-migration-platform/blob/main/docs/sources/grafana.md) and [architecture](https://github.com/elastic/observability-migration-platform/blob/main/docs/architecture.md)): **`grafana-migrate`** with **`--native-promql`** for Observability Serverless.
 
 Pick **Path A** or **Path B** (or both).
 
@@ -102,7 +102,7 @@ That migrate script converts **20** Grafana JSON under **`assets/grafana/`**, up
 
 ### Path A — script defaults (optional)
 
-Upload is **Kibana-only** by default (no pre-upload ES validation): the wrapper clears **`--es-url`** / **`--es-api-key`** so **`ES_URL`** in **`~/.bashrc`** does not enable validation unless you set **`WORKSHOP_MIG_ES_VALIDATE=1`**. The pipeline uses **`--native-promql`**, **`metrics-*`**, **`--fetch-alerts`** on **`assets/grafana/alerts/`**, and writes **`build/mig-grafana/`** (e.g. **`alert_comparison_results.json`**). More context: [Grafana source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/grafana.md), [alert inputs](https://github.com/elastic/mig-to-kbn/blob/main/observability_migration/adapters/source/grafana/extract.py). For optional synthetic metrics demos, see **`setup_serverless_data.py`** at the bottom of this lab.
+Upload is **Kibana-only** by default (no pre-upload ES validation): the wrapper clears **`--es-url`** / **`--es-api-key`** so **`ES_URL`** in **`~/.bashrc`** does not enable validation unless you set **`WORKSHOP_MIG_ES_VALIDATE=1`**. The pipeline uses **`--native-promql`**, **`metrics-*`**, **`--fetch-alerts`** on **`assets/grafana/alerts/`**, and writes **`build/mig-grafana/`** (e.g. **`alert_comparison_results.json`**). More context: [Grafana source](https://github.com/elastic/observability-migration-platform/blob/main/docs/sources/grafana.md), [alert inputs](https://github.com/elastic/observability-migration-platform/blob/main/observability_migration/adapters/source/grafana/extract.py). For optional synthetic metrics demos, see **`setup_serverless_data.py`** at the bottom of this lab.
 
 ## Path B — Cursor on your laptop
 

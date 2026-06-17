@@ -15,7 +15,7 @@ metadata:
 
 **Grafana → Elastic Serverless** migration practice: **Grafana** exports in `assets/grafana/` (**20** sample dashboards)
 and **`assets/grafana/alerts/`** (unified alert rules for **`--fetch-alerts`**)
-→ **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`grafana-migrate`** → **`build/mig-grafana/`** + upload to **Kibana** on **Observability Serverless** (**`--native-promql`** for Serverless), then **`tools/publish_grafana_alert_drafts_kibana.py`** for **Rules**. **Telemetry:** **OpenTelemetry SDK** → **Grafana Alloy** → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**. Optional legacy **`tools/grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** still exist for comparison.
+→ **[mig-to-kbn](https://github.com/elastic/observability-migration-platform)** **`grafana-migrate`** → **`build/mig-grafana/`** + upload to **Kibana** on **Observability Serverless** (**`--native-promql`** for Serverless), then **`tools/publish_grafana_alert_drafts_kibana.py`** for **Rules**. **Telemetry:** **OpenTelemetry SDK** → **Grafana Alloy** → Elastic **mOTLP**. Restart: **`./scripts/start_workshop_otel.sh`**. Optional legacy **`tools/grafana_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** still exist for comparison.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ Waits for OTLP (or starts **`start_workshop_otel.sh`**), then runs **`grafana-mi
 
 Use **Instruqt Terminal** (secrets in `~/.bashrc`) and **laptop** (clone + Cursor). Order matters.
 
-1. **Laptop:** clone the workshop repo **including** **`mig-to-kbn/`** (private **`elastic/mig-to-kbn`**). Run **`./scripts/install_workshop_mig_to_kbn.sh`**. Grafana inputs: **`assets/grafana/*.json`** (top-level only; **`fixtures/`** excluded by Grafana file glob).
+1. **Laptop:** clone the workshop repo **including** **`mig-to-kbn/`** (private **`elastic/observability-migration-platform`**). Run **`./scripts/install_workshop_mig_to_kbn.sh`**. Grafana inputs: **`assets/grafana/*.json`** (top-level only; **`fixtures/`** excluded by Grafana file glob).
 2. **Instruqt Terminal:** **`cd /root/workshop && source ~/.bashrc`**, then:
 
    ```bash

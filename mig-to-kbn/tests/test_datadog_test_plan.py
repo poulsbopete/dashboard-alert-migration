@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Comprehensive test suites aligned with the Datadog migration test plan.
 
 Covers sections 10.1 through 10.15 as described in TEST_PLAN.md.
@@ -17,13 +20,15 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from observability_migration.adapters.source.datadog.query_parser import (
-    VALID_AGGREGATORS,
-    ParseError,
-    parse_formula,
-    parse_legacy_query,
-    parse_metric_query,
+from observability_migration.adapters.source.datadog.extract import (
+    extract_dashboards_from_files,
+    load_credentials_from_env,
 )
+from observability_migration.adapters.source.datadog.field_map import (
+    OTEL_PROFILE,
+    FieldMapProfile,
+)
+from observability_migration.adapters.source.datadog.generate import generate_dashboard_yaml
 from observability_migration.adapters.source.datadog.log_parser import (
     LogTokenizeWarning,
     log_ast_to_esql_where,
@@ -45,16 +50,6 @@ from observability_migration.adapters.source.datadog.models import (
 )
 from observability_migration.adapters.source.datadog.normalize import normalize_dashboard
 from observability_migration.adapters.source.datadog.planner import plan_widget
-from observability_migration.adapters.source.datadog.field_map import (
-    OTEL_PROFILE,
-    FieldMapProfile,
-)
-from observability_migration.adapters.source.datadog.translate import translate_widget
-from observability_migration.adapters.source.datadog.generate import generate_dashboard_yaml
-from observability_migration.adapters.source.datadog.extract import (
-    extract_dashboards_from_files,
-    load_credentials_from_env,
-)
 from observability_migration.adapters.source.datadog.preflight import (
     FieldCapability,
     PreflightResult,
@@ -65,7 +60,14 @@ from observability_migration.adapters.source.datadog.preflight import (
     check_runtime_field_budget,
     run_preflight,
 )
-
+from observability_migration.adapters.source.datadog.query_parser import (
+    VALID_AGGREGATORS,
+    ParseError,
+    parse_formula,
+    parse_legacy_query,
+    parse_metric_query,
+)
+from observability_migration.adapters.source.datadog.translate import translate_widget
 
 # =========================================================================
 # 10.1 Extractor Suite
@@ -86,9 +88,8 @@ class TestExtractorSuite(unittest.TestCase):
             extract_dashboards_from_files("/nonexistent/path")
 
     def test_extract_from_empty_dir_raises(self):
-        with tempfile.TemporaryDirectory() as td:
-            with self.assertRaises(FileNotFoundError):
-                extract_dashboards_from_files(td)
+        with tempfile.TemporaryDirectory() as td, self.assertRaises(FileNotFoundError):
+            extract_dashboards_from_files(td)
 
     def test_invalid_json_skipped(self):
         with tempfile.TemporaryDirectory() as td:
@@ -568,6 +569,41 @@ class TestPreflightSuite(unittest.TestCase):
         self.assertTrue(any("service.name" in issue.message for issue in warnings))
         self.assertTrue(any("not searchable" in issue.message for issue in warnings))
 
+    def test_run_preflight_ignores_metric_template_scope_and_group_tokens(self):
+        mq = parse_metric_query("avg:system.cpu.user{$scope,$host} by {$service}")
+        widget = NormalizedWidget(
+            id="widget-3",
+            widget_type="timeseries",
+            title="CPU",
+            queries=[
+                WidgetQuery(
+                    name="q1",
+                    data_source="metrics",
+                    raw_query="avg:system.cpu.user{$scope,$host} by {$service}",
+                    metric_query=mq,
+                    query_type="metric",
+                )
+            ],
+        )
+        dashboard = NormalizedDashboard(id="dash-3", title="Dash", widgets=[widget])
+        profile = FieldMapProfile(
+            name="typed",
+            metric_index="metrics-*",
+            logs_index="logs-*",
+            metric_field_caps={
+                "system_cpu_user": FieldCapability(
+                    name="system_cpu_user",
+                    type="double",
+                    aggregatable=True,
+                    searchable=True,
+                )
+            },
+        )
+
+        result = run_preflight(dashboard, field_map=profile)
+
+        self.assertEqual(result.issues, [])
+
     def test_invalid_version_string_blocks(self):
         issues = check_kibana_version("not_a_version")
         blocking = [i for i in issues if i.level == "block"]
@@ -604,6 +640,41 @@ class TestPlannerGaps(unittest.TestCase):
         w = self._make_widget(id="1", widget_type="timeseries", title="CPU", queries=[wq])
         plan = plan_widget(w)
         self.assertEqual(plan.backend, "lens")
+
+    def test_simple_query_value_prefers_esql(self):
+        mq = parse_metric_query("avg:system.cpu.user{*}")
+        wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
+        w = self._make_widget(id="1", widget_type="query_value", title="CPU", queries=[wq])
+        plan = plan_widget(w)
+        self.assertEqual(plan.backend, "esql")
+
+    def test_simple_toplist_prefers_esql(self):
+        mq = parse_metric_query("avg:system.cpu.user{*} by {host}")
+        wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
+        w = self._make_widget(id="1", widget_type="toplist", title="Top", queries=[wq])
+        plan = plan_widget(w)
+        self.assertEqual(plan.backend, "esql")
+
+    def test_simple_query_table_prefers_esql(self):
+        mq = parse_metric_query("sum:consul.catalog.services_critical{*} by {host}")
+        wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
+        w = self._make_widget(id="1", widget_type="query_table", title="Services", queries=[wq])
+        plan = plan_widget(w)
+        self.assertEqual(plan.backend, "esql")
+
+    def test_grouped_query_value_stays_lens(self):
+        mq = parse_metric_query("avg:system.cpu.user{*} by {host}")
+        wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
+        w = self._make_widget(id="1", widget_type="query_value", title="CPU", queries=[wq])
+        plan = plan_widget(w)
+        self.assertEqual(plan.backend, "lens")
+
+    def test_count_derived_query_value_stays_esql(self):
+        mq = parse_metric_query("sum:http.requests{*}.as_count()")
+        wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
+        w = self._make_widget(id="1", widget_type="query_value", title="Requests", queries=[wq])
+        plan = plan_widget(w)
+        self.assertEqual(plan.backend, "esql")
 
     def test_rate_metric_chooses_esql(self):
         mq = parse_metric_query("sum:http.requests{*}.as_rate()")
@@ -722,26 +793,26 @@ class TestLensGenerationSuite(unittest.TestCase):
         self.assertEqual(result.yaml_panel["type"], "lens")
 
     def test_lens_has_data_view(self):
-        mq = parse_metric_query("avg:system.cpu.user{*}")
+        mq = parse_metric_query("avg:system.cpu.user{*} by {host}")
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
-        w = NormalizedWidget(id="1", widget_type="query_value", title="CPU", queries=[wq])
+        w = NormalizedWidget(id="1", widget_type="timeseries", title="CPU", queries=[wq])
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
         self.assertIn("data_view", result.yaml_panel)
         self.assertEqual(result.yaml_panel["data_view"], "metrics-*")
 
     def test_lens_has_metric_field(self):
-        mq = parse_metric_query("avg:system.cpu.user{*}")
+        mq = parse_metric_query("avg:system.cpu.user{*} by {host}")
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
-        w = NormalizedWidget(id="1", widget_type="query_value", title="CPU", queries=[wq])
+        w = NormalizedWidget(id="1", widget_type="timeseries", title="CPU", queries=[wq])
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
         self.assertEqual(result.yaml_panel["metric_field"], "system_cpu_user")
 
     def test_lens_has_aggregation(self):
-        mq = parse_metric_query("sum:http.requests.count{*}")
+        mq = parse_metric_query("sum:http.requests.count{*} by {host}")
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
-        w = NormalizedWidget(id="1", widget_type="query_value", title="Req", queries=[wq])
+        w = NormalizedWidget(id="1", widget_type="timeseries", title="Req", queries=[wq])
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
         self.assertEqual(result.yaml_panel["aggregation"], "SUM")
@@ -755,18 +826,18 @@ class TestLensGenerationSuite(unittest.TestCase):
         self.assertIn("host.name", result.yaml_panel.get("group_by", []))
 
     def test_lens_filters_captured(self):
-        mq = parse_metric_query("avg:system.cpu.user{host:web01}")
+        mq = parse_metric_query("avg:system.cpu.user{host:web01} by {host}")
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
-        w = NormalizedWidget(id="1", widget_type="query_value", title="CPU", queries=[wq])
+        w = NormalizedWidget(id="1", widget_type="timeseries", title="CPU", queries=[wq])
         plan = plan_widget(w)
         result = translate_widget(w, plan, OTEL_PROFILE)
         self.assertTrue(len(result.yaml_panel.get("filters", [])) > 0)
 
     def test_lens_panel_in_yaml(self):
-        mq = parse_metric_query("avg:system.cpu.user{*}")
+        mq = parse_metric_query("avg:system.cpu.user{*} by {host}")
         wq = WidgetQuery(name="q1", data_source="metrics", raw_query="...", metric_query=mq, query_type="metric")
         w = NormalizedWidget(
-            id="1", widget_type="query_value", title="CPU", queries=[wq],
+            id="1", widget_type="timeseries", title="CPU", queries=[wq],
             layout={"x": 0, "y": 0, "width": 4, "height": 2},
         )
         dash = NormalizedDashboard(id="1", title="Dash", widgets=[w])
@@ -882,7 +953,9 @@ class TestNegativeChaos(unittest.TestCase):
         nd = normalize_dashboard(raw)
         self.assertEqual(len(nd.widgets), 0)
 
-    def test_conflicting_multi_query_formula_reports_not_feasible(self):
+    def test_multi_query_formula_with_different_filters_translates(self):
+        # Previously blocked at translation; now per-aggregation WHERE
+        # clauses in STATS preserve each query's filter independently.
         q1 = "count:a{type:x AND direction:out} by {topic}.as_rate()"
         q2 = "count:b{type:x AND direction:in} by {topic}.as_rate()"
         mq1 = parse_metric_query(q1)
@@ -898,7 +971,9 @@ class TestNegativeChaos(unittest.TestCase):
             formulas=[wf],
         )
         result = translate_widget(w, plan_widget(w), OTEL_PROFILE)
-        self.assertEqual(result.status, "not_feasible")
+        self.assertNotEqual(result.status, "not_feasible")
+        self.assertIn('direction == "out"', result.esql_query)
+        self.assertIn('direction == "in"', result.esql_query)
 
     def test_unsupported_formula_function_reports_error(self):
         mq = parse_metric_query("avg:system.cpu.user{*}")
@@ -938,11 +1013,11 @@ class TestNegativeChaos(unittest.TestCase):
         self.assertIn(plan.backend, ("blocked", "markdown"))
         self.assertEqual(plan.confidence, 0.0)
 
-    def test_multiple_log_queries_error(self):
+    def test_multiple_log_queries_non_timeseries_error(self):
         lq1 = parse_log_query("service:a")
         lq2 = parse_log_query("service:b")
         w = NormalizedWidget(
-            id="1", widget_type="timeseries", title="Multi",
+            id="1", widget_type="query_table", title="Multi",
             queries=[
                 WidgetQuery(name="q1", data_source="logs", raw_query="service:a", log_query=lq1, query_type="log"),
                 WidgetQuery(name="q2", data_source="logs", raw_query="service:b", log_query=lq2, query_type="log"),
@@ -1199,23 +1274,23 @@ class TestBugRegressions(unittest.TestCase):
             _resolve_agg(None, "system.cpu.user")
 
     def test_tag_filter_value_none_no_crash(self):
-        from observability_migration.adapters.source.datadog.translate import _tag_filter_to_esql
-        from observability_migration.adapters.source.datadog.models import TagFilter
         from observability_migration.adapters.source.datadog.field_map import BUILTIN_PROFILES
+        from observability_migration.adapters.source.datadog.models import TagFilter
+        from observability_migration.adapters.source.datadog.translate import _tag_filter_to_esql
         filt = TagFilter(key="service", value=None, negated=False)
         fm = BUILTIN_PROFILES["default"]
         result = _tag_filter_to_esql(filt, fm)
         self.assertIsInstance(result, str)
 
     def test_formula_number_none_value(self):
-        from observability_migration.adapters.source.datadog.translate import _formula_ast_to_esql
         from observability_migration.adapters.source.datadog.query_parser import FormulaNumber
+        from observability_migration.adapters.source.datadog.translate import _formula_ast_to_esql
         result = _formula_ast_to_esql(FormulaNumber(value=None), {})
         self.assertEqual(result, "0")
 
     def test_formula_func_call_none_name(self):
-        from observability_migration.adapters.source.datadog.translate import _formula_needs_bucket_span
         from observability_migration.adapters.source.datadog.query_parser import FormulaFuncCall
+        from observability_migration.adapters.source.datadog.translate import _formula_needs_bucket_span
         result = _formula_needs_bucket_span(FormulaFuncCall(name=None, args=None))
         self.assertFalse(result)
 

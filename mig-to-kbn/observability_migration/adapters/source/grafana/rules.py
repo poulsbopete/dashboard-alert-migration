@@ -1,14 +1,19 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Rule infrastructure, rule-pack loading, and plugin registration."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import importlib.util
 import json
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import yaml
+
 from observability_migration.core.extensions import (
     ExtensionCatalog,
     ExtensionRuleCard,
@@ -25,12 +30,24 @@ DEFAULT_NOT_FEASIBLE_PATTERNS = [
 ]
 
 DEFAULT_WARNING_PATTERNS = [
-    (r"\blabel_replace\b", "label_replace needs EVAL/RENAME in ES|QL"),
     (r"\bpredict_linear\b", "predict_linear has no ES|QL equivalent"),
-    (r"\babs\b|\bceil\b|\bfloor\b|\bround\b", "math functions need EVAL mapping"),
 ]
 
-DEFAULT_COUNTER_SUFFIXES = ["_total", "_seconds_total", "_bytes_total", "_created"]
+# Canonical Prometheus counter naming conventions. ``_total`` (and the
+# unit-qualified ``_seconds_total`` / ``_bytes_total``) plus ``_created`` are the
+# explicit-counter spellings; ``_bucket`` / ``_count`` / ``_sum`` are the
+# monotonic component series Prometheus emits for histograms and summaries.
+# Treating the latter as counters lets rate()/irate()/increase() over them emit
+# RATE/IRATE/INCREASE instead of the gauge fallback (AVG_OVER_TIME/MAX_OVER_TIME).
+DEFAULT_COUNTER_SUFFIXES = [
+    "_total",
+    "_seconds_total",
+    "_bytes_total",
+    "_created",
+    "_bucket",
+    "_count",
+    "_sum",
+]
 
 
 @dataclass
@@ -49,7 +66,7 @@ class IndexRewriteRule:
 class RegisteredRule:
     priority: int
     name: str = field(compare=False)
-    fn: Callable[[Any], Optional[str]] = field(compare=False)
+    fn: Callable[[Any], str | None] = field(compare=False)
 
 
 class RuleRegistry:
@@ -64,7 +81,7 @@ class RuleRegistry:
 
         return decorator
 
-    def add(self, name: str, fn: Callable[[Any], Optional[str]], priority: int = 100):
+    def add(self, name: str, fn: Callable[[Any], str | None], priority: int = 100):
         self._rules.append(RegisteredRule(priority=priority, name=name, fn=fn))
         self._rules.sort()
         return fn
@@ -99,8 +116,14 @@ class RulePackConfig:
     counter_suffixes: list = field(default_factory=lambda: list(DEFAULT_COUNTER_SUFFIXES))
     default_rate_window: str = "5m"
     default_gauge_agg: str = "AVG"
-    ts_time_filter: str = "@timestamp >= ?_tstart AND @timestamp < ?_tend"
-    from_time_filter: str = "@timestamp >= ?_tstart AND @timestamp < ?_tend"
+    # Migration default: target clusters we provision ingest metrics as TSDS, so when
+    # we cannot prove a gauge field's TSDS status (offline / empty target / field not yet
+    # in the mapping) we assume it IS a TSDS and emit ``TS`` for its aggregations. ``FROM``
+    # over a multi-sample TSDS inflates non-idempotent aggregators (SUM/COUNT) by the
+    # per-bucket sample count. Set False to target a known non-TSDS index (forces FROM).
+    assume_tsds_gauges: bool = True
+    ts_time_filter: str = "@timestamp >= ?_tstart AND @timestamp <= ?_tend"
+    from_time_filter: str = "@timestamp >= ?_tstart AND @timestamp <= ?_tend"
     ts_bucket: str = "time_bucket = TBUCKET(5 minute)"
     from_bucket: str = "time_bucket = BUCKET(@timestamp, 50, ?_tstart, ?_tend)"
     logs_index: str = "logs-*"
@@ -111,12 +134,24 @@ class RulePackConfig:
     logs_limit: int = 200
     label_rewrites: dict = field(default_factory=dict)
     label_candidates: dict = field(default_factory=dict)
-    ignored_labels: list = field(default_factory=lambda: ["origin_prometheus"])
+    ignored_labels: list = field(default_factory=lambda: [
+        "origin_prometheus",
+        # Prometheus scrape-target metadata labels — these describe the scrape
+        # configuration (endpoint path, scheme) and are not stored as metric
+        # dimensions in Elastic indices.  Translating them to WHERE clauses
+        # produces "Unknown column" errors at validation time.
+        "metrics_path",
+        "__metrics_path__",
+    ])
     control_field_overrides: dict = field(default_factory=dict)
+    # Authoritative per-metric counter/gauge classification, keyed by metric name.
+    # Overrides every inferred signal when seeding telemetry (see telemetry_contract).
+    metric_kinds: dict = field(default_factory=dict)
     panel_type_overrides: dict = field(default_factory=dict)
     skip_panel_types: list = field(default_factory=list)
     index_rewrites: list = field(default_factory=list)
     native_promql: bool = False
+    runtime_features: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if self.native_promql:
@@ -169,7 +204,7 @@ def _merge_mapping_lists(target, source):
                 bucket.append(item)
 
 
-def load_rule_pack_files(paths):
+def load_rule_pack_files(paths: Sequence[str] | None) -> RulePackConfig:
     """Load optional declarative rule packs from YAML or JSON files."""
     pack = RulePackConfig()
     for raw_path in paths or []:
@@ -221,6 +256,8 @@ def load_rule_pack_files(paths):
             elif dashboard_value not in (None, "", []):
                 setattr(pack, field_name, dashboard_value)
         pack.label_rewrites.update(query_cfg.label_rewrites)
+        for metric_name, kind in query_cfg.metric_kinds.items():
+            pack.metric_kinds[metric_name] = str(kind).strip().lower()
         _merge_mapping_lists(pack.label_candidates, query_cfg.label_candidates)
         _merge_mapping_lists(pack.label_candidates, schema_cfg.label_candidates)
         pack.control_field_overrides.update(payload.controls.field_overrides)
@@ -229,7 +266,7 @@ def load_rule_pack_files(paths):
     return pack
 
 
-def build_rule_catalog(rule_pack):
+def build_rule_catalog(rule_pack: RulePackConfig) -> dict[str, Any]:
     registries = {
         "query_preprocessors": QUERY_PREPROCESSORS,
         "query_classifiers": QUERY_CLASSIFIERS,
@@ -312,7 +349,7 @@ def build_rule_catalog(rule_pack):
     return catalog.to_dict()
 
 
-def build_rule_pack_template():
+def build_rule_pack_template() -> dict[str, Any]:
     return {
         "query": {
             "default_rate_window": "5m",
@@ -391,18 +428,18 @@ __all__ = [
     "DEFAULT_COUNTER_SUFFIXES",
     "DEFAULT_NOT_FEASIBLE_PATTERNS",
     "DEFAULT_WARNING_PATTERNS",
-    "IndexRewriteRule",
     "PANEL_TRANSLATORS",
-    "PatternRule",
     "QUERY_CLASSIFIERS",
     "QUERY_POSTPROCESSORS",
     "QUERY_PREPROCESSORS",
     "QUERY_TRANSLATORS",
     "QUERY_VALIDATORS",
+    "VARIABLE_TRANSLATORS",
+    "IndexRewriteRule",
+    "PatternRule",
     "RegisteredRule",
     "RulePackConfig",
     "RuleRegistry",
-    "VARIABLE_TRANSLATORS",
     "_append_unique",
     "_load_index_rewrites",
     "_load_pattern_entries",

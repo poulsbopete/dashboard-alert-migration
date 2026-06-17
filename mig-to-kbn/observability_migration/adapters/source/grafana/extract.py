@@ -1,21 +1,144 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Grafana dashboard extraction and text-panel normalization."""
 
 from __future__ import annotations
 
+import json
+import re
 from html import unescape
 from html.parser import HTMLParser
-import json
 from pathlib import Path
-import re
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
 
+from observability_migration.core.http import apply_tls
+from observability_migration.core.selection import (
+    AssetSelectionMetadata,
+    parse_selection_datetime,
+)
 
-def extract_dashboards_from_grafana(grafana_url, user, password):
+
+def _safe_parse_dt(value: Any) -> Any:
+    """Best-effort datetime parse; return None on anything unusable."""
+    if value is None or value == "":
+        return None
+    try:
+        return parse_selection_datetime(str(value))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _datasource_token(datasource: Any) -> str:
+    """Return a datasource selection token (type for dicts, the string otherwise)."""
+    if isinstance(datasource, dict):
+        return str(datasource.get("type", "") or "")
+    if isinstance(datasource, str):
+        return datasource
+    return ""
+
+
+def selection_metadata_from_grafana_dashboard(dashboard: dict[str, Any]) -> AssetSelectionMetadata:
+    """Map a raw Grafana dashboard dict into the source-agnostic selection view.
+
+    ``folder``/``updated_at``/``starred`` come from the ``_grafana_meta`` block
+    (absent in bare file exports -> ``None`` -> degrade gracefully). ``team`` is
+    always ``None`` (Grafana dashboards have no first-class team).
+    """
+    meta = dashboard.get("_grafana_meta")
+    has_meta = isinstance(meta, dict)
+    meta = meta if has_meta else {}
+
+    datasources: list[str] = []
+    seen: set[str] = set()
+
+    def _add(token: str) -> None:
+        if token and token not in seen:
+            seen.add(token)
+            datasources.append(token)
+
+    panels: list[dict[str, Any]] = []
+    for panel in dashboard.get("panels", []) or []:
+        if isinstance(panel, dict):
+            panels.append(panel)
+            panels.extend(p for p in (panel.get("panels", []) or []) if isinstance(p, dict))
+    for row in dashboard.get("rows", []) or []:
+        if isinstance(row, dict):
+            panels.extend(p for p in (row.get("panels", []) or []) if isinstance(p, dict))
+    for panel in panels:
+        _add(_datasource_token(panel.get("datasource")))
+        for target in panel.get("targets", []) or []:
+            if isinstance(target, dict):
+                _add(_datasource_token(target.get("datasource")))
+
+    folder = meta.get("folderTitle") if has_meta else None
+    starred = meta.get("isStarred") if has_meta else None
+    return AssetSelectionMetadata(
+        folder=folder,
+        tags=[str(t) for t in (dashboard.get("tags") or [])],
+        datasources=datasources,
+        team=None,
+        updated_at=_safe_parse_dt(meta.get("updated")) if has_meta else None,
+        starred=bool(starred) if starred is not None else None,
+    )
+
+
+def selection_metadata_from_grafana_alert_rule(
+    rule: dict[str, Any],
+    datasource_map: dict[str, dict[str, Any]] | None = None,
+) -> AssetSelectionMetadata:
+    """Map a Grafana Unified Alerting rule dict into the selection view.
+
+    ``folder`` is ``None``: unified rules expose only a ``folderUID`` (not the
+    folder name a user selects on), so folder selection degrades gracefully.
+    Labels are rendered as ``key:value`` tags; ``team`` is read from a ``team``
+    label.
+    """
+    datasource_map = datasource_map or {}
+    labels = rule.get("labels") if isinstance(rule.get("labels"), dict) else {}
+    tags = [f"{k}:{v}" for k, v in labels.items()]
+    team = None
+    for key, value in labels.items():
+        if str(key).casefold() == "team":
+            team = str(value)
+            break
+
+    datasources: list[str] = []
+    seen: set[str] = set()
+    for entry in rule.get("data", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        uid = str(entry.get("datasourceUid", "") or "")
+        if not uid:
+            continue
+        token = str((datasource_map.get(uid) or {}).get("type", "") or "") or uid
+        if token and token not in seen:
+            seen.add(token)
+            datasources.append(token)
+
+    return AssetSelectionMetadata(
+        folder=None,
+        tags=tags,
+        datasources=datasources,
+        team=team,
+        updated_at=_safe_parse_dt(rule.get("updated")),
+        starred=None,
+    )
+
+
+def extract_dashboards_from_grafana(
+    grafana_url: str,
+    user: str,
+    password: str,
+    *,
+    token: str = "",
+    verify: bool | str = True,
+) -> list[dict[str, Any]]:
     """Extract all dashboards from Grafana via HTTP API."""
-    session = requests.Session()
-    session.auth = (user, password)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     search_resp = session.get(f"{grafana_url}/api/search?type=dash-db&limit=500")
     search_resp.raise_for_status()
     dashboard_list = search_resp.json()
@@ -31,14 +154,18 @@ def extract_dashboards_from_grafana(grafana_url, user, password):
     return dashboards
 
 
-def extract_dashboards_from_files(directory):
+def extract_dashboards_from_files(directory: str) -> list[dict[str, Any]]:
     """Load dashboards from local JSON files."""
     dashboards = []
     for f in sorted(Path(directory).glob("*.json")):
         with open(f) as fh:
             try:
                 d = json.load(fh)
-                if "panels" in d or "rows" in d:
+                if isinstance(d, dict) and isinstance(d.get("dashboard"), dict):
+                    dashboard = d["dashboard"]
+                    dashboard["_grafana_meta"] = d.get("meta", {})
+                    d = dashboard
+                if isinstance(d, dict) and ("panels" in d or "rows" in d):
                     d["_source_file"] = f.name
                     dashboards.append(d)
             except json.JSONDecodeError:
@@ -190,9 +317,10 @@ def _normalize_text_panel_content(content, mode=""):
     return raw
 
 
-def _grafana_session(grafana_url, user="", password="", token=""):
+def _grafana_session(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Build a requests session with Bearer token or HTTP basic auth."""
     session = requests.Session()
+    apply_tls(session, verify)
     tok = str(token or "").strip()
     if tok:
         session.headers["Authorization"] = f"Bearer {tok}"
@@ -221,10 +349,10 @@ def _fetch_unified_provisioning_json(session, base_url, path, empty_on_error, re
         return empty_on_error
 
 
-def extract_unified_alert_rules(grafana_url, user="", password="", token=""):
+def extract_unified_alert_rules(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch all Grafana Unified Alerting rules (GET /api/v1/provisioning/alert-rules)."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -235,10 +363,10 @@ def extract_unified_alert_rules(grafana_url, user="", password="", token=""):
     return data if isinstance(data, list) else []
 
 
-def extract_unified_contact_points(grafana_url, user="", password="", token=""):
+def extract_unified_contact_points(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch contact points (GET /api/v1/provisioning/contact-points)."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -249,10 +377,10 @@ def extract_unified_contact_points(grafana_url, user="", password="", token=""):
     return data if isinstance(data, list) else []
 
 
-def extract_unified_notification_policies(grafana_url, user="", password="", token=""):
+def extract_unified_notification_policies(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch notification policy tree (GET /api/v1/provisioning/policies)."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -263,10 +391,10 @@ def extract_unified_notification_policies(grafana_url, user="", password="", tok
     return data if isinstance(data, dict) else {}
 
 
-def extract_unified_mute_timings(grafana_url, user="", password="", token=""):
+def extract_unified_mute_timings(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch mute timings (GET /api/v1/provisioning/mute-timings)."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -277,10 +405,10 @@ def extract_unified_mute_timings(grafana_url, user="", password="", token=""):
     return data if isinstance(data, list) else []
 
 
-def extract_unified_templates(grafana_url, user="", password="", token=""):
+def extract_unified_templates(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch notification templates (GET /api/v1/provisioning/templates)."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -291,10 +419,10 @@ def extract_unified_templates(grafana_url, user="", password="", token=""):
     return data if isinstance(data, list) else []
 
 
-def extract_datasources(grafana_url, user="", password="", token=""):
+def extract_datasources(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch Grafana datasources and return a UID-keyed metadata map."""
     base = str(grafana_url or "").rstrip("/")
-    session = _grafana_session(grafana_url, user=user, password=password, token=token)
+    session = _grafana_session(grafana_url, user=user, password=password, token=token, verify=verify)
     data = _fetch_unified_provisioning_json(
         session,
         base,
@@ -319,26 +447,50 @@ def extract_datasources(grafana_url, user="", password="", token=""):
     return datasources
 
 
-def extract_all_alerting_resources(grafana_url, user="", password="", token=""):
+def filter_unified_alert_rules(
+    rules: list[dict[str, Any]],
+    *,
+    uids: list[str] | None = None,
+    folder_uids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return only the rules that match all supplied filters (AND semantics).
+
+    ``uids`` — keep rules whose ``uid`` is in the set.
+    ``folder_uids`` — keep rules whose ``folderUID`` is in the set.
+    Either filter is skipped when the corresponding argument is falsy.
+    """
+    uid_set = set(uids) if uids else None
+    folder_set = set(folder_uids) if folder_uids else None
+    if uid_set is None and folder_set is None:
+        return rules
+    return [
+        r for r in rules
+        if isinstance(r, dict)
+        and (uid_set is None or str(r.get("uid", "") or "") in uid_set)
+        and (folder_set is None or str(r.get("folderUID", "") or "") in folder_set)
+    ]
+
+
+def extract_all_alerting_resources(grafana_url, user="", password="", token="", verify: bool | str = True):
     """Fetch all unified alerting provisioning resources; each part degrades gracefully."""
     return {
         "alert_rules": extract_unified_alert_rules(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
         "contact_points": extract_unified_contact_points(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
         "notification_policies": extract_unified_notification_policies(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
         "mute_timings": extract_unified_mute_timings(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
         "templates": extract_unified_templates(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
         "datasources": extract_datasources(
-            grafana_url, user=user, password=password, token=token
+            grafana_url, user=user, password=password, token=token, verify=verify
         ),
     }
 
@@ -457,12 +609,13 @@ __all__ = [
     "_normalize_text_panel_content",
     "extract_all_alerting_resources",
     "extract_all_alerting_resources_from_files",
-    "extract_datasources",
     "extract_dashboards_from_files",
     "extract_dashboards_from_grafana",
+    "extract_datasources",
     "extract_unified_alert_rules",
     "extract_unified_contact_points",
     "extract_unified_mute_timings",
     "extract_unified_notification_policies",
     "extract_unified_templates",
+    "filter_unified_alert_rules",
 ]

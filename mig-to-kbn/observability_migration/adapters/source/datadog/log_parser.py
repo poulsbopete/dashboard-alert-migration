@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Parser for Datadog log search syntax.
 
 Datadog log search supports:
@@ -15,10 +18,16 @@ Reference: https://docs.datadoghq.com/logs/explorer/search_syntax/
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Protocol, TypeAlias, cast
 
 from lark import Lark, Transformer
 from lark.exceptions import LarkError
+
+from observability_migration.core.verification.field_capabilities import (
+    is_numeric_field,
+    is_string_field,
+)
 
 from .models import (
     LogAttributeFilter,
@@ -436,6 +445,44 @@ def _parse_attr_range(text: str) -> LogRange:
 # ES|QL / KQL translation helpers
 # ---------------------------------------------------------------------------
 
+# KQL only recognizes a backslash escape in front of these characters (plus
+# whitespace and the reserved keywords). A backslash before anything else —
+# most commonly Datadog's escaped forward slash ``\/`` — is a hard parse error
+# in the Elasticsearch KQL grammar ("token recognition error"). Datadog log
+# search escapes a broader set of characters, so we must drop the backslashes
+# that KQL does not understand when bridging a free-text term into KQL().
+_KQL_ESCAPABLE_CHARS = set('\\():<>"*{}')
+
+
+def _normalize_kql_escapes(value: str) -> str:
+    """Drop backslashes that KQL cannot parse, keeping valid KQL escapes.
+
+    e.g. Datadog ``felix\\/int_dataplane.go`` -> ``felix/int_dataplane.go``
+    (forward slash never needs escaping in KQL), while a genuine ``\\(`` or
+    ``\\"`` escape is preserved.
+    """
+    if "\\" not in value:
+        return value
+    out: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        ch = value[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = value[i + 1]
+            if nxt in _KQL_ESCAPABLE_CHARS or nxt.isspace():
+                out.append(ch)
+                out.append(nxt)
+            else:
+                # backslash KQL would choke on; keep only the escaped char
+                out.append(nxt)
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def log_ast_to_kql(node: Any, field_map: dict[str, str] | None = None) -> str:
     """Convert a log search AST to a KQL string for use in ES|QL WHERE KQL().
 
@@ -451,9 +498,10 @@ def log_ast_to_kql(node: Any, field_map: dict[str, str] | None = None) -> str:
     if isinstance(node, LogTerm):
         if _TEMPLATE_VAR_RE.search(node.value):
             return ""
+        value = _normalize_kql_escapes(node.value)
         if node.quoted:
-            return f'"{node.value}"'
-        return node.value
+            return f'"{value}"'
+        return value
 
     if isinstance(node, LogAttributeFilter):
         if _TEMPLATE_VAR_RE.search(node.value):
@@ -468,10 +516,11 @@ def log_ast_to_kql(node: Any, field_map: dict[str, str] | None = None) -> str:
         return f"{attr} >= {node.low} AND {attr} <= {node.high}"
 
     if isinstance(node, LogWildcard):
+        pattern = _normalize_kql_escapes(node.pattern)
         if node.attribute:
             attr = fm.get(node.attribute, node.attribute)
-            return f"{attr}: {node.pattern}"
-        return node.pattern
+            return f"{attr}: {pattern}"
+        return pattern
 
     if isinstance(node, LogBoolOp):
         parts = [p for p in (log_ast_to_kql(c, fm) for c in node.children) if p]
@@ -506,13 +555,20 @@ def _balance_parens(kql: str) -> str:
     return kql
 
 
-def log_ast_to_esql_where(node: Any, field_map: dict[str, str] | None = None) -> str:
+class _LogFieldProfileLike(Protocol):
+    def map_tag(self, dd_tag: str, context: str = "") -> str: ...
+
+    def field_capability(self, field_name: str, context: str = "") -> Any | None: ...
+
+
+LogFieldMapping: TypeAlias = Mapping[str, str] | _LogFieldProfileLike | None
+
+
+def log_ast_to_esql_where(node: Any, field_map: LogFieldMapping = None) -> str:
     """Convert a log search AST to an ES|QL WHERE clause (without the WHERE keyword).
 
     Uses direct ES|QL predicates for attribute filters and KQL() for free-text.
     """
-    fm = field_map or {}
-
     if node is None:
         return ""
 
@@ -525,29 +581,34 @@ def log_ast_to_esql_where(node: Any, field_map: dict[str, str] | None = None) ->
         return f'message LIKE "*{_esql_escape(val)}*"'
 
     if isinstance(node, LogAttributeFilter):
-        field = _esql_identifier(fm.get(node.attribute, node.attribute))
+        field_name, capability = _resolve_esql_field(node.attribute, field_map)
+        field = _esql_identifier(field_name)
         if _TEMPLATE_VAR_RE.search(node.value):
             return ""
         if node.value.startswith("(") and node.value.endswith(")") and re.search(r"\bOR\b", node.value, re.IGNORECASE):
             inner = node.value[1:-1]
             options = [part.strip() for part in re.split(r"\bOR\b", inner, flags=re.IGNORECASE) if part.strip()]
-            clauses = [_render_attr_predicate(field, value, node.negated) for value in options]
+            clauses = [_render_attr_predicate(field, value, node.negated, capability) for value in options]
             clauses = [clause for clause in clauses if clause]
             if not clauses:
                 return ""
             joiner = " AND " if node.negated else " OR "
             return "(" + joiner.join(clauses) + ")"
-        return _render_attr_predicate(field, node.value, node.negated)
+        return _render_attr_predicate(field, node.value, node.negated, capability)
 
     if isinstance(node, LogRange):
-        field = _esql_identifier(fm.get(node.attribute, node.attribute))
+        field_name, capability = _resolve_esql_field(node.attribute, field_map)
+        field = _esql_identifier(field_name)
         low_op = ">=" if node.low_inclusive else ">"
         high_op = "<=" if node.high_inclusive else "<"
-        return f"{field} {low_op} {node.low} AND {field} {high_op} {node.high}"
+        low = _render_attr_literal(node.low, capability)
+        high = _render_attr_literal(node.high, capability)
+        return f"{field} {low_op} {low} AND {field} {high_op} {high}"
 
     if isinstance(node, LogWildcard):
         if node.attribute:
-            field = _esql_identifier(fm.get(node.attribute, node.attribute))
+            field_name, _capability = _resolve_esql_field(node.attribute, field_map)
+            field = _esql_identifier(field_name)
             if _TEMPLATE_VAR_RE.search(node.pattern):
                 return ""
             return f'{field} LIKE "{_esql_escape(node.pattern)}"'
@@ -556,7 +617,7 @@ def log_ast_to_esql_where(node: Any, field_map: dict[str, str] | None = None) ->
         return f'message LIKE "{_esql_escape(node.pattern)}"'
 
     if isinstance(node, LogBoolOp):
-        parts = [log_ast_to_esql_where(c, fm) for c in node.children if c]
+        parts = [log_ast_to_esql_where(c, field_map) for c in node.children if c]
         parts = [p for p in parts if p]
         if not parts:
             return ""
@@ -564,7 +625,7 @@ def log_ast_to_esql_where(node: Any, field_map: dict[str, str] | None = None) ->
         return joiner.join(f"({p})" if " AND " in p or " OR " in p else p for p in parts)
 
     if isinstance(node, LogNot):
-        inner = log_ast_to_esql_where(node.child, fm)
+        inner = log_ast_to_esql_where(node.child, field_map)
         if not inner:
             return ""
         return f"NOT ({inner})"
@@ -586,7 +647,29 @@ def _esql_identifier(field_name: str) -> str:
     return ".".join(parts)
 
 
-def _render_attr_predicate(field: str, value: str, negated: bool) -> str:
+def _resolve_esql_field(raw_field: str, field_map: LogFieldMapping) -> tuple[str, Any | None]:
+    if field_map is None:
+        return raw_field, None
+    if isinstance(field_map, dict):
+        return field_map.get(raw_field, raw_field), None
+    profile = cast(_LogFieldProfileLike, field_map)
+    mapped = profile.map_tag(raw_field, context="log")
+    capability = profile.field_capability(mapped, context="log")
+    return mapped, capability
+
+
+def _render_attr_literal(value: str, field_capability: Any | None = None) -> str:
+    if field_capability is not None:
+        if is_numeric_field(field_capability):
+            return value
+        if is_string_field(field_capability):
+            return f'"{_esql_escape(value)}"'
+    if _NUMERIC_RE.fullmatch(value):
+        return value
+    return f'"{_esql_escape(value)}"'
+
+
+def _render_attr_predicate(field: str, value: str, negated: bool, field_capability: Any | None = None) -> str:
     value = value.strip()
     if value.startswith("(") and value.endswith(")") and not re.search(r"\bOR\b", value, re.IGNORECASE):
         value = value[1:-1].strip()
@@ -602,13 +685,12 @@ def _render_attr_predicate(field: str, value: str, negated: bool) -> str:
     comp = _COMPARISON_RE.fullmatch(value)
     if comp:
         op, number = comp.groups()
+        rhs = _render_attr_literal(number, field_capability)
         if negated:
-            return f"NOT ({field} {op} {number})"
-        return f"{field} {op} {number}"
+            return f"NOT ({field} {op} {rhs})"
+        return f"{field} {op} {rhs}"
     op = "!=" if negated else "=="
-    if _NUMERIC_RE.fullmatch(value):
-        return f"{field} {op} {value}"
-    return f'{field} {op} "{_esql_escape(value)}"'
+    return f"{field} {op} {_render_attr_literal(value, field_capability)}"
 
 
 def _template_value_to_like_pattern(value: str) -> str:

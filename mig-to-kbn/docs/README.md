@@ -6,11 +6,20 @@ Use this index when you want the shortest path to the right document.
 
 | Path | Use when |
 |---|---|
-| `../README.md` | You want the runnable entry points, capability matrix, and common commands |
+| `../README.md` | You want the public landing page (install, scope, and pointers into docs) |
 | `command-contract.md` | You want the canonical command inventory and safe invocation examples |
 | `architecture.md` | You want the repo-level architecture, boundaries, and package map |
 | `pipeline-trace.md` | You want the shared pipeline overview and cross-source audit summary |
-| `../REMAINING-ROADMAP.md` | You want the current roadmap and highest-priority gaps |
+| `targets/kibana-alert-migration-blockers.md` | You want Kibana-side alert migration constraints and blockers |
+
+## Governance
+
+| Path | Use when |
+| --- | --- |
+| `../CONTRIBUTING.md` | You want contributor setup, verification, documentation rules, and PR expectations |
+| `../SECURITY.md` | You need to report a security vulnerability responsibly |
+| `../SUPPORT.md` | You want help via issues and what context to include |
+| `../CODE_OF_CONDUCT.md` | You want community standards and how to report conduct issues |
 
 ## Source Docs
 
@@ -28,6 +37,7 @@ Use this index when you want the shortest path to the right document.
 | `targets/kibana.md` | You want the shared Kibana emit / compile / upload runtime |
 | `targets/kibana-esql-capabilities.md` | You want the current ES|QL capability survey |
 | `targets/kibana-esql-upgrade-matrix.md` | You want the concrete ES|QL follow-up matrix for this repo |
+| `targets/roadmap.md` | You want tracked translator improvements: shipped work with live-test steps and deferred designs |
 | `dashboards/README.md` | You want the dashboard YAML schema, lint, and layout validation tooling |
 
 ## Contributing Docs
@@ -60,4 +70,5 @@ Their editable templates live next to them as `*.tpl.md`.
 
 | Path | Use when |
 |---|---|
+| `../scripts/README.md` | You want an inventory of repo-maintained helper scripts and where they fit |
 | `local-otlp-validation.md` | You want the local validation lab and OTLP data flow |

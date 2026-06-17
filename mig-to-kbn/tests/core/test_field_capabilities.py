@@ -1,11 +1,14 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import unittest
 from unittest.mock import Mock, patch
 
 from observability_migration.core.verification.field_capabilities import (
     FieldCapability,
     assess_field_usage,
-    field_capability_from_es_field_caps,
     fetch_field_capabilities,
+    field_capability_from_es_field_caps,
     has_conflicting_types,
     is_aggregatable_field,
     is_counter_metric_field,
@@ -80,6 +83,7 @@ class TestFieldCapabilities(unittest.TestCase):
             params={"fields": "*"},
             headers={"Authorization": "ApiKey secret"},
             timeout=10,
+            verify=True,
         )
 
 

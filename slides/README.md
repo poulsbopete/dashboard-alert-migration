@@ -6,10 +6,10 @@ Vite + React + TypeScript + Tailwind, with a full-screen `FallingPattern` backgr
 
 | Project | Repo | Issues | Pull requests |
 | --- | --- | --- | --- |
-| Migration CLI (`grafana-migrate`, `datadog-migrate`) | [elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn) | [Issues](https://github.com/elastic/mig-to-kbn/issues) | [PRs](https://github.com/elastic/mig-to-kbn/pulls) |
+| Migration CLI (`grafana-migrate`, `datadog-migrate`) | [elastic/observability-migration-platform](https://github.com/elastic/observability-migration-platform) | [Issues](https://github.com/elastic/observability-migration-platform/issues) | [PRs](https://github.com/elastic/observability-migration-platform/pulls) |
 | YAML → Kibana NDJSON (`kb-dashboard-cli`) | [strawgate/kb-yaml-to-lens](https://github.com/strawgate/kb-yaml-to-lens) | [Issues](https://github.com/strawgate/kb-yaml-to-lens/issues) | [PRs](https://github.com/strawgate/kb-yaml-to-lens/pulls) |
 
-The slide deck footer links the same URLs. **Subham** and Elastic’s migration tooling team work primarily in **elastic/mig-to-kbn**; the compiler pipeline uses **kb-yaml-to-lens**.
+The slide deck footer links the same URLs. **Subham** and Elastic’s migration tooling team work primarily in **elastic/observability-migration-platform**; the compiler pipeline uses **kb-yaml-to-lens**.
 
 ## Local preview
 

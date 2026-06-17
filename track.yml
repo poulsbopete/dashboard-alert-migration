@@ -4,7 +4,7 @@ title: Grafana & Datadog → Elastic Serverless (migration workshop)
 teaser: Grafana & Datadog → Elastic Serverless—dashboards, alerts, and OTLP in guided
   labs.
 description: |
-  mig-to-kbn labs (grafana-migrate, datadog-migrate), Alloy→OTLP, Kibana on :8080. See the repo README for full setup; engine is upstream elastic/mig-to-kbn.
+  mig-to-kbn labs (grafana-migrate, datadog-migrate), Alloy→OTLP, Kibana on :8080. See the repo README for full setup; engine is upstream elastic/observability-migration-platform.
 icon: https://cdn.instruqt.com/assets/templates/kubernetes.png
 tags:
 - elastic

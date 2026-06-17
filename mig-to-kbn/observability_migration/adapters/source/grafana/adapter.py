@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Grafana source adapter.
 """
 
@@ -47,7 +50,7 @@ class GrafanaAdapter(SourceAdapter):
         config = config or {}
         if input_mode == "api":
             return extract_dashboards_from_grafana(
-                url=config.get("grafana_url", ""),
+                grafana_url=config.get("grafana_url", ""),
                 user=config.get("grafana_user", ""),
                 password=config.get("grafana_pass", ""),
             )

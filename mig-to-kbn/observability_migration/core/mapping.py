@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Rule-mapping engine for alert/monitor migration.
 
 Takes AlertingIR instances and produces Kibana rule payloads for safely
@@ -12,7 +15,6 @@ from typing import Any
 
 from observability_migration.core.assets.alerting import AlertingIR
 from observability_migration.core.assets.status import AssetStatus
-
 
 # ---- Kibana rule type IDs ----
 ES_QUERY_RULE_TYPE = ".es-query"
@@ -465,20 +467,24 @@ def _grafana_unified_exact_topk_bottomk_spec(ir: AlertingIR) -> dict[str, Any] |
         return None
 
     fragment = _parse_fragment(expr)
-    agg_name = str(getattr(fragment, "outer_agg", "") or "").strip().lower()
+    agg_name = (
+        "topk"
+        if str(getattr(fragment, "family", "") or "") == "topk"
+        else str(getattr(fragment, "outer_agg", "") or "").strip().lower()
+    )
     if agg_name not in {"topk", "bottomk"}:
         return None
-    if getattr(fragment, "group_labels", None):
+    if agg_name != "topk" and getattr(fragment, "group_labels", None):
         return None
 
     inner_fragment = fragment.extra.get("inner_frag")
-    if not isinstance(inner_fragment, PromQLFragment):
-        return None
-    inner_expr = str(getattr(inner_fragment, "raw_expr", "") or "").strip()
+    inner_expr = str(fragment.extra.get("topk_value_expr", "") or "").strip()
+    if not inner_expr and isinstance(inner_fragment, PromQLFragment):
+        inner_expr = str(getattr(inner_fragment, "raw_expr", "") or "").strip()
     if not inner_expr or not can_use_native_promql(inner_expr):
         return None
 
-    limit = _promql_rank_limit(expr, agg_name)
+    limit = fragment.extra.get("topk_limit") if agg_name == "topk" else _promql_rank_limit(expr, agg_name)
     if limit is None:
         return None
 

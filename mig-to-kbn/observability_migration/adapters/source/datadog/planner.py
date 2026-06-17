@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Backend selection planner: decides how each Datadog widget should be translated."""
 
 from __future__ import annotations
@@ -14,7 +17,6 @@ from .models import (
     PanelPlan,
 )
 from .rules import LOG_PLANNERS, METRIC_PLANNERS, PLANNER_PRECHECKS
-
 
 COMPLEXITY_FUNCTIONS = {
     "anomalies", "forecast", "outliers", "robust_trend",
@@ -40,6 +42,12 @@ UNTRANSLATABLE_FORMULA_FUNCS = {
 }
 
 TEXT_WIDGET_TYPES = {"note", "free_text", "image", "iframe"}
+
+# Widget types that represent a Datadog-side status/check view rather than
+# a queryable metric. These have no direct Kibana equivalent (Elastic uses
+# Synthetics for synthetic checks and Alerts for monitor status), so we
+# emit them as informative markdown placeholders rather than blocking.
+STATUS_PLACEHOLDER_WIDGET_TYPES = {"check_status", "manage_status"}
 GROUP_WIDGET_TYPES = {"group", "powerpack"}
 
 
@@ -113,6 +121,28 @@ def group_widget_rule(context: PlanContext) -> str | None:
     context.plan.backend = "group"
     context.plan.reasons.append("group/container widget")
     return "selected group backend"
+
+
+@PLANNER_PRECHECKS.register(
+    "datadog.plan.status_placeholder",
+    priority=25,
+    summary="Emit Datadog status/check widgets (check_status, manage_status) "
+            "as informative markdown placeholders rather than blocking — "
+            "Elastic uses Synthetics / Alerts instead.",
+)
+def status_placeholder_rule(context: PlanContext) -> str | None:
+    if context.widget.widget_type not in STATUS_PLACEHOLDER_WIDGET_TYPES:
+        return None
+    context.plan.backend = "markdown"
+    context.plan.kibana_type = "markdown"
+    # Confidence stays at 0 — this is not a real metric translation, it's
+    # an informative placeholder that needs human follow-up.
+    context.plan.confidence = 0.0
+    context.plan.reasons.append(
+        f"status widget ({context.widget.widget_type}) — placeholder for "
+        f"manual setup as an Elastic Synthetics check or Alert rule"
+    )
+    return f"selected markdown placeholder for status widget {context.widget.widget_type}"
 
 
 @PLANNER_PRECHECKS.register(
@@ -256,7 +286,7 @@ def metric_nested_query_rule(context: PlanContext) -> str | None:
 def metric_query_value_rule(context: PlanContext) -> str | None:
     if context.widget.widget_type != "query_value":
         return None
-    context.plan.backend = "lens" if context.use_lens else "esql"
+    context.plan.backend = _metric_widget_backend(context)
     context.plan.kibana_type = "metric"
     context.plan.reasons.append(f"single-value metric → {context.plan.backend} metric panel")
     return f"selected {context.plan.backend} metric panel"
@@ -265,15 +295,20 @@ def metric_query_value_rule(context: PlanContext) -> str | None:
 @METRIC_PLANNERS.register(
     "datadog.plan.metric_toplist",
     priority=30,
-    summary="Plan Datadog toplists as Lens or ES|QL tables.",
+    summary="Plan Datadog toplists and bar charts as Lens or ES|QL tables.",
 )
 def metric_toplist_rule(context: PlanContext) -> str | None:
-    if context.widget.widget_type != "toplist":
+    # Datadog bar_chart is a grouped scalar aggregation (group_by + compute
+    # + sort + limit) — the same data shape as a toplist, just drawn as bars.
+    # Route it through the toplist grouped-aggregation path so it produces a
+    # faithful ranked table instead of an "unsupported widget" placeholder.
+    if context.widget.widget_type not in ("toplist", "bar_chart"):
         return None
-    context.plan.backend = "lens" if context.use_lens else "esql"
+    context.plan.backend = _metric_widget_backend(context)
     context.plan.kibana_type = "table"
-    context.plan.reasons.append(f"top list → {context.plan.backend} table with ORDER BY + LIMIT")
-    return f"selected {context.plan.backend} toplist table"
+    label = "bar chart" if context.widget.widget_type == "bar_chart" else "top list"
+    context.plan.reasons.append(f"{label} → {context.plan.backend} table with ORDER BY + LIMIT")
+    return f"selected {context.plan.backend} {context.widget.widget_type} table"
 
 
 @METRIC_PLANNERS.register(
@@ -284,7 +319,7 @@ def metric_toplist_rule(context: PlanContext) -> str | None:
 def metric_table_rule(context: PlanContext) -> str | None:
     if context.widget.widget_type not in ("table", "query_table"):
         return None
-    context.plan.backend = "lens" if context.use_lens else "esql"
+    context.plan.backend = _metric_widget_backend(context)
     context.plan.kibana_type = "table"
     context.plan.reasons.append(f"table → {context.plan.backend} table")
     return f"selected {context.plan.backend} table"
@@ -331,12 +366,24 @@ def metric_heatmap_distribution_rule(context: PlanContext) -> str | None:
 def metric_change_rule(context: PlanContext) -> str | None:
     if context.widget.widget_type != "change":
         return None
+    has_grouped_change = any(
+        q.metric_query and q.metric_query.group_by
+        for q in context.metric_queries
+    )
     context.plan.backend = "esql"
-    context.plan.kibana_type = "metric"
-    context.plan.reasons.append("change widget → ES|QL metric (comparison shift)")
+    context.plan.kibana_type = "table" if has_grouped_change else "metric"
+    context.plan.reasons.append(
+        "change widget → ES|QL table (comparison shift)"
+        if has_grouped_change
+        else "change widget → ES|QL metric (comparison shift)"
+    )
     context.plan.warnings.append("change calculation is approximated")
     context.plan.confidence *= 0.7
-    return "selected ES|QL metric for change widget"
+    return (
+        "selected ES|QL table for grouped change widget"
+        if has_grouped_change
+        else "selected ES|QL metric for change widget"
+    )
 
 
 @METRIC_PLANNERS.register(
@@ -467,6 +514,22 @@ def log_query_value_rule(context: PlanContext) -> str | None:
 
 
 @LOG_PLANNERS.register(
+    "datadog.plan.log_geomap",
+    priority=55,
+    summary="Downgrade log-based geomaps to markdown (Kibana Maps not yet supported).",
+)
+def log_geomap_rule(context: PlanContext) -> str | None:
+    if context.widget.widget_type != "geomap":
+        return None
+    context.plan.backend = "markdown"
+    context.plan.kibana_type = "markdown"
+    context.plan.reasons.append("geomap requires Kibana Maps — not yet supported")
+    context.plan.warnings.append("geomap migration needs dedicated Maps saved object support")
+    context.plan.confidence = 0.0
+    return "selected markdown for log geomap"
+
+
+@LOG_PLANNERS.register(
     "datadog.plan.log_default",
     priority=60,
     summary="Default remaining log widgets to the chosen log backend.",
@@ -494,9 +557,44 @@ def _should_use_lens(
         return False
     if mq.as_rate or mq.as_count:
         return False
-    if any(fn.name in ("per_second", "per_minute", "per_hour", "derivative") for fn in mq.functions):
+    if any(fn.name in ("per_second", "per_minute", "per_hour", "derivative", "top") for fn in mq.functions):
         return False
     if widget.widget_type in ("heatmap", "scatterplot", "distribution"):
+        return False
+    return True
+
+
+def _metric_widget_backend(context: PlanContext) -> str:
+    if _prefer_esql_for_simple_metric_widget(
+        context.widget,
+        context.metric_queries,
+        context.has_multi_query_formula,
+    ):
+        return "esql"
+    return "lens" if context.use_lens else "esql"
+
+
+def _prefer_esql_for_simple_metric_widget(
+    widget: NormalizedWidget,
+    metric_queries: list[Any],
+    has_multi_query_formula: bool,
+) -> bool:
+    if widget.widget_type not in {"query_value", "toplist", "table", "query_table"}:
+        return False
+    if has_multi_query_formula or widget.formulas:
+        return False
+    if len(metric_queries) != 1:
+        return False
+    mq = metric_queries[0].metric_query
+    if not mq:
+        return False
+    if mq.as_rate or mq.as_count:
+        return False
+    if any(fn.name in ("per_second", "per_minute", "per_hour", "derivative") for fn in mq.functions):
+        return False
+    if _is_nested_query(mq):
+        return False
+    if widget.widget_type == "query_value" and mq.group_by:
         return False
     return True
 

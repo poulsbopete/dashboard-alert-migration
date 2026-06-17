@@ -1,6 +1,6 @@
 # Kibana Alert Migration Blockers
 
-Snapshot date: `2026-04-02`
+Snapshot date: `2026-04-14`
 
 ## Purpose
 
@@ -18,6 +18,17 @@ Two scope notes matter:
   Datadog. It is the current blocker set proven by our curated suites and
   generation pipeline.
 
+## External-Ready Summary
+
+Grafana currently has `6` automated cases, `5` draft-review cases, and `16`
+manual-required cases out of `27` curated alert examples.
+
+Datadog currently has `15` automated cases, `4` draft-review cases, and `16`
+manual-required cases out of `35` curated monitor examples.
+
+Use this section when you need a short external summary. Keep the detailed
+evidence and source references in this canonical document.
+
 ## Current Snapshot
 
 All counts below come from the current generated standings in the local artifact
@@ -26,14 +37,20 @@ path `examples/alerting/generated/alert_support_standings.md`.
 | Source | Total cases | Automated | Draft review | Manual required |
 | --- | ---: | ---: | ---: | ---: |
 | Grafana | 27 | 6 | 5 | 16 |
-| Datadog | 35 | 11 | 4 | 20 |
+| Datadog | 35 | 15 | 4 | 16 |
 
 Important Datadog nuance:
 
 - The current raw Datadog results show `19` monitors where `.es-query` is the
-  selected target rule type, but only `15` emitted `.es-query` payloads. The
-  missing `4` are intentionally blocked because the translated query is still
-  approximate and therefore not source-faithful. See the local artifact path
+  selected target rule type. The migration results artifact records emitted
+  `.es-query` payloads for all `19` of those monitors.
+- The standings still separate `15` `automated` cases from `4`
+  `draft_requires_review` cases because the four log monitors are emitted for
+  validation but held out of the `automated` tier by migration policy, not
+  because the JSON payload is missing.
+- Separately, `16` monitors remain `manual_required` under current policies
+  (algorithmic monitor types, product-specific families, service checks,
+  composite monitors, and the DST-sensitive `calendar_shift()` example). See
   `examples/alerting/generated/datadog/monitor_migration_results.json`.
 
 Top blockers from the current generated artifacts:
@@ -42,14 +59,23 @@ Top blockers from the current generated artifacts:
 | --- | --- | ---: |
 | Grafana | No source-faithful target query could be produced | 16 |
 | Grafana | no-data policy `NoData` may not have exact Kibana equivalent | 16 |
-| Datadog | No source-faithful target query could be produced | 4 |
-| Datadog | rollup interval is approximated in ES\|QL | 2 |
-| Datadog | Datadog formula monitor requires manual review outside the current exact subset | 1 |
-| Datadog | rate semantics approximated with delta over observed bucket span | 1 |
-| Datadog | default_zero semantics are approximated in ES\|QL | 1 |
+| Datadog | Datadog anomaly alert monitors are intentionally manual-only in the current migration policy | 1 |
 | Datadog | Datadog recovery/trigger threshold windows not directly portable | 1 |
 | Datadog | Datadog require_full_window semantics differ from Kibana evaluation | 1 |
+| Datadog | Datadog forecast monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog outlier monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog formula monitor requires manual review; exact support currently covers arithmetic formulas over as_count() metrics with sum aggregation, plus arithmetic formulas over aligned unshifted gauge metrics with matching aggregation, scope, and group-by, plus single-query shifted formulas such as week_before(), calendar_shift() in UTC or stable-offset IANA time zones for day/week/month shifts, and timeshift() | 1 |
 | Datadog | Datadog composite monitors depend on cross-monitor state and require manual migration | 1 |
+| Datadog | Datadog event alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog apm alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog rum alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog synthetics alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog ci alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog slo alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog audit alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog cost alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog network alert monitors are intentionally manual-only in the current migration policy | 1 |
+| Datadog | Datadog watchdog alert monitors are intentionally manual-only in the current migration policy | 1 |
 | Datadog | Datadog service check monitors use status-count semantics and require manual migration | 1 |
 
 The Datadog comparison artifacts now preserve explicit manual-only blocked
@@ -69,15 +95,13 @@ rows when query fidelity and no-data parity are both unresolved.
 
 ## Evidence Base
 
-### Internal Repo Evidence
+### In-Repo Generated Evidence
 
 - Curated standings: `examples/alerting/generated/alert_support_standings.md`
 - Structured standings JSON: `examples/alerting/generated/alert_support_standings.json`
 - Grafana raw migration results: `examples/alerting/generated/grafana/alert_migration_results.json`
 - Datadog raw migration results: `examples/alerting/generated/datadog/monitor_migration_results.json`
-- Datadog per-monitor comparison details: `examples/alerting/generated/datadog/monitor_comparison_results.json`
-- Roadmap note for current `calendar_shift()` boundaries:
-  [`docs/roadmap/alert-migration-next-steps.md`](../roadmap/alert-migration-next-steps.md)
+- Datadog per-monitor comparison details: `examples/alerting/generated/datadog/alerts/monitor_comparison_results.json`
 - Local Kibana ES|QL capability snapshot used by this repo:
   [`docs/targets/kibana-esql-capabilities.md`](./kibana-esql-capabilities.md)
 
@@ -202,38 +226,43 @@ discussion because they represent parity gaps:
 
 ### Summary
 
-Datadog currently has `20` `manual_required` cases out of `35`.
+Datadog currently has `16` `manual_required` cases out of `35`.
 
-Those `20` blockers fall into four main categories:
+Those `16` blockers fall into three main categories:
 
-- translated candidate query exists, but we intentionally do not emit because it
-  is approximate
 - formula / time-shift boundaries where no source-faithful query is currently
   produced
 - analytical monitor families with algorithmic semantics
 - Datadog product-specific monitor families that do not map to generic Kibana
   query rules
 
+Metric monitors that exercise `as_rate()`, `rollup()`, `default_zero()`, and
+`exclude_null()` compositions are represented in the current standings under
+the `automated` tier when they emit a warning-free translated query and pass the
+current correctness gates. Remaining parity gaps for those emitted rules are
+called out in comparison metadata and in the sections below rather than by
+withholding payloads.
+
 ### Blocker Buckets
 
 | Bucket | Cases | Example monitors | Why the current migration keeps them manual |
 | --- | ---: | --- | --- |
-| Approximation-blocked metric/query alerts with selected `.es-query` candidate but no emitted payload | 4 | `Checkout request rate is high`, `CPU rollup is high`, `CrashloopBackOff`, `CPU exclude_null rollup wrapper` | The translator can produce an ES\|QL candidate, but current semantics are still approximate for `as_rate()`, `rollup()`, and `default_zero()`. We intentionally block payload emission rather than claiming exact support. |
 | Formula / time-shift boundaries with no source-faithful query | 1 | `CPU calendar_shift timezone-sensitive` | Exact automation now covers the curated aligned unshifted gauge-arithmetic formula case plus the prior `as_count()` / shifted subset. DST-sensitive `calendar_shift()` remains manual. |
 | Analytical monitor families | 3 | anomaly, forecast, outlier examples | Datadog defines these as algorithmic monitor types with historical / predictive / peer-comparison semantics. The current Kibana rule types we target do not provide a source-faithful generic equivalent. |
 | Product-specific / manual-only monitor families | 12 | composite, service check, event, APM, RUM, Synthetics, CI, SLO, audit, cost, network, watchdog | These rely on Datadog product surfaces, cross-monitor state, or status semantics that do not map cleanly to the generic Kibana query rules we emit today. |
 
-### The Four Translated-But-Blocked Datadog Cases
+### Emitted metric monitors with documented Datadog parity gaps
 
-These are especially important because they show where Kibana is close but still
-not exact enough for automatic migration.
+These curated metric monitors are important because they show where the
+translation is close enough to emit under the current policy, but Datadog's
+documented monitor semantics still deserve explicit parity review.
 
-| Source feature | Example | Why we still do not emit the rule |
+| Source feature | Example | Why parity review still matters |
 | --- | --- | --- |
-| `as_rate()` | `Checkout request rate is high` | Datadog documents `as_rate()` as disabling interpolation, forcing `SUM`, and normalizing by the sampling interval. Our current ES\|QL rewrite computes a rate from observed delta over observed bucket span, which is close but not guaranteed identical. |
-| `rollup()` | `CPU rollup is high` | Datadog documents rollup interval and rollup alignment as first-class semantics, and explicitly warns that rollups in monitors can misalign with evaluation windows. Our current ES\|QL rewrite does not preserve Datadog's exact rollup-boundary monitor behavior. |
-| `default_zero()` | `[Kubernetes] Pod {{pod_name.name}} is CrashloopBackOff on namespace {{kube_namespace.name}}` | Datadog documents `default_zero()` as filling sparse intervals using `0` or interpolation and notes that it can resolve monitors before they enter no-data. A simple `COALESCE(..., 0)` rewrite is not a full monitor-semantic equivalent. |
-| `exclude_null()` wrapped around `rollup()` | `CPU exclude_null rollup wrapper` | `exclude_null()` itself is supportable in a narrow exact subset, but the wrapped `rollup()` still makes the monitor approximate, so the full rule remains manual. |
+| `as_rate()` | `Checkout request rate is high` | Datadog documents `as_rate()` as disabling interpolation, forcing `SUM`, and normalizing by the sampling interval. Our ES\|QL rewrite computes a rate from observed delta over observed bucket span, which may not match Datadog in every edge case. |
+| `rollup()` | `CPU rollup is high` | Datadog documents rollup interval and rollup alignment as first-class semantics, and explicitly warns that rollups in monitors can misalign with evaluation windows. |
+| `default_zero()` | `[Kubernetes] Pod {{pod_name.name}} is CrashloopBackOff on namespace {{kube_namespace.name}}` | Datadog documents `default_zero()` as filling sparse intervals using `0` or interpolation and notes that it can resolve monitors before they enter no-data. |
+| `exclude_null()` wrapped around `rollup()` | `CPU exclude_null rollup wrapper` | `exclude_null()` is supportable in a narrow exact subset, but the wrapped `rollup()` still carries rollup-window semantics that warrant monitoring-side review. |
 
 Relevant Datadog references:
 
@@ -272,8 +301,6 @@ Why the DST `calendar_shift()` case is still manual:
 - We do not currently have a documented source-faithful way to express
   Datadog-style civil-time `calendar_shift()` semantics across DST-observing or
   otherwise offset-changing IANA time zones in the generic query path we emit.
-- This exact boundary is also captured in the repo roadmap note:
-  [`docs/roadmap/alert-migration-next-steps.md`](../roadmap/alert-migration-next-steps.md).
 
 ### Analytical Datadog Monitor Families
 
@@ -442,12 +469,19 @@ core message is:
 
 - Grafana blockers are mostly advanced PromQL semantics plus Grafana-managed
   no-data behavior.
-- Datadog blockers split between approximate-but-close metric semantics
-  (`as_rate()`, `rollup()`, `default_zero()`), algorithmic monitor types
-  (anomaly / forecast / outlier), and product-specific monitor families
-  (composite, service check, APM, RUM, Synthetics, CI, SLO, audit, cost,
-  network, watchdog, event).
+- For Datadog, distinguish two layers in the curated suite: several metric
+  monitors are already **automated** with emitted rules, but some of those still
+  carry **documented fidelity or operational parity caveats** (for example
+  `as_rate()`, `rollup()`, and `default_zero()` semantics versus the current
+  ES\|QL rewrite, plus review-gated log monitors in **draft**). Separately, the
+  **manual-required** tier is where migration is still blocked for whole monitor
+  families—algorithmic types (anomaly / forecast / outlier), composite and
+  service-check monitors, and other product-specific Datadog surfaces (APM, RUM,
+  Synthetics, CI, SLO, audit, cost, network, watchdog, event, and similar)—
+  because there is no source-faithful generic Kibana equivalent in the path we
+  emit today.
 - The highest-value unlocks on the Kibana / Elastic side would be broader
-  alert-time PromQL support, exact alert-time metric semantics, timezone-aware
-  civil-time shifts, and richer first-class alert families beyond generic query
-  rules.
+  alert-time PromQL support; **closer alert-time metric semantics** for already
+  emitted Datadog translations; timezone-aware civil-time shifts for remaining
+  shifted-formula gaps; and **richer first-class alert families** for the
+  manual-only Datadog monitor types, beyond stretching generic query rules.

@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Tests for the alert/monitor migration pipeline.
 
 Covers:
@@ -13,13 +16,14 @@ Covers:
 from __future__ import annotations
 
 import copy
+import importlib
 import json
-import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import mock
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from observability_migration.core.assets.alerting import (
@@ -30,11 +34,7 @@ from observability_migration.core.assets.alerting import (
 )
 from observability_migration.core.assets.status import AssetStatus
 from observability_migration.core.mapping import (
-    AUTOMATED_KINDS,
-    CUSTOM_THRESHOLD_RULE_TYPE,
-    DRAFT_REVIEW_KINDS,
     ES_QUERY_RULE_TYPE,
-    INDEX_THRESHOLD_RULE_TYPE,
     MANUAL_ONLY_KINDS,
     build_custom_threshold_rule_params,
     build_es_query_rule_params,
@@ -46,7 +46,6 @@ from observability_migration.core.mapping import (
     select_target_rule_type,
 )
 from observability_migration.core.reporting.report import MigrationResult
-
 
 # =====================================================================
 # Fixtures
@@ -950,6 +949,42 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertIn("| WHERE value > 5.0", ir.translated_query)
         self.assertFalse(any("rate semantics approximated" in warning for warning in ir.warnings))
 
+    def test_query_alert_with_as_count_and_outer_avg_uses_metric_space_aggregation(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        field_map = load_profile("otel")
+        monitor = {
+            "id": 91001,
+            "name": "High 5xx rate",
+            "type": "query alert",
+            "query": "avg(last_5m):sum:trace.http.request.errors{service:sample-api}.as_count() > 25",
+        }
+
+        ir = build_alerting_ir_from_datadog(monitor, field_map=field_map)
+
+        self.assertEqual(ir.translated_query_provenance, "translated_esql")
+        self.assertIn("SUM(trace_http_request_errors)", ir.translated_query)
+        self.assertIn('service.name == "sample-api"', ir.translated_query)
+        self.assertIn("| WHERE value > 25.0", ir.translated_query)
+
+    def test_query_alert_with_p95_and_outer_avg_uses_percentile_metric_aggregation(self):
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        field_map = load_profile("otel")
+        monitor = {
+            "id": 91003,
+            "name": "p95 latency regression",
+            "type": "query alert",
+            "query": "avg(last_10m):p95:trace.http.request.duration{service:sample-api} > 1.5",
+        }
+
+        ir = build_alerting_ir_from_datadog(monitor, field_map=field_map)
+
+        self.assertEqual(ir.translated_query_provenance, "translated_esql")
+        self.assertIn("PERCENTILE(trace_http_request_duration, 95)", ir.translated_query)
+        self.assertIn('service.name == "sample-api"', ir.translated_query)
+        self.assertIn("| WHERE value > 1.5", ir.translated_query)
+
     def test_query_alert_with_rollup_gets_translated_query(self):
         from observability_migration.adapters.source.datadog.field_map import load_profile
 
@@ -974,9 +1009,9 @@ class TestBuildAlertingIRFromDatadog(unittest.TestCase):
         self.assertEqual(ir.translated_query_provenance, "translated_esql")
         self.assertIn("COALESCE(", ir.translated_query)
         self.assertIn("kubernetes_state_container_status_report_count_waiting", ir.translated_query)
-        self.assertIn("kubernetes.cluster.name", ir.translated_query)
-        self.assertIn("kubernetes.namespace", ir.translated_query)
-        self.assertIn("kubernetes.pod.name", ir.translated_query)
+        self.assertIn("k8s.cluster.name", ir.translated_query)
+        self.assertIn("k8s.namespace.name", ir.translated_query)
+        self.assertIn("k8s.pod.name", ir.translated_query)
         self.assertIn("| WHERE value >= 1.0", ir.translated_query)
         self.assertFalse(any("default_zero" in warning for warning in ir.warnings))
 
@@ -1462,89 +1497,89 @@ class TestRecordSemanticLosses(unittest.TestCase):
     def test_datadog_renotify_loss(self):
         ir = build_alerting_ir_from_datadog(_datadog_metric_monitor())
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("renotify" in l for l in losses))
+        self.assertTrue(any("renotify" in loss for loss in losses))
 
     def test_datadog_notification_handles_loss(self):
         ir = build_alerting_ir_from_datadog(_datadog_metric_monitor())
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("notification handles" in l for l in losses))
+        self.assertTrue(any("notification handles" in loss for loss in losses))
 
     def test_datadog_evaluation_delay_loss(self):
         ir = build_alerting_ir_from_datadog(_datadog_metric_monitor())
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("evaluation_delay" in l for l in losses))
+        self.assertTrue(any("evaluation_delay" in loss for loss in losses))
 
     def test_grafana_notification_channel_loss(self):
         task = _grafana_legacy_alert_task()
         ir = build_alerting_ir_from_grafana(task)
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("notification channel" in l for l in losses))
+        self.assertTrue(any("notification channel" in loss for loss in losses))
 
     def test_grafana_unified_simple_reduce_threshold_rule_has_no_multi_query_loss(self):
         rule = _grafana_unified_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertFalse(any("Multi-query" in l for l in losses))
+        self.assertFalse(any("Multi-query" in loss for loss in losses))
 
     def test_grafana_unified_safe_subset_has_no_review_losses(self):
         rule = _grafana_unified_prometheus_safe_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertFalse(any("no-data policy" in l for l in losses))
-        self.assertFalse(any("alert labels" in l for l in losses))
-        self.assertFalse(any("Dashboard-linked" in l for l in losses))
+        self.assertFalse(any("no-data policy" in loss for loss in losses))
+        self.assertFalse(any("alert labels" in loss for loss in losses))
+        self.assertFalse(any("Dashboard-linked" in loss for loss in losses))
 
     def test_grafana_unified_safe_static_labels_have_no_label_loss(self):
         rule = _grafana_unified_prometheus_safe_with_labels_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertFalse(any("alert labels" in l for l in losses))
+        self.assertFalse(any("alert labels" in loss for loss in losses))
 
     def test_grafana_unified_literal_dollar_label_has_no_label_loss(self):
         rule = _grafana_unified_prometheus_safe_rule()
         rule["labels"] = {"cost_center": "cost$center"}
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertFalse(any("alert labels" in l for l in losses))
+        self.assertFalse(any("alert labels" in loss for loss in losses))
 
     def test_grafana_unified_templated_label_reports_loss(self):
         rule = _grafana_unified_prometheus_safe_rule()
         rule["labels"] = {"instance": "{{ $labels.instance }}"}
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("alert labels" in l for l in losses))
+        self.assertTrue(any("alert labels" in loss for loss in losses))
 
     def test_grafana_unified_safe_topk_subset_has_no_review_losses(self):
         rule = _grafana_unified_prometheus_topk_safe_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertFalse(any("no-data policy" in l for l in losses))
-        self.assertFalse(any("alert labels" in l for l in losses))
-        self.assertFalse(any("Dashboard-linked" in l for l in losses))
+        self.assertFalse(any("no-data policy" in loss for loss in losses))
+        self.assertFalse(any("alert labels" in loss for loss in losses))
+        self.assertFalse(any("Dashboard-linked" in loss for loss in losses))
 
     def test_grafana_unified_multiple_source_queries_report_multi_query_loss(self):
         rule = _grafana_unified_multi_source_prometheus_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("Multi-query" in l for l in losses))
+        self.assertTrue(any("Multi-query" in loss for loss in losses))
 
     def test_grafana_unified_literal_dashboard_link_reports_loss(self):
         rule = _grafana_unified_rule()
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("Dashboard-linked" in l for l in losses))
+        self.assertTrue(any("Dashboard-linked" in loss for loss in losses))
 
     def test_grafana_unified_templated_dashboard_link_reports_loss(self):
         rule = _grafana_unified_rule()
         rule["annotations"]["__dashboardUid__"] = "{{ $dashboard }}"
         ir = build_alerting_ir_from_grafana_unified(rule)
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("Dashboard-linked" in l for l in losses))
+        self.assertTrue(any("Dashboard-linked" in loss for loss in losses))
 
     def test_no_data_policy_loss(self):
         ir = AlertingIR(kind="grafana_legacy", no_data_policy="Alerting")
         losses = record_semantic_losses(ir)
-        self.assertTrue(any("no-data policy" in l for l in losses))
+        self.assertTrue(any("no-data policy" in loss for loss in losses))
 
     def test_no_losses_for_clean_alert(self):
         ir = AlertingIR(kind="grafana_legacy", no_data_policy="", source_extension={"alert_type": "legacy"})
@@ -2768,7 +2803,7 @@ class TestDatadogMonitorVerification(unittest.TestCase):
         field_map = load_profile("otel")
         ir = build_alerting_ir_from_datadog(_datadog_log_measure_monitor(), field_map=field_map)
 
-        def _fake_validate(query, es_url, resolver, max_attempts=8, es_api_key=None):
+        def _fake_validate(query, es_url, resolver, max_attempts=8, es_api_key=None, verify=True):
             return {
                 "status": "pass",
                 "query": query,
@@ -2957,6 +2992,62 @@ class TestGrafanaExtractAllAlertingResources(unittest.TestCase):
 
 
 # =====================================================================
+# filter_unified_alert_rules tests
+# =====================================================================
+
+
+class TestFilterUnifiedAlertRules(unittest.TestCase):
+    def setUp(self):
+        from observability_migration.adapters.source.grafana.extract import filter_unified_alert_rules
+        self.filter = filter_unified_alert_rules
+        self.rules = [
+            {"uid": "rule-1", "folderUID": "folder-a", "title": "Alpha"},
+            {"uid": "rule-2", "folderUID": "folder-a", "title": "Beta"},
+            {"uid": "rule-3", "folderUID": "folder-b", "title": "Gamma"},
+        ]
+
+    def test_no_filters_returns_all(self):
+        result = self.filter(self.rules)
+        self.assertEqual(result, self.rules)
+
+    def test_filter_by_single_uid(self):
+        result = self.filter(self.rules, uids=["rule-1"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["uid"], "rule-1")
+
+    def test_filter_by_multiple_uids(self):
+        result = self.filter(self.rules, uids=["rule-1", "rule-3"])
+        self.assertEqual([r["uid"] for r in result], ["rule-1", "rule-3"])
+
+    def test_filter_by_folder(self):
+        result = self.filter(self.rules, folder_uids=["folder-a"])
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(r["folderUID"] == "folder-a" for r in result))
+
+    def test_filter_by_uid_and_folder_intersection(self):
+        result = self.filter(self.rules, uids=["rule-1", "rule-2"], folder_uids=["folder-a"])
+        self.assertEqual([r["uid"] for r in result], ["rule-1", "rule-2"])
+
+    def test_uid_and_folder_no_intersection(self):
+        result = self.filter(self.rules, uids=["rule-3"], folder_uids=["folder-a"])
+        self.assertEqual(result, [])
+
+    def test_unknown_uid_returns_empty(self):
+        result = self.filter(self.rules, uids=["does-not-exist"])
+        self.assertEqual(result, [])
+
+    def test_empty_input_returns_empty(self):
+        result = self.filter([], uids=["rule-1"])
+        self.assertEqual(result, [])
+
+    def test_non_dict_entries_skipped(self):
+        rules_with_garbage = self.rules + ["not-a-dict", None]  # type: ignore[list-item]
+        result = self.filter(rules_with_garbage, uids=["rule-1"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["uid"], "rule-1")
+
+
+# =====================================================================
 # Datadog monitor file extraction tests
 # =====================================================================
 
@@ -3011,6 +3102,249 @@ class TestDatadogMonitorFileExtraction(unittest.TestCase):
         self.assertEqual(normalized["updated_at"], "2026-04-01T12:34:56")
         self.assertEqual(normalized["nested"][0]["date"], "2026-04-01")
         json.dumps(normalized)
+
+
+class TestDatadogAlertPipeline(unittest.TestCase):
+    def test_run_alert_pipeline_writes_alert_artifacts_to_output_dir(self):
+        from observability_migration.adapters.source.datadog.alert_pipeline import (
+            run_alert_pipeline,
+        )
+        from observability_migration.adapters.source.datadog.field_map import load_profile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monitors_dir = Path(tmpdir) / "monitors"
+            monitors_dir.mkdir()
+            (monitors_dir / "monitor.json").write_text(
+                json.dumps(_datadog_metric_monitor()),
+                encoding="utf-8",
+            )
+            output_dir = Path(tmpdir) / "alerts"
+
+            summary = run_alert_pipeline(
+                SimpleNamespace(
+                    source="files",
+                    input_dir=tmpdir,
+                    data_view="metrics-*",
+                    validate=False,
+                    es_url="",
+                    es_api_key="",
+                    kibana_url="",
+                    kibana_api_key="",
+                    space_id="",
+                    create_alert_rules=False,
+                    monitor_ids="",
+                    monitor_query="",
+                ),
+                field_map=load_profile("otel"),
+                output_dir=output_dir,
+                dd_creds={},
+            )
+            self.assertEqual(summary["total"], 1)
+            self.assertEqual(summary["artifacts_dir"], str(output_dir))
+            self.assertTrue((output_dir / "raw_monitors" / "datadog_monitors.json").exists())
+            self.assertTrue((output_dir / "monitor_migration_results.json").exists())
+            self.assertTrue((output_dir / "monitor_comparison_results.json").exists())
+            self.assertTrue((output_dir / "monitor_verification_results.json").exists())
+
+    def test_alerting_preflight_threads_tls_verify(self):
+        from observability_migration.adapters.source.datadog import alert_pipeline
+
+        args = SimpleNamespace(
+            preflight=True,
+            kibana_url="https://kibana.example",
+            kibana_api_key="secret",
+            space_id="space-a",
+            ca_cert="/tmp/ca.pem",
+            insecure=False,
+        )
+        mapping_batch = {"results": []}
+
+        with patch(
+            "observability_migration.adapters.source.datadog.alert_pipeline.run_alerting_preflight",
+            return_value={},
+        ) as mock_preflight:
+            alert_pipeline.build_payload_validation_lookup(args, mapping_batch)
+
+        mock_preflight.assert_called_once()
+        self.assertEqual(mock_preflight.call_args.kwargs.get("verify"), "/tmp/ca.pem")
+
+    def test_create_rules_threads_tls_verify(self):
+        from observability_migration.adapters.source.datadog import alert_pipeline
+
+        args = SimpleNamespace(
+            create_alert_rules=True,
+            kibana_url="https://kibana.example",
+            kibana_api_key="secret",
+            space_id="space-a",
+            ca_cert="/tmp/ca.pem",
+            insecure=False,
+        )
+        upload_result = {
+            "summary": {"created": 0, "failed": 0, "skipped": 0},
+            "failed": [],
+            "preflight_unreachable": False,
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "observability_migration.adapters.source.datadog.alert_pipeline.create_rules_from_payloads",
+            return_value=upload_result,
+        ) as mock_create:
+            alert_pipeline.create_rules_if_requested(
+                args=args,
+                output_dir=Path(tmpdir),
+                mapping_batch={"results": []},
+                payload_preflight={},
+            )
+
+        mock_create.assert_called_once()
+        self.assertEqual(mock_create.call_args.kwargs.get("verify"), "/tmp/ca.pem")
+
+
+class TestGrafanaAlertPipeline(unittest.TestCase):
+    def test_run_alert_pipeline_writes_alert_artifacts_to_output_dir(self):
+        from observability_migration.adapters.source.grafana.alert_pipeline import (
+            run_alert_pipeline,
+        )
+
+        dashboard = {
+            "title": "Alerts",
+            "uid": "grafana-uid-1",
+            "panels": [
+                {
+                    "id": 101,
+                    "title": "CPU Alert",
+                    "alert": {
+                        "name": "CPU High",
+                        "conditions": [
+                            {
+                                "evaluator": {"type": "gt", "params": [80]},
+                                "reducer": {"type": "avg"},
+                                "query": {"params": ["A", "5m", "now"]},
+                                "operator": {"type": "and"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "alerts"
+
+            summary = run_alert_pipeline(
+                SimpleNamespace(
+                    source="files",
+                    input_dir=tmpdir,
+                    data_view="metrics-*",
+                    grafana_token="",
+                    kibana_url="",
+                    kibana_api_key="",
+                    space_id="",
+                    create_alert_rules=False,
+                ),
+                output_dir=output_dir,
+                raw_dashboards=[dashboard],
+            )
+
+            self.assertEqual(summary["total"], 1)
+            self.assertTrue((output_dir / "raw_alerts" / "grafana_dashboards.json").exists())
+            self.assertTrue((output_dir / "alert_migration_results.json").exists())
+            self.assertTrue((output_dir / "alert_comparison_results.json").exists())
+
+    def test_api_unified_alert_extraction_uses_grafana_pass_and_tls_verify(self):
+        from observability_migration.adapters.source.grafana import alert_pipeline
+
+        args = SimpleNamespace(
+            source="api",
+            grafana_url="https://grafana.example",
+            grafana_user="user-a",
+            grafana_pass="pass-a",
+            grafana_token="token-a",
+            ca_cert="/tmp/ca.pem",
+            insecure=False,
+        )
+
+        with patch(
+            "observability_migration.adapters.source.grafana.alert_pipeline.extract_all_alerting_resources",
+            return_value={"alert_rules": []},
+        ) as mock_extract:
+            alert_pipeline.load_unified_alerting_resources(args)
+
+        mock_extract.assert_called_once_with(
+            "https://grafana.example",
+            user="user-a",
+            password="pass-a",
+            token="token-a",
+            verify="/tmp/ca.pem",
+        )
+
+    def test_load_unified_alerting_resources_filters_by_alert_uids(self):
+        from observability_migration.adapters.source.grafana import alert_pipeline
+
+        rules = [
+            {"uid": "rule-1", "folderUID": "folder-a", "title": "Keep"},
+            {"uid": "rule-2", "folderUID": "folder-a", "title": "Skip"},
+        ]
+        args = SimpleNamespace(
+            source="files",
+            input_dir="",
+            grafana_token="",
+            alert_uids="rule-1",
+            alert_folder="",
+        )
+        with patch(
+            "observability_migration.adapters.source.grafana.alert_pipeline.extract_all_alerting_resources_from_files",
+            return_value={"alert_rules": rules},
+        ):
+            result = alert_pipeline.load_unified_alerting_resources(args)
+
+        self.assertEqual(len(result["alert_rules"]), 1)
+        self.assertEqual(result["alert_rules"][0]["uid"], "rule-1")
+
+    def test_load_unified_alerting_resources_filters_by_alert_folder(self):
+        from observability_migration.adapters.source.grafana import alert_pipeline
+
+        rules = [
+            {"uid": "rule-1", "folderUID": "folder-a", "title": "Keep"},
+            {"uid": "rule-2", "folderUID": "folder-b", "title": "Skip"},
+        ]
+        args = SimpleNamespace(
+            source="files",
+            input_dir="",
+            grafana_token="",
+            alert_uids="",
+            alert_folder="folder-a",
+        )
+        with patch(
+            "observability_migration.adapters.source.grafana.alert_pipeline.extract_all_alerting_resources_from_files",
+            return_value={"alert_rules": rules},
+        ):
+            result = alert_pipeline.load_unified_alerting_resources(args)
+
+        self.assertEqual(len(result["alert_rules"]), 1)
+        self.assertEqual(result["alert_rules"][0]["folderUID"], "folder-a")
+
+    def test_load_unified_alerting_resources_no_filter_returns_all(self):
+        from observability_migration.adapters.source.grafana import alert_pipeline
+
+        rules = [
+            {"uid": "rule-1", "folderUID": "folder-a", "title": "A"},
+            {"uid": "rule-2", "folderUID": "folder-b", "title": "B"},
+        ]
+        args = SimpleNamespace(
+            source="files",
+            input_dir="",
+            grafana_token="",
+            alert_uids="",
+            alert_folder="",
+        )
+        with patch(
+            "observability_migration.adapters.source.grafana.alert_pipeline.extract_all_alerting_resources_from_files",
+            return_value={"alert_rules": rules},
+        ):
+            result = alert_pipeline.load_unified_alerting_resources(args)
+
+        self.assertEqual(len(result["alert_rules"]), 2)
 
 
 # =====================================================================
@@ -3102,7 +3436,7 @@ class TestKibanaAlertingPreflight(unittest.TestCase):
 
         calls = []
 
-        def _fake_delete(kibana_url, rule_id, *, api_key="", space_id="", timeout=15):
+        def _fake_delete(kibana_url, rule_id, *, api_key="", space_id="", timeout=15, verify=True):
             calls.append((kibana_url, rule_id, api_key, space_id, timeout))
             return rule_id != "rule-2"
 
@@ -3129,6 +3463,210 @@ class TestKibanaAlertingPreflight(unittest.TestCase):
         migrated = collect_migrated_rules(rules)
         self.assertEqual([rule["id"] for rule in migrated], ["rule-1", "rule-2"])
 
+    def test_create_rules_from_payloads_from_emitted_shape_creates_rules(self):
+        from observability_migration.targets.kibana.alerting import (
+            create_rules_from_payloads,
+        )
+
+        calls: list[dict[str, Any]] = []
+
+        def _fake_create(kibana_url, **kwargs):
+            calls.append({"kibana_url": kibana_url, **kwargs})
+            return {"id": f"rule-{len(calls)}", "name": kwargs["name"], "enabled": kwargs["enabled"]}
+
+        items = [
+            {
+                "source_type": "alerts",
+                "alert_id": "grafana-1",
+                "name": "CPU high",
+                "kind": "grafana_unified",
+                "payload": {
+                    "rule_type_id": ".es-query",
+                    "name": "CPU high",
+                    "consumer": "alerts",
+                    "schedule": {"interval": "1m"},
+                    "params": {"esqlQuery": {"esql": "FROM metrics-*"}},
+                    "actions": [],
+                    "tags": ["legacy-grafana"],
+                    "enabled": True,
+                },
+            },
+        ]
+
+        result = create_rules_from_payloads(
+            "http://kibana:5601",
+            items,
+            api_key="key",
+            create_rule_fn=_fake_create,
+        )
+
+        self.assertEqual(result["summary"], {"created": 1, "failed": 0, "skipped": 0})
+        self.assertEqual(len(result["created"]), 1)
+        created_call = calls[0]
+        self.assertEqual(created_call["rule_type_id"], ".es-query")
+        self.assertEqual(created_call["name"], "[migrated] CPU high")
+        self.assertFalse(created_call["enabled"], "rules must be created disabled by default")
+        self.assertIn("obs-migration", created_call["tags"])
+        self.assertIn("legacy-grafana", created_call["tags"])
+
+    def test_create_rules_from_payloads_from_mapping_shape_skips_non_automated(self):
+        from observability_migration.targets.kibana.alerting import (
+            create_rules_from_payloads,
+        )
+
+        calls: list[dict[str, Any]] = []
+
+        def _fake_create(kibana_url, **kwargs):
+            calls.append(kwargs)
+            return {"id": "rule-x", "name": kwargs["name"], "enabled": kwargs["enabled"]}
+
+        items = [
+            {
+                "alert_id": "a1",
+                "name": "auto",
+                "kind": "grafana_unified",
+                "mapping": {
+                    "payload_emitted": True,
+                    "automation_tier": "automated",
+                    "rule_payload": {
+                        "rule_type_id": ".es-query",
+                        "name": "auto",
+                        "params": {},
+                    },
+                },
+            },
+            {
+                "alert_id": "a2",
+                "name": "draft",
+                "kind": "grafana_legacy",
+                "mapping": {
+                    "payload_emitted": True,
+                    "automation_tier": "draft_requires_review",
+                    "rule_payload": {
+                        "rule_type_id": ".es-query",
+                        "name": "draft",
+                        "params": {},
+                    },
+                },
+            },
+            {
+                "alert_id": "a3",
+                "name": "no-payload",
+                "kind": "grafana_unified",
+                "mapping": {
+                    "payload_emitted": False,
+                    "automation_tier": "automated",
+                    "rule_payload": {},
+                },
+            },
+        ]
+
+        result = create_rules_from_payloads(
+            "http://kibana:5601",
+            items,
+            api_key="key",
+            create_rule_fn=_fake_create,
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["summary"]["created"], 1)
+        self.assertEqual(result["summary"]["skipped"], 1)
+        self.assertEqual(result["skipped"][0]["alert_id"], "a2")
+        self.assertIn("draft_requires_review", result["skipped"][0]["reason"])
+
+    def test_create_rules_from_payloads_records_failures(self):
+        from observability_migration.targets.kibana.alerting import (
+            create_rules_from_payloads,
+        )
+
+        def _fake_create(kibana_url, **kwargs):
+            return {"error": "400 Bad Request"}
+
+        items = [
+            {
+                "alert_id": "a1",
+                "name": "n",
+                "kind": "grafana_unified",
+                "payload": {"rule_type_id": ".es-query", "name": "n", "params": {}},
+            }
+        ]
+
+        result = create_rules_from_payloads(
+            "http://kibana:5601",
+            items,
+            create_rule_fn=_fake_create,
+        )
+
+        self.assertEqual(result["summary"], {"created": 0, "failed": 1, "skipped": 0})
+        self.assertEqual(result["failed"][0]["error"], "400 Bad Request")
+
+    def test_create_rules_from_payloads_does_not_double_apply_name_prefix(self):
+        from observability_migration.targets.kibana.alerting import (
+            create_rules_from_payloads,
+        )
+
+        calls: list[dict[str, Any]] = []
+
+        def _fake_create(kibana_url, **kwargs):
+            calls.append(kwargs)
+            return {"id": "rule-x", "name": kwargs["name"], "enabled": kwargs["enabled"]}
+
+        items = [
+            {
+                "alert_id": "a1",
+                "name": "Already prefixed",
+                "kind": "grafana_legacy",
+                "payload": {
+                    "rule_type_id": ".es-query",
+                    "name": "[migrated] Already prefixed",
+                    "params": {},
+                },
+            }
+        ]
+
+        result = create_rules_from_payloads(
+            "http://kibana:5601",
+            items,
+            create_rule_fn=_fake_create,
+        )
+
+        self.assertEqual(result["summary"]["created"], 1)
+        self.assertEqual(calls[0]["name"], "[migrated] Already prefixed")
+
+    def test_create_rules_from_payloads_skips_all_when_preflight_unreachable(self):
+        from observability_migration.targets.kibana.alerting import (
+            create_rules_from_payloads,
+        )
+
+        def _fake_create(*_args, **_kwargs):
+            raise AssertionError("create_rule must not be called when preflight is unreachable")
+
+        items = [
+            {
+                "alert_id": "a1",
+                "name": "n",
+                "kind": "grafana_unified",
+                "payload": {"rule_type_id": ".es-query", "name": "n", "params": {}},
+            }
+        ]
+
+        preflight = {
+            "health": {"error": "connection refused"},
+            "rule_types_count": 0,
+            "connector_types_count": 0,
+        }
+
+        result = create_rules_from_payloads(
+            "http://kibana:5601",
+            items,
+            preflight=preflight,
+            create_rule_fn=_fake_create,
+        )
+
+        self.assertTrue(result["preflight_unreachable"])
+        self.assertEqual(result["summary"], {"created": 0, "failed": 0, "skipped": 1})
+        self.assertEqual(result["skipped"][0]["reason"], "preflight_unreachable")
+
     def test_audit_migrated_rules_optionally_disables_enabled_rules(self):
         from observability_migration.targets.kibana.alerting import audit_migrated_rules
 
@@ -3152,11 +3690,11 @@ class TestKibanaAlertingPreflight(unittest.TestCase):
         list_calls = []
         disable_calls = []
 
-        def _fake_list(kibana_url, *, api_key="", space_id="", timeout=15, per_page=100, page=1):
+        def _fake_list(kibana_url, *, api_key="", space_id="", timeout=15, per_page=100, page=1, verify=True):
             list_calls.append(page)
             return listed_pages[page]
 
-        def _fake_disable(kibana_url, rule_id, *, api_key="", space_id="", timeout=15):
+        def _fake_disable(kibana_url, rule_id, *, api_key="", space_id="", timeout=15, verify=True):
             disable_calls.append(rule_id)
             return True
 
@@ -3175,6 +3713,27 @@ class TestKibanaAlertingPreflight(unittest.TestCase):
         self.assertEqual(result["remediation"]["attempted_rule_ids"], ["rule-1"])
         self.assertEqual(result["remediation"]["disabled_rule_ids"], ["rule-1"])
         self.assertEqual(disable_calls, ["rule-1"])
+
+    def test_audit_migrated_rules_reports_truncated_listing(self):
+        from observability_migration.targets.kibana.alerting import audit_migrated_rules
+
+        def _fake_list(kibana_url, *, api_key="", space_id="", timeout=15, per_page=100, page=1, verify=True):
+            return {
+                "data": [{"id": f"rule-{page}", "name": "[migrated] CPU high", "enabled": False, "tags": []}],
+                "total": 3,
+            }
+
+        result = audit_migrated_rules(
+            "http://kibana:5601",
+            per_page=1,
+            max_pages=2,
+            list_rules_fn=_fake_list,
+        )
+
+        self.assertTrue(result["listing_truncated"])
+        self.assertEqual(result["total_rules_available"], 3)
+        self.assertEqual(result["total_rules_seen"], 2)
+        self.assertIn("Increase --max-pages", result["listing_warning"])
 
 
 # =====================================================================
@@ -3201,11 +3760,177 @@ class TestUnifiedCliFetchAlertsFlag(unittest.TestCase):
         args = parser.parse_args(["migrate", "--source", "datadog", "--monitor-ids", "1,2,3"])
         self.assertEqual(args.monitor_ids, "1,2,3")
 
-    def test_migrate_parser_has_alert_dry_run(self):
+    def test_migrate_parser_has_create_alert_rules(self):
         from observability_migration.app.cli import _build_parser
         parser = _build_parser()
-        args = parser.parse_args(["migrate", "--source", "grafana", "--alert-dry-run"])
-        self.assertTrue(args.alert_dry_run)
+        args = parser.parse_args([
+            "migrate",
+            "--source",
+            "grafana",
+            "--fetch-alerts",
+            "--create-alert-rules",
+        ])
+        self.assertTrue(args.create_alert_rules)
+
+    def test_create_alert_rules_forwarded_to_grafana_legacy_cli(self):
+        from observability_migration.app.cli import _run_grafana_migration
+
+        captured: dict[str, list[str]] = {}
+
+        def _fake_main():
+            captured["argv"] = list(sys.argv)
+
+        with patch(
+            "observability_migration.adapters.source.grafana.cli.main",
+            side_effect=_fake_main,
+        ):
+            with self.assertWarnsRegex(
+                FutureWarning,
+                "--fetch-alerts/--fetch-monitors are deprecated",
+            ):
+                _run_grafana_migration(
+                    SimpleNamespace(
+                        input_mode="files",
+                        input_dir="/tmp/input",
+                        output_dir="/tmp/output",
+                        data_view="metrics-*",
+                        assets="dashboards",
+                        esql_index="",
+                        logs_index="",
+                        native_promql=False,
+                        include="dashboards",
+                        rules_file=[],
+                        plugin=[],
+                        polish_metadata=False,
+                        preflight=False,
+                        dataset_filter="",
+                        logs_dataset_filter="",
+                        smoke_report="",
+                        fetch_alerts=True,
+                        create_alert_rules=True,
+                        grafana_token="",
+                        smoke=False,
+                        browser_audit=False,
+                        capture_screenshots=False,
+                        smoke_output="",
+                        smoke_timeout=30,
+                        chrome_binary="",
+                        validate=False,
+                        upload=False,
+                        es_url="",
+                        es_api_key="",
+                        kibana_url="",
+                        kibana_api_key="",
+                        space_id="",
+                    ),
+                )
+        self.assertIn("--assets", captured["argv"])
+        asset_index = captured["argv"].index("--assets")
+        self.assertEqual(captured["argv"][asset_index + 1], "all")
+        self.assertNotIn("--fetch-alerts", captured["argv"])
+        self.assertIn("--create-alert-rules", captured["argv"])
+
+    def test_create_alert_rules_forwarded_to_datadog_legacy_cli(self):
+        from observability_migration.app.cli import _run_datadog_migration
+
+        captured: dict[str, list[str]] = {}
+
+        def _fake_main():
+            captured["argv"] = list(sys.argv)
+
+        with patch(
+            "observability_migration.adapters.source.datadog.cli.main",
+            side_effect=_fake_main,
+        ):
+            with self.assertWarnsRegex(
+                FutureWarning,
+                "--fetch-alerts/--fetch-monitors are deprecated",
+            ):
+                _run_datadog_migration(
+                    SimpleNamespace(
+                        input_mode="files",
+                        input_dir="/tmp/input",
+                        output_dir="/tmp/output",
+                        data_view="metrics-*",
+                        assets="dashboards",
+                        logs_index="",
+                        field_profile="otel",
+                        validate=False,
+                        upload=False,
+                        preflight=False,
+                        dataset_filter="",
+                        logs_dataset_filter="",
+                        es_url="",
+                        es_api_key="",
+                        kibana_url="",
+                        kibana_api_key="",
+                        space_id="",
+                        fetch_alerts=True,
+                        create_alert_rules=True,
+                        monitor_ids="",
+                        monitor_query="",
+                        env_file="",
+                        smoke=False,
+                        browser_audit=False,
+                        capture_screenshots=False,
+                        smoke_output="",
+                        smoke_timeout=30,
+                        chrome_binary="",
+                    ),
+                )
+        self.assertIn("--assets", captured["argv"])
+        asset_index = captured["argv"].index("--assets")
+        self.assertEqual(captured["argv"][asset_index + 1], "all")
+        self.assertNotIn("--fetch-monitors", captured["argv"])
+        self.assertIn("--create-alert-rules", captured["argv"])
+
+
+def _load_cli_contract_module():
+    module_name = "observability_migration.core.cli_contract"
+    try:
+        return importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised in red phase
+        raise AssertionError(f"{module_name} is missing") from exc
+
+
+class LegacyFlagContractTests(unittest.TestCase):
+    def test_fetch_alerts_alias_normalizes_to_all_assets(self):
+        cli_contract = _load_cli_contract_module()
+        normalize_requested_assets = getattr(cli_contract, "normalize_requested_assets", None)
+        self.assertIsNotNone(
+            normalize_requested_assets,
+            "observability_migration.core.cli_contract.normalize_requested_assets is missing",
+        )
+
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "--fetch-alerts/--fetch-monitors are deprecated",
+        ):
+            selection = normalize_requested_assets(
+                assets="dashboards",
+                fetch_alerts=True,
+                fetch_monitors=False,
+            )
+        self.assertEqual(selection.label, "all")
+
+    def test_fetch_monitors_alias_normalizes_to_all_assets(self):
+        cli_contract = _load_cli_contract_module()
+        normalize_requested_assets = getattr(cli_contract, "normalize_requested_assets", None)
+        self.assertIsNotNone(
+            normalize_requested_assets,
+            "observability_migration.core.cli_contract.normalize_requested_assets is missing",
+        )
+
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "--fetch-alerts/--fetch-monitors are deprecated",
+        ):
+            selection = normalize_requested_assets(
+                assets="dashboards",
+                fetch_alerts=False,
+                fetch_monitors=True,
+            )
+        self.assertEqual(selection.label, "all")
 
 
 class TestGrafanaCliFetchAlertsFlag(unittest.TestCase):
@@ -3218,6 +3943,31 @@ class TestGrafanaCliFetchAlertsFlag(unittest.TestCase):
         from observability_migration.adapters.source.grafana.cli import parse_args
         args = parse_args(["--grafana-token", "my-token"])
         self.assertEqual(args.grafana_token, "my-token")
+
+    def test_grafana_parser_has_create_alert_rules(self):
+        from observability_migration.adapters.source.grafana.cli import parse_args
+        args = parse_args(["--fetch-alerts", "--create-alert-rules"])
+        self.assertTrue(args.create_alert_rules)
+
+    def test_grafana_parser_has_alert_uids(self):
+        from observability_migration.adapters.source.grafana.cli import parse_args
+        args = parse_args(["--alert-uids", "rule-uid-1,rule-uid-2"])
+        self.assertEqual(args.alert_uids, "rule-uid-1,rule-uid-2")
+
+    def test_grafana_parser_has_alert_folder(self):
+        from observability_migration.adapters.source.grafana.cli import parse_args
+        args = parse_args(["--alert-folder", "folder-uid-a"])
+        self.assertEqual(args.alert_folder, "folder-uid-a")
+
+    def test_grafana_parser_alert_uids_defaults_to_empty(self):
+        from observability_migration.adapters.source.grafana.cli import parse_args
+        args = parse_args([])
+        self.assertEqual(args.alert_uids, "")
+
+    def test_grafana_parser_alert_folder_defaults_to_empty(self):
+        from observability_migration.adapters.source.grafana.cli import parse_args
+        args = parse_args([])
+        self.assertEqual(args.alert_folder, "")
 
 
 class TestDatadogCliFetchMonitorsFlag(unittest.TestCase):
@@ -3235,6 +3985,11 @@ class TestDatadogCliFetchMonitorsFlag(unittest.TestCase):
         from observability_migration.adapters.source.datadog.cli import parse_args
         args = parse_args(["--monitor-query", "tag:env:prod"])
         self.assertEqual(args.monitor_query, "tag:env:prod")
+
+    def test_datadog_parser_has_create_alert_rules(self):
+        from observability_migration.adapters.source.datadog.cli import parse_args
+        args = parse_args(["--fetch-monitors", "--create-alert-rules"])
+        self.assertTrue(args.create_alert_rules)
 
 
 # =====================================================================

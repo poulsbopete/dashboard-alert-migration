@@ -1,7 +1,10 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import pathlib
+import re
 import subprocess
 import unittest
-
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FULL_LOCAL_DEMO_SCRIPT = ROOT / "scripts" / "full_local_demo.sh"
@@ -51,12 +54,12 @@ class LocalValidationScriptTests(unittest.TestCase):
         script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn("validation/local_otlp_sample_run", script_text)
-        self.assertIn("otel-collector-dashboard.json", script_text)
         self.assertIn("node-exporter-full.json", script_text)
-        self.assertIn("loki-dashboard.json", script_text)
-        self.assertIn("AWS OpenTelemetry Collector", script_text)
+        self.assertIn("k8s-views-global.json", script_text)
+        self.assertIn("diverse-panels-test.json", script_text)
         self.assertIn("Node Exporter Full", script_text)
-        self.assertIn("Loki Dashboard quick search", script_text)
+        self.assertIn("Kubernetes / Views / Global", script_text)
+        self.assertIn("Diverse Panel Types Test", script_text)
 
     def test_full_local_demo_contains_external_port_conflict_guard(self):
         script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
@@ -73,12 +76,19 @@ class LocalValidationScriptTests(unittest.TestCase):
     def test_full_local_demo_uses_integrated_grafana_smoke_flow(self):
         script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
 
+        self.assertRegex(script_text, re.compile(r"--assets\s+dashboards"))
         self.assertIn("--smoke", script_text)
         self.assertIn("--browser-audit", script_text)
         self.assertIn("--smoke-output \"$OUTPUT_DIR/upload_smoke_report.json\"", script_text)
         self.assertIn("--time-from \"$TIME_FROM\"", script_text)
         self.assertIn("--time-to \"$TIME_TO\"", script_text)
         self.assertNotIn("observability_migration.adapters.source.grafana.validate_uploaded_dashboards", script_text)
+
+    def test_full_local_demo_reports_dashboard_scoped_artifacts(self):
+        script_text = FULL_LOCAL_DEMO_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("$OUTPUT_DIR/dashboards/yaml", script_text)
+        self.assertIn("$OUTPUT_DIR/run_summary.json", script_text)
 
     def test_validate_local_sample_script_removed(self):
         self.assertFalse(REMOVED_SAMPLE_SCRIPT.exists())

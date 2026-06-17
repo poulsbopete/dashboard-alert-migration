@@ -1,0 +1,5 @@
+source: sum by(name)(podman_container_info * on(id) group_right(name) podman_container_memory_bytes / 1024 / 1024)
+feasibility: not_feasible
+warning: Aggregating over a PromQL vector-matching join with scalar arithmetic requires manual redesign; dropping the joined metric would change numeric values
+---
+

@@ -13,6 +13,9 @@ build/
 venv/
 env/
 
+# Local agent scratch
+.tmp/
+
 # IDE / Editor
 .vscode/
 .idea/
@@ -38,21 +41,50 @@ htmlcov/
 # Serena
 .serena/
 
-# Cursor
-.cursor/
+# Cursor (ignore everything except shared project skills)
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/**/
+
+# Claude (ignore everything except shared project skills)
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/**/
 
 # Generated migration output
 migration_output*/
 datadog_migration_output*/
 audit_output/
 examples/alerting/generated/
+blog_research_migration/
+e2e_datadog_run/
+pipeline_run/
+
+# Smoke / browser audit artifacts (written alongside *_smoke.json reports)
+*_browser_audit/
+*_smoke.json
+*_smoke_report.json
+dashboard_qa/
+browser_qa/
+
+# Excluded third-party dashboards
+infra/grafana/dashboards/otel-collector-dashboard.json
+infra/grafana/dashboards/kube-state-metrics-v2.json
+infra/grafana/dashboards/loki-dashboard.json
+infra/grafana/dashboards/node-exporter-old-schema.json
 
 # Validation run artifacts
-validation/local_otlp_sample_run/
-validation/migration_fresh_run/
+validation/
 
 # Credentials
 serverless_creds.env
 datadog_creds.env
 grafana_creds.env
 *.creds.env
+
+docs/superpowers/
+
+# Datadog parity rig run outputs
+parity-rig/datadog/parity_report.json

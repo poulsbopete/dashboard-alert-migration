@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 set -euo pipefail
 
@@ -44,6 +47,11 @@ done
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker is required" >&2
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "ERROR: docker daemon is not running (start Docker Desktop / docker service and retry)" >&2
   exit 1
 fi
 

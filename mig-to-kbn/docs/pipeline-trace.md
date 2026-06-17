@@ -15,8 +15,8 @@ This document is the **shared architecture overview** for the migration
 pipeline. For per-dashboard traces with source queries, translation steps, and
 translated output, see the source-specific trace docs:
 
-- [Grafana Pipeline Trace](sources/grafana-trace.md) — 9 dashboards, PromQL / LogQL → Kibana
-- [Datadog Pipeline Trace](sources/datadog-trace.md) — 15 dashboards, metric / log / formula → Kibana
+- [Grafana Pipeline Trace](sources/grafana-trace.md) — per-dashboard PromQL / LogQL → Kibana traces
+- [Datadog Pipeline Trace](sources/datadog-trace.md) — per-dashboard metric / log / formula → Kibana traces
 
 This is the **shared** pipeline contract, not the exact dedicated CLI sequence
 for every source. The source adapters differ materially:
@@ -32,25 +32,29 @@ For the exact source-specific stage order, see `docs/architecture.md`,
 ## Cross-Source Summary
 
 <!-- GENERATED:DASHBOARD_SUMMARY -->
-| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped |
-|--------|-----------|--------|----------|----------|--------|--------------|---------|
-| grafana | Diverse Panel Types Test | 11 | 1 | 7 | 0 | 2 | 1 |
-| grafana | Home - Migration Test Lab | 6 | 2 | 3 | 0 | 1 | 0 |
-| grafana | Kubernetes / Views / Global | 30 | 2 | 24 | 0 | 0 | 4 |
-| grafana | kube-state-metrics-v2 | 51 | 2 | 37 | 0 | 3 | 9 |
-| grafana | Loki Dashboard quick search | 3 | 1 | 2 | 0 | 0 | 0 |
-| grafana | Node Exporter Full | 132 | 0 | 114 | 0 | 2 | 16 |
-| grafana | Node Exporter Server Metrics | 15 | 1 | 13 | 0 | 0 | 1 |
-| grafana | AWS OpenTelemetry Collector | 15 | 2 | 9 | 0 | 0 | 4 |
-| grafana | Prometheus 2.0 (by FUSAKLA) | 44 | 6 | 33 | 5 | 0 | 0 |
-| datadog | Docker - Overview | 28 | 6 | 19 | 1 | 2 | 0 |
-| datadog | Kubernetes - Overview | 10 | 2 | 39 | 2 | 4 | 10 |
-| datadog | NGINX - Overview | 6 | 12 | 4 | 0 | 5 | 6 |
-| datadog | Postgres - Metrics | 9 | 0 | 9 | 0 | 0 | 0 |
-| datadog | Redis - Overview | 7 | 7 | 27 | 0 | 2 | 7 |
-| datadog | System Overview - Sample | 11 | 8 | 2 | 0 | 1 | 0 |
+| Source | Dashboard | Panels | Migrated | Warnings | Manual | Not Feasible | Skipped | Rows |
+|--------|-----------|--------|----------|----------|--------|--------------|---------|------|
+| grafana | Diverse Panel Types Test | 10 | 2 | 8 | 0 | 0 | 0 | 1 |
+| grafana | Home - Migration Test Lab | 6 | 2 | 3 | 0 | 1 | 0 | 0 |
+| grafana | Kubernetes / Views / Global | 26 | 12 | 14 | 0 | 0 | 0 | 4 |
+| grafana | Node Exporter Full | 116 | 3 | 111 | 0 | 2 | 0 | 16 |
+| grafana | Prometheus 2.0 (by FUSAKLA) | 44 | 21 | 17 | 5 | 1 | 0 | 0 |
+| datadog | Apache - Overview | 22 | 16 | 4 | 1 | 1 | 0 | 0 |
+| datadog | Celery Overview | 17 | 5 | 6 | 2 | 0 | 4 | 0 |
+| datadog | Consul Overview | 27 | 7 | 11 | 4 | 0 | 5 | 0 |
+| datadog | Docker - Overview | 28 | 16 | 9 | 1 | 2 | 0 | 0 |
+| datadog | HAProxy - Overview | 29 | 9 | 12 | 2 | 0 | 6 | 0 |
+| datadog | Kafka, Zookeeper and Kafka Consumer Overview | 55 | 13 | 27 | 4 | 2 | 9 | 0 |
+| datadog | Kubernetes - Overview | 57 | 17 | 24 | 4 | 2 | 10 | 0 |
+| datadog | MongoDB - Overview | 43 | 15 | 18 | 1 | 0 | 9 | 0 |
+| datadog | MySQL - Overview | 11 | 0 | 11 | 0 | 0 | 0 | 0 |
+| datadog | NGINX - Overview | 27 | 12 | 5 | 2 | 2 | 6 | 0 |
+| datadog | Postgres - Metrics | 9 | 0 | 9 | 0 | 0 | 0 | 0 |
+| datadog | RabbitMQ Overview (OpenMetrics Version) | 47 | 11 | 23 | 6 | 1 | 6 | 0 |
+| datadog | Redis - Overview | 43 | 9 | 27 | 0 | 0 | 7 | 0 |
+| datadog | System Overview - Sample | 11 | 8 | 2 | 1 | 0 | 0 | 0 |
 
-**15 dashboards, 378 panels** audited from `infra/grafana/dashboards/` and `infra/datadog/dashboards/`.
+**19 dashboards, 628 panels** audited from `infra/grafana/dashboards/` and `infra/datadog/dashboards/`.
 <!-- /GENERATED:DASHBOARD_SUMMARY -->
 
 <!-- GENERATED:VERDICT_SUMMARY -->
@@ -58,9 +62,9 @@ For the exact source-specific stage order, see `docs/architecture.md`,
 
 | Verdict | Count | Meaning |
 |---------|-------|---------|
-| **CORRECT** | 77 | Translation is semantically accurate |
-| **MINOR_ISSUE** | 238 | Translated with approximations — review recommended |
-| **EXPECTED_LIMITATION** | 167 | Known unsupported feature — placeholder or skip |
+| **CORRECT** | 337 | Translation is semantically accurate |
+| **MINOR_ISSUE** | 71 | Translated with approximations — review recommended |
+| **EXPECTED_LIMITATION** | 241 | Known unsupported feature — placeholder or skip |
 <!-- /GENERATED:VERDICT_SUMMARY -->
 
 <!-- GENERATED:WARNING_PATTERNS -->
@@ -68,21 +72,21 @@ For the exact source-specific stage order, see `docs/architecture.md`,
 
 | Count | Warning |
 |------:|---------|
-| 216 | Variable-driven label filters applied via Kibana dashboard controls |
-| 103 | Template variable filters applied via Kibana dashboard controls |
-| 92 | Merged compatible panel targets into a single ES\|QL query |
-| 90 | No explicit aggregation; using AVG (correct for gauge metrics) |
+| 188 | Scope filter with template variable could not be bound exactly; apply specific values via Kibana dashboard controls |
+| 60 | No explicit aggregation; using AVG per series (faithful gauge downsample) |
+| 54 | XY chart shows a single breakdown; additional grouping dimension(s) ['job'] are in the query but not on the chart, so series differing only by those are visually merged |
+| 45 | Added outer AVG() around irate because ES\|QL requires an outer aggregation when grouping TS functions by label fields |
 | 35 | Grafana panel description is not carried into Kibana YAML automatically |
-| 29 | Approximated PromQL arithmetic using same-bucket ES\|QL math |
-| 29 | Grafana panel has 1 field override(s); verify visual mappings manually |
-| 27 | Wrapped irate in AVG() to support grouped TS queries |
-| 15 | Grafana repeating panel behavior is not preserved automatically |
-| 9 | Grafana panel has 2 field override(s); verify visual mappings manually |
-| 8 | Panel has 2 PromQL targets but only 1 could be migrated |
+| 27 | Grafana panel has 1 field override(s); verify visual mappings manually |
+| 24 | Approximated PromQL arithmetic using same-bucket ES\|QL math |
+| 13 | PromQL series labels were not retained; output is bucket-level and may collapse multiple source series |
+| 9 | as_count interval semantics are approximated in ES\|QL |
+| 7 | Grafana panel has 2 field override(s); verify visual mappings manually |
 | 6 | Grafana panel has 18 field override(s); verify visual mappings manually |
 | 6 | Grafana panel has 19 field override(s); verify visual mappings manually |
-| 5 | Panel has 2 PromQL targets but only 1 could be migrated (dropped targets are Windows-specific) |
+| 6 | fill(zero) only applies to null values in returned rows; empty buckets may still be omitted |
 | 5 | Grafana panel has 20 field override(s); verify visual mappings manually |
+| 5 | Grafana panel has 17 field override(s); verify visual mappings manually |
 <!-- /GENERATED:WARNING_PATTERNS -->
 
 ---
@@ -166,8 +170,10 @@ the Datadog adapter.
 
 **Grafana** has four translation paths, chosen automatically per panel:
 
-1. **Native PROMQL** (`--native-promql`, preferred) — wraps the original PromQL
-   in `PROMQL index=… value=(expr)`. Highest fidelity.
+1. **Native PROMQL** (the default; when `--es-url` is set, target detection
+   downgrades to ES|QL translation if the `PROMQL` command is unsupported;
+   `--native-promql` forces it and `--no-native-promql` opts out) — wraps
+   the original PromQL in `PROMQL index=… value=(expr)`. Highest fidelity.
 2. **Rule-engine ES|QL** — parses PromQL AST via `promql-parser`, classifies,
    runs through priority-ordered translation rules, renders ES|QL.
 3. **LLM fallback** (optional) — for `not_feasible` panels, asks an LLM.
@@ -228,25 +234,26 @@ reports, verification, and downstream analysis.
 From the latest trace run:
 
 ```
-Total panels found:  482
-  Migrated:              17 (3.5%)
-  With warnings:        242 (50.2%)
-  OK:                    35 (7.3%)
-  Warning:              100 (20.7%)
-  Requires manual:        8 (1.7%)
-  Not feasible:          22 (4.6%)
-  Skipped:               58 (12.0%)
+Elements:            649 total (628 panels + 21 rows)
+Renderable panels:   628
+  Migrated:              40 (6.4%)
+  With warnings:        153 (24.4%)
+  OK:                   138 (22.0%)
+  Warning:              188 (29.9%)
+  Requires manual:       33 (5.3%)
+  Not feasible:          14 (2.2%)
+  Skipped:               62 (9.9%)
 ```
 
 Verdict breakdown:
 
 ```
-  CORRECT:                   77
-  MINOR_ISSUE:              238
-  EXPECTED_LIMITATION:      167
+  CORRECT:                  337
+  MINOR_ISSUE:               71
+  EXPECTED_LIMITATION:      241
 ```
 <!-- /GENERATED:APPENDIX_STATS -->
 
 ---
 
-*Last generated: 2026-04-02 13:38 UTC*
+*Last generated: 2026-06-02 10:51 UTC*

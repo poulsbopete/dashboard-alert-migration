@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull the latest elastic/mig-to-kbn into this workshop (developer laptop or CI).
+# Pull the latest elastic/observability-migration-platform into this workshop (developer laptop or CI).
 # Supports: git submodule, vendored tree (no nested .git; re-clone + rsync), or standalone git clone under mig-to-kbn/.
 #
 # Usage (repo root):
@@ -11,7 +11,7 @@
 #   MIG_TO_KBN_REMOTE  default: origin
 #   MIG_TO_KBN_REF     default: main (branch or tag after fetch; must exist on remote)
 #   MIG_TO_KBN_GIT_URL optional: clone URL for vendored refresh (SSH or HTTPS with token). If unset:
-#     uses `gh repo clone elastic/mig-to-kbn` when `gh auth status` works (private repo OK), else HTTPS (may fail if private).
+#     uses `gh repo clone elastic/observability-migration-platform` when `gh auth status` works (private repo OK), else HTTPS (may fail if private).
 #
 # Typical private-upstream flow (laptop — not on Instruqt VM):
 #   gh auth login
@@ -58,20 +58,20 @@ _clone_upstream_mig_to_kbn() {
     return 0
   fi
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    echo "==> Cloning via GitHub CLI: gh repo clone elastic/mig-to-kbn (works for private repos)"
-    if gh repo clone elastic/mig-to-kbn "$dest" -- --depth 1 -b "$REF" 2>/dev/null; then
+    echo "==> Cloning via GitHub CLI: gh repo clone elastic/observability-migration-platform (works for private repos)"
+    if gh repo clone elastic/observability-migration-platform "$dest" -- --depth 1 -b "$REF" 2>/dev/null; then
       return 0
     fi
-    gh repo clone elastic/mig-to-kbn "$dest" -- --depth 1
+    gh repo clone elastic/observability-migration-platform "$dest" -- --depth 1
     git -C "$dest" checkout "$REF" 2>/dev/null || true
     return 0
   fi
   echo "WARN: No MIG_TO_KBN_GIT_URL and gh not logged in; trying public HTTPS (fails if repo is private)." >&2
-  echo "     Fix: gh auth login   OR   export MIG_TO_KBN_GIT_URL='git@github.com:elastic/mig-to-kbn.git'" >&2
-  if git clone --depth 1 --branch "$REF" "https://github.com/elastic/mig-to-kbn.git" "$dest" 2>/dev/null; then
+  echo "     Fix: gh auth login   OR   export MIG_TO_KBN_GIT_URL='git@github.com:elastic/observability-migration-platform.git'" >&2
+  if git clone --depth 1 --branch "$REF" "https://github.com/elastic/observability-migration-platform.git" "$dest" 2>/dev/null; then
     return 0
   fi
-  git clone --depth 1 "https://github.com/elastic/mig-to-kbn.git" "$dest"
+  git clone --depth 1 "https://github.com/elastic/observability-migration-platform.git" "$dest"
   git -C "$dest" checkout "$REF" 2>/dev/null || true
   return 0
 }
@@ -111,8 +111,8 @@ update_via_standalone_clone() {
   if [ ! -d "$MIG" ]; then
     echo "ERROR: ${MIG} not found." >&2
     echo "  One-time setup (pick one):" >&2
-    echo "    gh repo clone elastic/mig-to-kbn ${MIG}" >&2
-    echo "    git submodule add git@github.com:elastic/mig-to-kbn.git mig-to-kbn   # then commit .gitmodules" >&2
+    echo "    gh repo clone elastic/observability-migration-platform ${MIG}" >&2
+    echo "    git submodule add git@github.com:elastic/observability-migration-platform.git mig-to-kbn   # then commit .gitmodules" >&2
     exit 1
   fi
   if [ ! -d "$MIG/.git" ]; then

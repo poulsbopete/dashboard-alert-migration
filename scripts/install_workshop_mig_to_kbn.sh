@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install elastic/mig-to-kbn (obs-migrate) into a dedicated Python 3.12+ venv for Instruqt / workshop VMs.
+# Install elastic/observability-migration-platform (obs-migrate) into a dedicated Python 3.12+ venv for Instruqt / workshop VMs.
 # Requires: curl, ca-certificates. Uses Astral uv to provision Python and dependencies (includes kb-dashboard-cli via uvx at compile time).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +9,7 @@ VENV="${MIG_TO_KBN_VENV:-/opt/mig-to-kbn-venv}"
 if [ ! -f "${MIG_ROOT}/pyproject.toml" ]; then
   echo "ERROR: mig-to-kbn missing at ${MIG_ROOT}" >&2
   echo "       This workshop vendors mig-to-kbn in git. On your machine: ./scripts/update_mig_to_kbn.sh (uses gh when logged in)," >&2
-  echo "       then commit and push mig-to-kbn/. Instruqt sandboxes do not clone elastic/mig-to-kbn by default." >&2
+  echo "       then commit and push mig-to-kbn/. Instruqt sandboxes do not clone elastic/observability-migration-platform by default." >&2
   exit 1
 fi
 

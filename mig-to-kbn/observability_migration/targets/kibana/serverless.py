@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Elastic Serverless Kibana API helpers.
 
 Serverless Kibana restricts the saved-objects surface to two endpoints:
@@ -25,6 +28,7 @@ from typing import Any
 
 import requests
 
+from observability_migration.core.http import apply_tls
 from observability_migration.targets.kibana.compile import (
     kibana_url_for_space,
 )
@@ -39,8 +43,9 @@ def _api_base(kibana_url: str, space_id: str = "") -> str:
     return base
 
 
-def _session(api_key: str = "") -> requests.Session:
+def _session(api_key: str = "", verify: bool | str = True) -> requests.Session:
     session = requests.Session()
+    apply_tls(session, verify)
     session.headers.update({"kbn-xsrf": "true"})
     if api_key:
         session.headers["Authorization"] = f"ApiKey {api_key}"
@@ -57,9 +62,10 @@ def list_dashboards(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """Return all dashboards via _export (Serverless-safe)."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     response = session.post(
         f"{base}/api/saved_objects/_export",
@@ -92,9 +98,10 @@ def import_saved_objects(
     space_id: str = "",
     overwrite: bool = True,
     timeout: int = 60,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """Import an NDJSON file via POST /api/saved_objects/_import."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     if isinstance(ndjson_path_or_bytes, (str,)):
         with open(ndjson_path_or_bytes, "rb") as fh:
@@ -119,13 +126,14 @@ def delete_dashboards(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
-    """Best-effort dashboard deletion for Serverless.
+    """Best-effort dashboard cleanup using a Serverless-safe overwrite.
 
-    Serverless Kibana blocks DELETE /api/saved_objects/dashboard/{id}.
-    Workaround: re-import each dashboard with an empty panelsJSON and
-    a title prefixed with "[DELETED]", effectively clearing the content.
-    The dashboard object remains but is harmless.
+    The shared CLI uses this path for all targets so cleanup behaves the same
+    on Serverless and non-Serverless Kibana. It re-imports each dashboard with
+    empty panelsJSON and a title prefixed with "[DELETED]", effectively clearing
+    the content. The dashboard object remains but is harmless.
 
     Returns a summary with counts of cleared / failed IDs.
     """
@@ -151,6 +159,7 @@ def delete_dashboards(
                 space_id=space_id,
                 overwrite=True,
                 timeout=timeout,
+                verify=verify,
             )
             if result.get("success"):
                 cleared.append(dashboard_id)
@@ -166,9 +175,9 @@ def delete_dashboards(
         "cleared": cleared,
         "failed": failed,
         "note": (
-            "Serverless Kibana does not support DELETE for saved objects. "
             "Cleared dashboards have been overwritten with empty content. "
-            "To fully remove them, use the Kibana UI."
+            "This Serverless-safe cleanup leaves [DELETED] placeholder saved objects; "
+            "use the Kibana UI to fully remove them."
         ),
     }
 
@@ -183,9 +192,10 @@ def list_data_views(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """GET /api/data_views — returns all data views."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     response = session.get(f"{base}/api/data_views", timeout=timeout)
     response.raise_for_status()
@@ -199,9 +209,10 @@ def get_data_view(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """GET /api/data_views/data_view/{viewId}."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     response = session.get(
         f"{base}/api/data_views/data_view/{view_id}",
@@ -222,6 +233,7 @@ def create_data_view(
     space_id: str = "",
     override: bool = True,
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """POST /api/data_views/data_view — create (or override) a data view.
 
@@ -230,7 +242,7 @@ def create_data_view(
     compiles NDJSON that references the data view by ID, and by default that
     ID equals the index pattern title.
     """
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     dv: dict[str, Any] = {
         "title": title,
@@ -257,9 +269,10 @@ def delete_data_view(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> bool:
     """DELETE /api/data_views/data_view/{viewId}."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     response = session.delete(
         f"{base}/api/data_views/data_view/{view_id}",
@@ -277,28 +290,31 @@ def ensure_data_view(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     """Create a data view if one with the same title doesn't exist.
 
     Returns the existing or newly created data view.
     """
     existing = list_data_views(
-        kibana_url, api_key=api_key, space_id=space_id, timeout=timeout,
+        kibana_url, api_key=api_key, space_id=space_id, timeout=timeout, verify=verify,
     )
     for dv in existing:
         if dv.get("title") == title:
             logger.info("Data view '%s' already exists (id=%s)", title, dv.get("id"))
             return dv
     logger.info("Creating data view '%s'", title)
+    view_id = "" if any(token in title for token in ("*", "?")) else title
     return create_data_view(
         kibana_url,
         title=title,
         name=name or title,
-        view_id=title,
+        view_id=view_id,
         time_field=time_field,
         api_key=api_key,
         space_id=space_id,
         timeout=timeout,
+        verify=verify,
     )
 
 
@@ -309,9 +325,10 @@ def set_default_data_view(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> bool:
     """POST /api/data_views/default — set the default data view."""
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     response = session.post(
         f"{base}/api/data_views/default",
@@ -332,6 +349,7 @@ def ensure_migration_data_views(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 30,
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """Ensure all data views needed by migration output exist.
 
@@ -350,6 +368,7 @@ def ensure_migration_data_views(
             api_key=api_key,
             space_id=space_id,
             timeout=timeout,
+            verify=verify,
         )
         created.append(dv)
     return created
@@ -365,13 +384,14 @@ def detect_serverless(
     api_key: str = "",
     space_id: str = "",
     timeout: int = 10,
+    verify: bool | str = True,
 ) -> bool:
     """Detect whether Kibana is running in Serverless mode.
 
     Tries GET /api/saved_objects/_find?type=dashboard&per_page=1 — if it
     returns 400/404 with the "not available" message, it's Serverless.
     """
-    session = _session(api_key)
+    session = _session(api_key, verify=verify)
     base = _api_base(kibana_url, space_id)
     try:
         response = session.get(

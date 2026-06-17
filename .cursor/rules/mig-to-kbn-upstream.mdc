@@ -1,11 +1,11 @@
 ---
-description: elastic/mig-to-kbn is upstream-only; workshop edits stay outside vendored mig-to-kbn/
+description: elastic/observability-migration-platform is upstream-only; workshop edits stay outside vendored mig-to-kbn/
 alwaysApply: true
 ---
 
-# Upstream boundary — `elastic/mig-to-kbn`
+# Upstream boundary — `elastic/observability-migration-platform`
 
-**[elastic/mig-to-kbn](https://github.com/elastic/mig-to-kbn)** is the canonical repository for **`grafana-migrate`**, **`datadog-migrate`**, PromQL/Datadog translation, and the shared Kibana YAML/compile path.
+**[elastic/observability-migration-platform](https://github.com/elastic/observability-migration-platform)** is the canonical repository for **`grafana-migrate`**, **`datadog-migrate`**, PromQL/Datadog translation, and the shared Kibana YAML/compile path.
 
 ## Do not edit `mig-to-kbn/` for workshop-only changes
 
@@ -14,7 +14,7 @@ alwaysApply: true
 
 ## Engine work belongs upstream
 
-- Fixes and features for migration CLIs or translators → **[Issues](https://github.com/elastic/mig-to-kbn/issues)** / **[PRs](https://github.com/elastic/mig-to-kbn/pulls)** on **elastic/mig-to-kbn**, then bump this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored tree.
+- Fixes and features for migration CLIs or translators → **[Issues](https://github.com/elastic/observability-migration-platform/issues)** / **[PRs](https://github.com/elastic/observability-migration-platform/pulls)** on **elastic/observability-migration-platform**, then bump this repo with **`./scripts/update_mig_to_kbn.sh`** and commit the vendored tree.
 
 ## Vendored tree
 

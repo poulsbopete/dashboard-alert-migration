@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 import requests
 import yaml
@@ -20,7 +23,6 @@ import yaml
 from .promql import PromQLFragment, _parse_fragment, _parse_logql_search, preprocess_grafana_macros
 from .rules import RulePackConfig, load_rule_pack_files
 from .schema import SchemaResolver
-
 
 ROOT = Path(__file__).resolve().parents[1]
 migrate = SimpleNamespace(
@@ -190,7 +192,7 @@ def _load_structured_file(path: Path) -> dict[str, Any]:
     return yaml.safe_load(text) or {}
 
 
-def load_profile(path: Optional[str]) -> dict[str, Any]:
+def load_profile(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
     return _load_structured_file(Path(path))
@@ -658,7 +660,7 @@ def _metric_value(metric: MetricDemand, dims: dict[str, str], point_idx: int, ti
 def generate_metric_documents(manifest: CorpusManifest, profile: dict[str, Any], points: int, step_seconds: int, cap: int) -> tuple[list[dict[str, Any]], set[str]]:
     docs_by_key: dict[tuple[str, tuple[tuple[str, str], ...]], dict[str, Any]] = {}
     labels = set(manifest.labels)
-    end = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    end = dt.datetime.now(dt.UTC).replace(microsecond=0)
     start = end - dt.timedelta(seconds=step_seconds * max(points - 1, 1))
     for metric in sorted(manifest.metrics.values(), key=lambda item: item.name):
         series = build_metric_series(metric, profile, cap)
@@ -688,7 +690,7 @@ def generate_log_documents(manifest: CorpusManifest, profile: dict[str, Any], po
     docs = []
     fields = set(manifest.logs.fields) | {"service.name", "service.instance.id", "host.name"}
     terms = sorted(manifest.logs.search_terms) or ["synthetic", "obs-migrate"]
-    end = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    end = dt.datetime.now(dt.UTC).replace(microsecond=0)
     start = end - dt.timedelta(seconds=step_seconds * max(points - 1, 1))
     bundles = [_identity_bundle("synthetic_logs", 1, profile), _identity_bundle("synthetic_logs", 2, profile)]
     extra_fields = sorted(field for field in fields if field not in IDENTITY_FIELDS)
@@ -801,14 +803,15 @@ def _build_logs_template(stream_name: str, label_fields: set[str]) -> dict[str, 
     }
 
 
-def _request(method: str, url: str, **kwargs) -> requests.Response:
+def _request(method: str, url: str, *, verify: bool | str = True, **kwargs) -> requests.Response:
+    kwargs.setdefault("verify", verify)
     response = requests.request(method, url, timeout=30, **kwargs)
     response.raise_for_status()
     return response
 
 
-def _delete_if_exists(es_url: str, resource: str):
-    response = requests.delete(f"{es_url}/{resource}", timeout=30)
+def _delete_if_exists(es_url: str, resource: str, verify: bool | str = True):
+    response = requests.delete(f"{es_url}/{resource}", timeout=30, verify=verify)
     if response.status_code not in {200, 404}:
         response.raise_for_status()
 
@@ -820,39 +823,42 @@ def apply_to_elasticsearch(
     metrics_template: dict[str, Any],
     logs_template: dict[str, Any],
     metrics_bulk: Path,
-    logs_bulk: Optional[Path],
+    logs_bulk: Path | None,
     reset: bool,
+    verify: bool | str = True,
 ):
     metrics_template_name = "observability-migration-synthetic-metrics"
     logs_template_name = "observability-migration-synthetic-logs"
     if reset:
-        _delete_if_exists(es_url, f"_data_stream/{metrics_stream}")
-        _delete_if_exists(es_url, f"_data_stream/{logs_stream}")
-        _delete_if_exists(es_url, f"_index_template/{metrics_template_name}")
-        _delete_if_exists(es_url, f"_index_template/{logs_template_name}")
+        _delete_if_exists(es_url, f"_data_stream/{metrics_stream}", verify=verify)
+        _delete_if_exists(es_url, f"_data_stream/{logs_stream}", verify=verify)
+        _delete_if_exists(es_url, f"_index_template/{metrics_template_name}", verify=verify)
+        _delete_if_exists(es_url, f"_index_template/{logs_template_name}", verify=verify)
 
-    _request("PUT", f"{es_url}/_index_template/{metrics_template_name}", json=metrics_template)
-    _request("PUT", f"{es_url}/_data_stream/{metrics_stream}")
+    _request("PUT", f"{es_url}/_index_template/{metrics_template_name}", json=metrics_template, verify=verify)
+    _request("PUT", f"{es_url}/_data_stream/{metrics_stream}", verify=verify)
     with metrics_bulk.open("rb") as fh:
         bulk_response = _request(
             "POST",
             f"{es_url}/_bulk?refresh=true",
             data=fh.read(),
             headers={"Content-Type": "application/x-ndjson"},
+            verify=verify,
         )
     bulk_body = bulk_response.json()
     if bulk_body.get("errors"):
         raise RuntimeError(f"Metric bulk upload reported errors: {json.dumps(bulk_body)[:2000]}")
 
     if logs_bulk and logs_bulk.exists() and logs_bulk.stat().st_size:
-        _request("PUT", f"{es_url}/_index_template/{logs_template_name}", json=logs_template)
-        _request("PUT", f"{es_url}/_data_stream/{logs_stream}")
+        _request("PUT", f"{es_url}/_index_template/{logs_template_name}", json=logs_template, verify=verify)
+        _request("PUT", f"{es_url}/_data_stream/{logs_stream}", verify=verify)
         with logs_bulk.open("rb") as fh:
             logs_response = _request(
                 "POST",
                 f"{es_url}/_bulk?refresh=true",
                 data=fh.read(),
                 headers={"Content-Type": "application/x-ndjson"},
+                verify=verify,
             )
         logs_body = logs_response.json()
         if logs_body.get("errors"):

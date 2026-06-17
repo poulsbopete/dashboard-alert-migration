@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Datadog verification packets and semantic gate helpers."""
 
 from __future__ import annotations
@@ -9,11 +12,11 @@ from types import SimpleNamespace
 from typing import Any
 
 from observability_migration.adapters.source.datadog.execution import build_source_execution_summary
-from observability_migration.adapters.source.grafana.execution.target import build_target_execution_summary
 from observability_migration.adapters.source.grafana.esql_validate import (
     _query_source_and_index,
     validate_query_with_fixes,
 )
+from observability_migration.adapters.source.grafana.execution.target import build_target_execution_summary
 from observability_migration.core.assets.operational import build_operational_ir
 from observability_migration.core.verification.comparators import (
     build_comparison_result,
@@ -236,6 +239,7 @@ def build_verification_packet(
     datadog_app_key: str = "",
     datadog_site: str = "datadoghq.com",
     source_timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     query_ir = _build_query_ir_snapshot(panel_result)
     panel_result.query_ir = dict(query_ir)
@@ -249,6 +253,7 @@ def build_verification_packet(
         app_key=datadog_app_key,
         site=datadog_site,
         timeout=source_timeout,
+        verify=verify,
     ).to_dict()
     target_execution = build_target_execution_summary(panel_result, validation_record).to_dict()
     comparison = build_comparison_result(source_execution, target_execution, query_ir, validation_record).to_dict()
@@ -360,6 +365,7 @@ def validate_monitor_queries(
     es_api_key: str = "",
     validate_query_fn=validate_query_with_fixes,
     max_attempts: int = 8,
+    verify: bool | str = True,
 ) -> list[dict[str, Any]]:
     """Validate translated monitor queries against Elasticsearch when configured."""
     records: list[dict[str, Any]] = []
@@ -387,6 +393,7 @@ def validate_monitor_queries(
             resolver=None,
             max_attempts=max_attempts,
             es_api_key=es_api_key or None,
+            verify=verify,
         )
         records.append({**base_record, **validation})
     return records
@@ -436,6 +443,7 @@ def annotate_results_with_verification(
     datadog_app_key: str = "",
     datadog_site: str = "datadoghq.com",
     source_timeout: int = 30,
+    verify: bool | str = True,
 ) -> dict[str, Any]:
     validation_index = _index_validation_records(validation_records)
     validation_attempted = bool(validation_records)
@@ -462,6 +470,7 @@ def annotate_results_with_verification(
                 datadog_app_key=datadog_app_key,
                 datadog_site=datadog_site,
                 source_timeout=source_timeout,
+                verify=verify,
             )
             panel_result.target_candidates = list(packet.get("candidate_targets", []) or [])
             panel_result.recommended_target = str(packet.get("recommended_target", "") or "")
@@ -503,6 +512,6 @@ __all__ = [
     "annotate_results_with_verification",
     "build_monitor_verification_lookup",
     "build_verification_packet",
-    "validate_monitor_queries",
     "save_verification_packets",
+    "validate_monitor_queries",
 ]

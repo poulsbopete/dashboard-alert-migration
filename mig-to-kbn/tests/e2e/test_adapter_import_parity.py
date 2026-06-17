@@ -1,8 +1,19 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """End-to-end adapter import parity tests."""
 
 import subprocess
 import sys
 import unittest
+
+
+def _run_module_help(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, *args],
+        capture_output=True,
+        text=True,
+    )
 
 
 class TestGrafanaImportParity(unittest.TestCase):
@@ -76,23 +87,48 @@ class TestTargetImportParity(unittest.TestCase):
 
 
 class TestModuleEntrypoints(unittest.TestCase):
+    def test_app_cli_migrate_module_help_executes_main(self):
+        proc = _run_module_help("-m", "observability_migration.app.cli", "migrate", "--help")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("--assets {dashboards,alerts,all}", proc.stdout)
+        self.assertIn("--source", proc.stdout)
+        self.assertIn("Deprecated compatibility alias", proc.stdout)
+        self.assertIn("alert-capable asset selection", proc.stdout)
+        self.assertIn("--assets alerts", proc.stdout)
+        self.assertIn("--assets all", proc.stdout)
+        self.assertNotIn("After --fetch-alerts", proc.stdout)
+        self.assertNotIn("Requires --fetch-alerts", proc.stdout)
+
+    def test_app_cli_cluster_module_help_executes_main(self):
+        proc = _run_module_help("-m", "observability_migration.app.cli", "cluster", "--help")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("ensure-data-views", proc.stdout)
+        self.assertIn("list-dashboards", proc.stdout)
+        self.assertNotIn("--assets", proc.stdout)
+
     def test_grafana_cli_module_help_executes_main(self):
-        proc = subprocess.run(
-            [sys.executable, "-m", "observability_migration.adapters.source.grafana.cli", "--help"],
-            capture_output=True,
-            text=True,
-        )
+        proc = _run_module_help("-m", "observability_migration.adapters.source.grafana.cli", "--help")
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Grafana", proc.stdout)
+        self.assertIn("--assets {dashboards,alerts,all}", proc.stdout)
+        self.assertIn("--fetch-alerts", proc.stdout)
+        self.assertIn("Deprecated compatibility alias", proc.stdout)
+        self.assertIn("alert-capable asset selection", proc.stdout)
+        self.assertIn("--assets alerts", proc.stdout)
+        self.assertIn("--assets all", proc.stdout)
+        self.assertNotIn("Requires --fetch-alerts", proc.stdout)
 
     def test_datadog_cli_module_help_executes_main(self):
-        proc = subprocess.run(
-            [sys.executable, "-m", "observability_migration.adapters.source.datadog.cli", "--help"],
-            capture_output=True,
-            text=True,
-        )
+        proc = _run_module_help("-m", "observability_migration.adapters.source.datadog.cli", "--help")
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Datadog", proc.stdout)
+        self.assertIn("--assets {dashboards,alerts,all}", proc.stdout)
+        self.assertIn("--fetch-monitors", proc.stdout)
+        self.assertIn("Deprecated compatibility alias", proc.stdout)
+        self.assertIn("alert-capable asset selection", proc.stdout)
+        self.assertIn("--assets alerts", proc.stdout)
+        self.assertIn("--assets all", proc.stdout)
+        self.assertNotIn("Requires --fetch-monitors", proc.stdout)
 
 
 if __name__ == "__main__":

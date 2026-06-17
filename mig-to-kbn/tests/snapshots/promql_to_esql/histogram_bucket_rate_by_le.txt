@@ -1,0 +1,8 @@
+source: sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+feasibility: feasible
+---
+TS metrics-*
+| WHERE @timestamp >= ?_tstart AND @timestamp <= ?_tend
+| WHERE http_request_duration_seconds_bucket IS NOT NULL
+| STATS http_request_duration_seconds_bucket = SUM(RATE(http_request_duration_seconds_bucket, 5m)) BY time_bucket = TBUCKET(5 minute), le
+| SORT time_bucket ASC

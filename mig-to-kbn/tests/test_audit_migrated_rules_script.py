@@ -1,10 +1,12 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import importlib.util
 import pathlib
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "audit_migrated_rules.py"
@@ -94,6 +96,19 @@ class AuditMigratedRulesScriptTests(unittest.TestCase):
                 ),
                 0,
             )
+
+    def test_main_returns_two_when_audit_reports_fetch_errors(self):
+        module = self._load_script_module()
+        with patch.object(
+            module,
+            "audit_migrated_rules",
+            return_value={
+                "enabled_migrated_rule_ids": [],
+                "remediation": {"failed_rule_ids": []},
+                "errors": ["connection refused"],
+            },
+        ):
+            self.assertEqual(module.main(["--kibana-url", "http://kibana:5601", "--api-key", "secret"]), 2)
 
 
 if __name__ == "__main__":

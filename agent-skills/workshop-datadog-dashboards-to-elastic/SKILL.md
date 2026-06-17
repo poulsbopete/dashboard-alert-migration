@@ -12,7 +12,7 @@ metadata:
 
 ## When to use
 
-Migrating **Datadog dashboard** exports via **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`datadog-migrate`**
+Migrating **Datadog dashboard** exports via **[mig-to-kbn](https://github.com/elastic/observability-migration-platform)** **`datadog-migrate`**
 (**`--field-profile otel`**) into **Kibana** on **Observability Serverless**, optionally with **Cursor** + [Elastic Agent Skills](https://github.com/elastic/agent-skills).
 Legacy **`datadog_dashboard_to_elastic.py`** + **`publish_grafana_drafts_kibana.py`** remain for comparison.
 

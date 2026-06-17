@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 
 set -euo pipefail
 
@@ -325,6 +328,10 @@ if [[ $OUTPUT_DIR_SET -eq 0 ]]; then
   fi
 fi
 
+ALERT_ARTIFACT_DIR="$OUTPUT_DIR/alerts"
+DASHBOARD_YAML_DIR="$OUTPUT_DIR/dashboards/yaml"
+RUN_SUMMARY="$OUTPUT_DIR/run_summary.json"
+
 if [[ $INPUT_DIR_SET -eq 1 ]]; then
   RUN_INPUT_DIR="$INPUT_DIR"
 else
@@ -383,6 +390,7 @@ prepare_cmd=(
   --source files
   --input-dir "$RUN_INPUT_DIR"
   --output-dir "$OUTPUT_DIR"
+  --assets dashboards
   --field-profile "$FIELD_PROFILE"
   --data-view "$DATA_VIEW"
   --logs-index "$LOGS_INDEX"
@@ -402,14 +410,10 @@ delete_legacy_datadog_templates
 printf 'Generating small Datadog validation dataset\n'
 ELASTICSEARCH_ENDPOINT="$ES_URL" \
 KEY="${ES_API_KEY:-dummy}" \
-DASHBOARD_YAML_DIR="$OUTPUT_DIR/yaml" \
-FIELD_PROFILE="$FIELD_PROFILE" \
 DATA_HOURS="$DATA_HOURS" \
 INTERVAL_SEC="$INTERVAL_SEC" \
-BULK_WORKERS="$BULK_WORKERS" \
 BATCH_DOC_LIMIT="$BATCH_DOC_LIMIT" \
-RECREATE_DATA_STREAMS=1 \
-  "$PYTHON_BIN" "$ROOT/scripts/setup_datadog_serverless_data.py"
+  "$PYTHON_BIN" "$ROOT/scripts/setup_telemetry_data.py" "$DASHBOARD_YAML_DIR"
 
 wait_for_esql_query "metrics" "FROM $DATA_VIEW | LIMIT 1" 45 2
 wait_for_esql_query "logs" "FROM $LOGS_INDEX | LIMIT 1" 45 2
@@ -422,6 +426,7 @@ validate_cmd=(
   --source files
   --input-dir "$RUN_INPUT_DIR"
   --output-dir "$OUTPUT_DIR"
+  --assets dashboards
   --field-profile "$FIELD_PROFILE"
   --data-view "$DATA_VIEW"
   --logs-index "$LOGS_INDEX"
@@ -460,5 +465,6 @@ Datadog demo completed.
 
 Artifacts:
   Output: $OUTPUT_DIR
-  YAML:   $OUTPUT_DIR/yaml
+  YAML:   $DASHBOARD_YAML_DIR
+  Run summary: $RUN_SUMMARY
 EOF

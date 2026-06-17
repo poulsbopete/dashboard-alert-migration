@@ -1,8 +1,10 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 import json
+import pathlib
 import tempfile
 import unittest
-
-import pathlib
 
 from observability_migration.adapters.source.grafana import corpus as generate_corpus
 

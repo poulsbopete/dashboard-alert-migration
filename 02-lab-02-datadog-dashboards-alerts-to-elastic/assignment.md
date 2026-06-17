@@ -75,7 +75,7 @@ enhanced_loading: null
 
 # Lab 2 — Datadog → Elastic Serverless
 
-**10** dashboards via **[mig-to-kbn](https://github.com/elastic/mig-to-kbn)** **`datadog-migrate`** ([Datadog source](https://github.com/elastic/mig-to-kbn/blob/main/docs/sources/datadog.md), [architecture](https://github.com/elastic/mig-to-kbn/blob/main/docs/architecture.md)) with **`--field-profile otel`**; **4** monitors still use workshop **`datadog_to_elastic_alert.py`** → **`publish_datadog_alert_drafts_kibana.py`** (rules imported **disabled**, no connectors until you edit).
+**10** dashboards via **[mig-to-kbn](https://github.com/elastic/observability-migration-platform)** **`datadog-migrate`** ([Datadog source](https://github.com/elastic/observability-migration-platform/blob/main/docs/sources/datadog.md), [architecture](https://github.com/elastic/observability-migration-platform/blob/main/docs/architecture.md)) with **`--field-profile otel`**; **4** monitors still use workshop **`datadog_to_elastic_alert.py`** → **`publish_datadog_alert_drafts_kibana.py`** (rules imported **disabled**, no connectors until you edit).
 
 Pick **Path A** or **Path B** (or both).
 

@@ -1,3 +1,6 @@
+# Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one or more contributor license agreements.
+# SPDX-License-Identifier: Elastic-2.0
+
 """Tests for example extension artifacts shipped with the repo."""
 
 from __future__ import annotations
@@ -9,10 +12,11 @@ from pathlib import Path
 import yaml
 
 from observability_migration.adapters.source.datadog.field_map import load_profile
-from observability_migration.adapters.source.datadog.rules import build_extension_template as build_datadog_extension_template
+from observability_migration.adapters.source.datadog.rules import (
+    build_extension_template as build_datadog_extension_template,
+)
 from observability_migration.adapters.source.grafana.rules import load_rule_pack_files
 from observability_migration.core.interfaces import source_registry
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES_DIR = REPO_ROOT / "examples"
