@@ -3,19 +3,28 @@ set -euo pipefail
 cd /root/workshop
 
 # Primary: mig-to-kbn / grafana-migrate (assignment.md one-liner)
-mig_yaml="$(find build/mig-grafana/yaml -maxdepth 1 -type f -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')"
-mig_report="build/mig-grafana/migration_report.json"
+# Support both old layout (yaml/) and new (dashboards/yaml/) from newer mig-to-kbn.
+mig_yaml_old="$(find build/mig-grafana/yaml -maxdepth 1 -type f -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')" || mig_yaml_old=0
+mig_yaml_new="$(find build/mig-grafana/dashboards/yaml -maxdepth 1 -type f -name '*.yaml' 2>/dev/null | wc -l | tr -d ' ')" || mig_yaml_new=0
+if [ "${mig_yaml_new:-0}" -gt "${mig_yaml_old:-0}" ]; then
+  mig_yaml="${mig_yaml_new}"
+  mig_report="build/mig-grafana/dashboards/migration_report.json"
+else
+  mig_yaml="${mig_yaml_old}"
+  mig_report="build/mig-grafana/migration_report.json"
+  [ ! -f "$mig_report" ] && [ -f "build/mig-grafana/dashboards/migration_report.json" ] && mig_report="build/mig-grafana/dashboards/migration_report.json"
+fi
 
 if [ -f "$mig_report" ] && [ "${mig_yaml:-0}" -ge 20 ]; then
-  echo "Lab 1 checks passed (mig-to-kbn: ${mig_yaml} YAML under build/mig-grafana/yaml/)."
+  echo "Lab 1 checks passed (mig-to-kbn: ${mig_yaml} YAML under $(dirname "$mig_report")/yaml/)."
   exit 0
 fi
 
 # Legacy: tools/grafana_to_elastic.py → *-elastic-draft.json
-legacy="$(find build/elastic-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')"
+legacy="$(find build/elastic-dashboards -maxdepth 1 -type f -name '*-elastic-draft.json' 2>/dev/null | wc -l | tr -d ' ')" || legacy=0
 if [ "${legacy:-0}" -ge 20 ]; then
   echo "Lab 1 checks passed (legacy drafts: ${legacy} under build/elastic-dashboards/)."
   exit 0
 fi
 
-fail-message "Expected mig-to-kbn output: 20+ *.yaml in build/mig-grafana/yaml/ and build/mig-grafana/migration_report.json (YAML count: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo missing)). Or legacy: 20 *-elastic-draft.json in build/elastic-dashboards (found: ${legacy:-0}). Run: bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh"
+fail-message "Expected mig-to-kbn output: 20+ *.yaml in build/mig-grafana/yaml/ (or dashboards/yaml/) and migration_report.json (YAML count: ${mig_yaml:-0}, report: $([ -f "$mig_report" ] && echo yes || echo missing)). Or legacy: 20 *-elastic-draft.json in build/elastic-dashboards (found: ${legacy:-0}). Run: bash /root/workshop/scripts/migrate_grafana_dashboards_to_serverless.sh"
