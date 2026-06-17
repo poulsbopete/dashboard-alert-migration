@@ -358,6 +358,78 @@ def _run_worker(spec: dict[str, str]) -> int:
         "system_mem_total", unit="By", description="system.mem.total proxy", callbacks=[mem_total_obs]
     )
 
+    def mem_cached_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(0.8e9, 16e9 * 0.15 * (1.0 + 0.3 * math.sin(phase)) + rng.uniform(-1e8, 1e8)))
+
+    meter.create_observable_gauge(
+        "system_mem_cached", unit="By", description="system.mem.cached → system_mem_cached", callbacks=[mem_cached_obs]
+    )
+
+    def mem_usable_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        util = max(0.12, min(0.88, 0.38 + 0.28 * math.sin(phase * 0.85)))
+        yield Observation((16e9 * (1.0 - util)) + rng.uniform(-3e8, 3e8))
+
+    meter.create_observable_gauge(
+        "system_mem_usable", unit="By", description="system.mem.usable → system_mem_usable", callbacks=[mem_usable_obs]
+    )
+
+    def mem_buffered_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(2e8, 16e9 * 0.055 * (1.0 + 0.2 * math.sin(phase * 0.6)) + rng.uniform(-5e7, 5e7)))
+
+    meter.create_observable_gauge(
+        "system_mem_buffered",
+        unit="By",
+        description="system.mem.buffered → system_mem_buffered",
+        callbacks=[mem_buffered_obs],
+    )
+
+    def mem_slab_obs(_options: object):
+        phase = (time.time() - t0) / 55.0
+        yield Observation(max(1e8, 16e9 * 0.035 * (1.0 + 0.15 * math.sin(phase * 0.4)) + rng.uniform(-3e7, 3e7)))
+
+    meter.create_observable_gauge(
+        "system_mem_slab", unit="By", description="system.mem.slab → system_mem_slab", callbacks=[mem_slab_obs]
+    )
+
+    def mem_commit_limit_obs(_options: object):
+        yield Observation(24e9 + rng.uniform(-1e7, 1e7))
+
+    meter.create_observable_gauge(
+        "system_mem_commit_limit",
+        unit="By",
+        description="system.mem.commit_limit → system_mem_commit_limit",
+        callbacks=[mem_commit_limit_obs],
+    )
+
+    def swap_used_obs(_options: object):
+        phase = (time.time() - t0) / 90.0 + seed * 0.01
+        yield Observation(max(0.5e9, min(3e9, 1.5e9 + 1.2e9 * math.sin(phase) + rng.uniform(-1e8, 1e8))))
+
+    meter.create_observable_gauge(
+        "system_swap_used", unit="By", description="system.swap.used → system_swap_used", callbacks=[swap_used_obs]
+    )
+
+    def swap_pct_free_obs(_options: object):
+        phase = (time.time() - t0) / 90.0 + seed * 0.01
+        swap_used = max(0.5e9, min(3e9, 1.5e9 + 1.2e9 * math.sin(phase)))
+        yield Observation(max(0.0, min(100.0, (4e9 - swap_used) / 4e9 * 100.0)))
+
+    meter.create_observable_gauge(
+        "system_swap_pct_free",
+        unit="%",
+        description="system.swap.pct_free → system_swap_pct_free",
+        callbacks=[swap_pct_free_obs],
+    )
+
+    mem_page_faults = meter.create_counter(
+        "system_mem_page_faults",
+        unit="1",
+        description="system.mem.page_faults → system_mem_page_faults",
+    )
+
     def disk_io_obs(_options: object):
         phase = (time.time() - t0) / 23.0 + seed * 0.05
         yield Observation(max(1.0, min(98.0, 35.0 + 40.0 * math.sin(phase) + rng.uniform(-6.0, 6.0))))
@@ -520,6 +592,7 @@ def _run_worker(spec: dict[str, str]) -> int:
             req_counter.add(1, base_attrs)
 
         ctx_switches.add(rng.randint(1_200, 48_000), {})
+        mem_page_faults.add(rng.randint(50, 4_000), {})
 
         iface = rng.choice(("eth0", "ens5", "ens6"))
         dev = rng.choice(("/dev/xvda", "/dev/nvme0n1", "/dev/sda"))
